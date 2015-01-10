@@ -43,18 +43,18 @@ default_vdp_opts = {
 }
 
 DEFAULT_LOG_LEVELS = (
-"amqp=WARN, amqplib=WARN, oslo.messaging=WARN, pika=WARN, paramiko=WARN,"
-"paramiko.transport=WARN,"
-"paramiko.transport.sftp=WARN,"
-"pika.callback=WARN,oslo.messaging._drivers=WARN"
+    "amqp=WARN, amqplib=WARN, oslo.messaging=WARN, pika=WARN, paramiko=WARN,"
+    "paramiko.transport=WARN,"
+    "paramiko.transport.sftp=WARN,"
+    "pika.callback=WARN,oslo.messaging._drivers=WARN"
 )
 
 default_log_opts = {
-    'dfa_log' : {
+    'dfa_log': {
         'use_syslog': False,
         'syslog_lgo_facility': 'LOG_USER',
         'log_dir': '.',
-        'log_file': 'dfa_enabler.log',
+        'log_file': 'fabric_enabler.log',
         'log_level': 'WARNING',
         'log_format': '%(asctime)s %(levelname)8s [%(name)s] %(message)s',
         'log_date_format': '%Y-%m-%d %H:%M:%S',
@@ -63,16 +63,25 @@ default_log_opts = {
 }
 
 default_sys_opts = {
-    'sys' : {
+    'sys': {
         'root_helper': 'sudo',
     },
 }
 
 default_dcnm_opts = {
-    'dcnm' : {
+    'dcnm': {
         'default_cfg_profile': 'defaultNetworkIpv4EfProfile',
         'default_vrf_profile': 'vrf-common-universal',
         'default_partition_name': 'CTX',
+        'dcnm_net_ext': '(DCNM)',
+        'gateway_mac': '20:20:00:00:00:AA',
+        'dcnm_dhcp_leases': '/var/lib/dhcpd/dhcpd.leases',
+    },
+}
+
+default_notify_opts = {
+    'dfa_notify': {
+        'cisco_dfa_notify_queue': 'cisco_dfa_%(service_name)s_notify',
     },
 }
 
@@ -82,6 +91,7 @@ default_opts_list = [
     default_vdp_opts,
     default_sys_opts,
     default_dcnm_opts,
+    default_notify_opts,
 ]
 
 

@@ -38,7 +38,6 @@ class PeriodicTask(object):
         self.stop_flag = False
         self._excq = kwargs.get('excq')
 
-
     def run(self):
         try:
             if self.stop_flag:
@@ -92,6 +91,7 @@ class EventProcessingThread(threading.Thread):
     def name(self):
         return self._thread_name
 
+
 class dict_to_obj(object):
 
     """Convert a dictionary to an object."""
@@ -109,7 +109,7 @@ class dict_to_obj(object):
 
     def __repr__(self):
         return '{%s}' % str(', '.join('%s : %s' % (k, repr(v)) for
-                                (k, v) in self.__dict__.iteritems()))
+                                      (k, v) in self.__dict__.iteritems()))
 
 
 def get_uuid():
@@ -160,5 +160,5 @@ def make_cidr(gw, mask):
         gw_addr_int = struct.unpack('>L', socket.inet_aton(gw))[0] & int_mask
         return (socket.inet_ntoa(struct.pack("!I", gw_addr_int)) +
                 '/' + str(mask))
-    except:
+    except (socket.error, struct.error, ValueError):
         return

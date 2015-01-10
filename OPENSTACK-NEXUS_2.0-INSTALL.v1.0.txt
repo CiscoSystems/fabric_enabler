@@ -145,6 +145,31 @@ This is the application level user name and password.
 compute_user = localadmin
 compute_passwd = cisco123
 
+
+The following options should be set in the keystone_authtoken section in
+a)  neutron.conf:
+[keystone_authtoken]
+...
+auth_uri = http://<ip address of controller>:5000/v2.0
+identity_uri = http://<ip address of controller>:35357
+auth_host = <ip address of controller>
+admin_tenant_name = service
+admin_user = neutron
+admin_password = <admin password>
+...
+
+b) nova.conf:
+[keystone_authtoken]
+...
+admin_password = <admin password>
+admin_user = nova
+admin_tenant_name = service
+auth_uri = http://<ip address of controller>:5000/v2.0
+identity_uri = http://<ip address of controller>:35357
+auth_host = <ip address of controller>
+...
+
+
 It requires all control/compute nodes have same username/password - 
 This is user's Linux account on the servers to run as control/compute nodes.                        
 

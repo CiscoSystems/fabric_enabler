@@ -27,6 +27,7 @@ import requests
 from dfa.common import dfa_exceptions as dexc
 from dfa.common import dfa_logger as logging
 
+
 LOG = logging.getLogger(__name__)
 
 
@@ -95,11 +96,15 @@ class DFARESTClient(object):
         version of DCNM. If not, set it to new default value which is supported
         by latest version.
         """
-        cfgplist = self.config_profile_list()
-        if not self.default_cfg_profile in cfgplist:
-            self.default_cfg_profile = ('defaultNetworkUniversalEfProfile'
-            if self.is_iplus else 'defaultNetworkIpv4EfProfile')
-
+        try:
+            cfgplist = self.config_profile_list()
+            if self.default_cfg_profile not in cfgplist:
+                self.default_cfg_profile = ('defaultNetworkUniversalEfProfile'
+                                            if self.is_iplus else
+                                            'defaultNetworkIpv4EfProfile')
+        except dexc.DfaClientRequestFailed:
+            LOG.error("Failed to send requst to DCNM.")
+            self.default_cfg_profile = 'defaultNetworkIpv4EfProfile'
 
     def _create_network(self, network_info):
         """Send create network request to DCNM.
@@ -158,7 +163,7 @@ class DFARESTClient(object):
         :param desc: description of partition
         """
         url = ((self._create_part_url % (org_name)) if operation == 'POST' else
-               self._update_part_url %(org_name, part_name))
+               self._update_part_url % (org_name, part_name))
 
         payload = {
             "partitionName": part_name,
@@ -461,9 +466,12 @@ class DFARESTClient(object):
     def list_organizations(self):
         """Return list of organizations from DCNM."""
 
-        res = self._send_request('GET', self._org_url, '', 'organizations')
-        if res and res.status_code in self._resp_ok:
-            return res.json()
+        try:
+            res = self._send_request('GET', self._org_url, '', 'organizations')
+            if res and res.status_code in self._resp_ok:
+                return res.json()
+        except dexc.DfaClientRequestFailed:
+            LOG.error("Failed to send request to DCNM.")
 
     def get_network(self, org, segid):
         """Return given network from DCNM."""
