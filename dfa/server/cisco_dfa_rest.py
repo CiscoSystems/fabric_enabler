@@ -173,7 +173,7 @@ class DFARESTClient(object):
                 "vrfProfileName": self.default_vrf_profile,
                 "vrfName": ':'.join((org_name, part_name)),
                 "dciId": dci_id,
-                "enableDCIExtension": "true" if dci_id else "false"}
+                "enableDCIExtension": "true" if dci_id and int(dci_id) != 0 else "false"}
             payload.update(extra_payload)
 
         return self._send_request(operation, url, payload, 'partition')
