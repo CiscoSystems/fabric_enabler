@@ -1,17 +1,17 @@
-# Copyright 2014 Cisco Systems, Inc.                                                 
-# All Rights Reserved.                                                               
-#                                                                                     
-#    Licensed under the Apache License, Version 2.0 (the "License"); you may         
-#    not use this file except in compliance with the License. You may obtain         
-#    a copy of the License at                                                         
-#                                                                                    
-#         http://www.apache.org/licenses/LICENSE-2.0                                 
-#                                                                                     
-#    Unless required by applicable law or agreed to in writing, software             
-#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT       
-#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the        
-#    License for the specific language governing permissions and limitations         
-#    under the License. 
+# Copyright 2014 Cisco Systems, Inc.
+# All Rights Reserved.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
 
 
 """
@@ -24,8 +24,9 @@ from socket import timeout as SocketTimeout
 
 DEBUG = False
 
-not_copy_dirs = ['build','dist','openstack_dfa_enabler.egg-info', '.git'] 
-not_copy_files = ['setup_dfa', 'cisco_scp.py','requirements.txt', 'dfa_neutron_svc.log', 'paramiko.log']
+not_copy_dirs = ['build', 'dist', 'openstack_fabric_enabler.egg-info', '.git']
+not_copy_files = ['setup_enabler', 'cisco_scp.py', 'requirements.txt',
+                  'enabler_neutron_svc.log', 'paramiko.log']
 not_copy_list = not_copy_files + not_copy_dirs
 # this is quote from the shlex module, added in py3.3
 _find_unsafe = re.compile(r'[^\w@%+=:,./~-]').search
@@ -174,8 +175,8 @@ class cisco_SCPClient(object):
         for name in files:
             basename = os.path.basename(name)
             if (basename in not_copy_files or basename.endswith(".pyc")):
-               print "not copying %s\n" % basename
-               continue
+                print "not copying %s\n" % basename
+                continue
             (mode, size, mtime, atime) = self._read_stats(name)
             if self.preserve_times:
                 self._send_time(mtime, atime)
@@ -227,8 +228,8 @@ class cisco_SCPClient(object):
     def _send_recursive(self, files):
         for base in files:
             if (base in not_copy_list or base.endswith(".pyc")):
-               print "not copying %s\n" % base
-               continue
+                print "not copying %s\n" % base
+                continue
             if not os.path.isdir(base):
                 # filename mixed into the bunch
 
@@ -236,14 +237,14 @@ class cisco_SCPClient(object):
                 continue
             last_dir = base
             for root, dirs, fls in os.walk(base):
-                sub_dirs=root.split('/')
+                sub_dirs = root.split('/')
                 if len(sub_dirs) > 1 and sub_dirs[1] in not_copy_dirs:
-                   print "not copying whole dir %s" % root
-                   continue  
+                    print "not copying whole dir %s" % root
+                    continue
                 self._chdir(last_dir, root)
                 if (base.endswith(".pyc")):
-                  print "not copying %s\n" % base
-                  continue 
+                    print "not copying %s\n" % base
+                    continue
                 self._send_files([os.path.join(root, f) for f in fls])
                 last_dir = root
             # back out of the directory
@@ -274,7 +275,8 @@ class cisco_SCPClient(object):
             msg = self.channel.recv(512)
         except SocketTimeout:
             raise SCPException('Timout waiting for scp response')
-        # slice off the first byte, so this compare will work in python2 and python3
+        # slice off the first byte, so this compare will work in python2 and
+        # python3
         if msg and msg[0:1] == b'\x00':
             return
         elif msg and msg[0:1] == b'\x01':
