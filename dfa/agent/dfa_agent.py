@@ -21,7 +21,6 @@ eventlet.monkey_patch()
 import json
 import os
 import platform
-import threading
 import time
 import sys
 
@@ -55,8 +54,7 @@ class RpcCallBacks(object):
     def send_vm_info(self, context, msg):
         vm_info = eval(msg)
         LOG.debug('Received %(vm_info)s for %(instance)s' % (
-                             {'vm_info': vm_info,
-                              'instance': vm_info.get('inst_name')}))
+            {'vm_info': vm_info, 'instance': vm_info.get('inst_name')}))
         # Call VDP/LLDPad API to send the info
         self._vdpd.vdp_vm_event(vm_info)
 
@@ -78,10 +76,10 @@ class RpcCallBacks(object):
         msg_type = context.get('type')
         uplink = json.loads(msg)
         LOG.debug("Received %(context)s and %(msg)s" % (
-                            {'context': context, 'msg': uplink}))
+            {'context': context, 'msg': uplink}))
         if msg_type == constants.UPLINK_NAME:
-             LOG.debug("uplink is %(uplink)s" % uplink)
-             self._vdpd.dfa_uplink_restart(uplink)
+            LOG.debug("uplink is %(uplink)s" % uplink)
+            self._vdpd.dfa_uplink_restart(uplink)
 
 
 class DfaAgent(object):
@@ -93,7 +91,7 @@ class DfaAgent(object):
         self._qn = rpc_qn
         self._cfg = config.CiscoDFAConfig('neutron').cfg
         LOG.debug('Starting DFA Agent on %s' % self._my_host)
-        
+
         # List of task in the agent
         self.agent_task_list = []
 
@@ -108,9 +106,9 @@ class DfaAgent(object):
         self.setup_client_rpc()
 
         # Initialize VPD manager.
-	# TODO read it from config. 
-	br_int = 'br-int'
-	br_ext = 'br-ethd'
+        # TODO read it from config.
+        br_int = 'br-int'
+        br_ext = 'br-ethd'
         root_helper = 'sudo'
         self._vdpm = vdpm.VdpMgr(br_int, br_ext, root_helper, self.clnt,
                                  thishost)
@@ -121,7 +119,7 @@ class DfaAgent(object):
         """Setup RPC client for dfa agent."""
         # Setup RPC client.
         url = self._cfg.dfa_rpc.transport_url % (
-                     {'ip': self._cfg.DEFAULT.rabbit_hosts})
+            {'ip': self._cfg.DEFAULT.rabbit_hosts})
         self.clnt = rpc.DfaRpcClient(url, constants.DFA_SERVER_QUEUE)
 
     def send_heartbeat(self):
@@ -139,7 +137,7 @@ class DfaAgent(object):
             LOG.debug("request_uplink_info: resp = %s" % resp)
             self._need_uplink_info = resp
         except rpc.MessagingTimeout:
-             LOG.error("RPC timeout: Request for uplink info failed.")
+            LOG.error("RPC timeout: Request for uplink info failed.")
 
     def setup_rpc(self):
         """Setup RPC server for dfa agent."""
@@ -173,6 +171,7 @@ class DfaAgent(object):
         ipt_thrd = self.start_iptables_task()
         self.agent_task_list.append(ipt_thrd)
 
+
 def save_my_pid(cfg):
 
     mypid = os.getpid()
@@ -187,7 +186,6 @@ def save_my_pid(cfg):
             pass
         else:
             pid_file_path = os.path.join(pid_path, pid_file)
-
 
         LOG.debug('dfa_agent pid=%s' % mypid)
         with open(pid_file_path, 'w') as fn:
@@ -206,7 +204,6 @@ def main():
     # Create DFA agent object
     dfa_agent = DfaAgent(thishost, constants.DFA_AGENT_QUEUE)
 
-    
     LOG.debug('Starting tasks in agent...')
     try:
         # Start all task in the agent.
@@ -215,7 +212,7 @@ def main():
         # Endless loop
         while True:
             start = time.time()
-            
+
             # Send heartbeat to controller, data includes:
             # - timestamp
             # - host name

@@ -26,11 +26,12 @@ import platform
 import sys
 from tabulate import tabulate
 
-from common import config
-from common import constants
-from common import rpc
-from common import utils
-from server import cisco_dfa_rest as cdr
+from dfa.common import config
+from dfa.common import constants
+from dfa.common import dfa_exceptions as dexc
+from dfa.common import rpc
+from dfa.common import utils
+from dfa.server import cisco_dfa_rest as cdr
 
 
 class DfaCli(cmd.Cmd):
@@ -49,7 +50,7 @@ class DfaCli(cmd.Cmd):
 
     def setup_client_rpc(self):
         url = self._cfg.dfa_rpc.transport_url % (
-                      {'ip': self.ctl_host})
+            {'ip': self.ctl_host})
         self.clnt = rpc.DfaRpcClient(url, constants.DFA_SERVER_QUEUE)
 
     def set_static_ip_address(self, ipaddr, macaddr):
@@ -67,8 +68,8 @@ class DfaCli(cmd.Cmd):
         macaddr = ip_mac.get('--mac')
         # Some sanity check.
         if (not ipaddr or not macaddr or
-            not utils.is_valid_ipv4(ipaddr) or
-            not utils.is_valid_mac(macaddr)):
+                not utils.is_valid_ipv4(ipaddr)
+                or not utils.is_valid_mac(macaddr)):
             print ('Invalid input parameters.\n'
                    'Usage:'
                    ' set_static_ip --mac <mac address> --ip <ip address>')
@@ -77,9 +78,13 @@ class DfaCli(cmd.Cmd):
         self.set_static_ip_address(ipaddr, macaddr)
 
     def do_get_config_profile(self, line):
-        cfgp_list = self.dcnm_client.config_profile_list()
-        if not cfgp_list:
-            print 'No config profile found.'
+        try:
+            cfgp_list = self.dcnm_client.config_profile_list()
+            if not cfgp_list:
+                print 'No config profile found.'
+                return
+        except dexc.DfaClientRequestFailed:
+            print 'Failed to access DCNM.'
             return
 
         columns = ['Config Profile Name', 'Alias']
@@ -101,9 +106,13 @@ class DfaCli(cmd.Cmd):
             print 'Tenant name is required.'
             return
 
-        net_list = self.dcnm_client.list_networks(tenant_name, tenant_name)
-        if not net_list:
-            print 'No network found.'
+        try:
+            net_list = self.dcnm_client.list_networks(tenant_name, tenant_name)
+            if not net_list:
+                print 'No network found.'
+                return
+        except dexc.DfaClientRequestFailed:
+            print 'Failed to access DCNM.'
             return
 
         rows = []
@@ -119,9 +128,17 @@ class DfaCli(cmd.Cmd):
             print 'Invalid parameters'
             return
 
-        net = self.dcnm_client.get_network(args[0], args[1])
-        if not net:
-            print 'No network found.'
+        if not args[1].isdigit():
+            print 'Invalid segmentation id %s.' % args[1]
+            return
+
+        try:
+            net = self.dcnm_client.get_network(args[0], args[1])
+            if not net:
+                print 'No network found.'
+                return
+        except dexc.DfaClientRequestFailed:
+            print 'Failed to access DCNM.'
             return
 
         rows = []

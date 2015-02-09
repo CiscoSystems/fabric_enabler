@@ -17,30 +17,29 @@
 # @author: Nader Lahouti, Cisco Systems, Inc.
 
 
-
-import os
-import sys
-import commands
-import itertools
-import optparse
 import ConfigParser
+import commands
+import sys
+import optparse
+import os
+import re
 
 CONF_TMP_FILE = '%s_conf.new'
 NEUTRON = 'neutron'
 KEYSTONE = 'keystone'
 
 conf_file_list = [
-'keystone.conf',
-'keystone.conf.sample',
-'neutron.conf'
+    'keystone.conf',
+    'keystone.conf.sample',
+    'neutron.conf'
 ]
 default_path = '/opt/stack,/etc/neutron,/etc/keystone'
-default_mysql_user = 'root'
-default_mysql_passwd = 'cisco123'
 dfa_cfg_file = '/etc/enabler_conf.ini'
 
 
 def get_mysql_credentials(cfg_file):
+    """Get the creadentials and database name from options in config file."""
+
     try:
         parser = ConfigParser.ConfigParser()
         cfg_fp = open(cfg_file)
@@ -57,11 +56,31 @@ def get_mysql_credentials(cfg_file):
     value = parser.get('dfa_mysql', 'connection')
 
     try:
-        start = value.index('://') + 3
-        end = value.index('@')
-        cred = value[start:end].split(':')
-        return cred[0], cred[1]
-    except ValueError:
+        # Find location of pattern in connection parameter as shown below:
+        # http://username:password@host/databasename?characterset=encoding'
+        sobj = re.search(r"(://).*(@).*(/).*(\?)", value)
+
+        # The list parameter contains:
+        # indices[0], is the index of '://'
+        # indices[1], is the index of '@'
+        # indices[2], is the index of '/'
+        # indices[3], is the index of '?'
+        indices = [sobj.start(1), sobj.start(2), sobj.start(3), sobj.start(4)]
+
+        # Get the credentials
+        cred = value[indices[0]+3:indices[1]].split(':')
+
+        # Get the host name
+        host = value[indices[1]+1:indices[2]]
+
+        # Get the database name
+        db_name = value[indices[2]+1:indices[3]]
+
+        # Get the character encoding
+        charset = value[indices[3]+1:].split('=')[1]
+
+        return cred[0], cred[1], host, db_name, charset
+    except (ValueError, IndexError, AttributeError):
         print 'Failed to find mysql connections credentials.'
         sys.exit(1)
 
@@ -73,7 +92,7 @@ def modify_conf(cfgfile, service_name, outfn):
     2. /etc/neutron/neutron.conf
     3. /etc/keystone/keyston.conf
     4. /opt/stack/keystone/etc/keystone.conf.sample
-    
+
     rpc_backend = rabbit
     notification_topics = cisco_dfa_neutron_notify
     notification_driver = messaging
@@ -82,7 +101,7 @@ def modify_conf(cfgfile, service_name, outfn):
     notification_topics = cisco_dfa_keystone_notify
     notification_driver = messaging
     """
-    fn = open(outfn , 'w')
+    fn = open(outfn, 'w')
     notify_val = 'cisco_dfa_%s_notify' % service_name
     notify_drvr = 'messaging'
     if cfgfile:
@@ -103,8 +122,8 @@ def modify_conf(cfgfile, service_name, outfn):
                         elif opt[0].startswith('notification_topics'):
                             if notify_val not in opt[2]:
                                 newline = opt[0] + ' = ' + (
-                                      (opt[2] + ',' + notify_val)
-                                      if opt[2].strip(' ') else notify_val)
+                                    (opt[2] + ',' + notify_val)
+                                    if opt[2].strip(' ') else notify_val)
 
                 fn.write(newline + '\n')
 
@@ -112,15 +131,12 @@ def modify_conf(cfgfile, service_name, outfn):
 
 
 def prepare_db():
-    hostname = 'localhost'
-    database = 'cisco_dfa'
-    charset = 'utf8'
 
-    (user, password) = get_mysql_credentials(dfa_cfg_file)
+    (user, password, host, db, charset) = get_mysql_credentials(dfa_cfg_file)
 
     # Modify max_connections, if it is not 2000
     logincmd = ("mysql -u%(user)s -p%(password)s -h%(host)s -e '" % (
-                 {'user': user, 'password': password, 'host': hostname}))
+        {'user': user, 'password': password, 'host': host}))
     conn_cmd = 'show variables like "' + 'max_connections";' + "'"
     out = commands.getoutput(logincmd + conn_cmd)
     try:
@@ -131,27 +147,18 @@ def prepare_db():
 
     if val < 2000:
         # Set max_connections to 2000 if it is not.
-        logincmd = ("mysql -u%(user)s -p%(password)s -h%(host)s -e '" % (
-                     {'user': user, 'password': password, 'host': hostname}))
         conn_cmd = 'set global max_connections = 2000' + "'"
         out = commands.getoutput(logincmd + conn_cmd)
 
-    # Delete database if it exist.
-    del_cmd = ('mysql -u%(user)s -p%(password)s -h%(host)s -e '
-               '"DROP DATABASE IF EXISTS %(db)s;"' % (
-               {'user': user, 'password': password, 'host': hostname,
-                'db': database}))
-    out = commands.getoutput(del_cmd)
+    # Create database if it not existed.
+    create_cmd = ('mysql -u%(user)s -p%(password)s -h%(host)s '
+                  '-e "CREATE DATABASE IF NOT EXISTS %(db)s '
+                  'CHARACTER SET %(charset)s;"' % (
+                      {'user': user, 'password': password, 'host': host,
+                       'db': db, 'charset': charset}))
+    out = commands.getoutput(create_cmd)
     print out
 
-    # Create database.
-    creat_cmd = ('mysql -u%(user)s -p%(password)s -h%(host)s '
-                 '-e "CREATE DATABASE %(db)s CHARACTER SET %(charset)s;"' % (
-                 {'user': user, 'password': password, 'host': hostname, 
-                  'db': database, 'charset': charset}))
-    out = commands.getoutput(creat_cmd)
-    print out
-    
 
 def find_conf_and_modify(os_path):
 
@@ -162,10 +169,10 @@ def find_conf_and_modify(os_path):
                 if fn in conf_file_list:
                     fname = os.path.realpath(os.path.join(p, fn))
                     service_name = NEUTRON if NEUTRON in fname else (
-                                   KEYSTONE if KEYSTONE in fname else None)
+                        KEYSTONE if KEYSTONE in fname else None)
                     modify_conf(fname, service_name, fname + '.modified')
 
-                    # Keep the existing in .orig and copy the .modified 
+                    # Keep the existing in .orig and copy the .modified
                     # to the exisiting one.
                     cmd = 'cp %s %s.orig' % (fname, fname)
                     print cmd
@@ -182,14 +189,14 @@ def copy_init_conf_files(node):
     # to /etc/init.
     path = 'openstack_fabric_enabler/dfa/scripts/'
     if node == 'control':
-        f = 'fabric_enabler_server.conf'
+        conf_fn = 'fabric_enabler_server.conf'
     else:
-        f ='fabric_enabler_agent.conf'
-        f2 = 'openstack_fabric_enabler/dfa/agent/detect_uplink.sh'
-        cmd2 = 'sudo cp %s /usr/local/bin' % f2
+        conf_fn = 'fabric_enabler_agent.conf'
+        uplink_script = 'openstack_fabric_enabler/dfa/agent/detect_uplink.sh'
+        cmd2 = 'sudo cp %s /usr/local/bin' % uplink_script
         print cmd2
         commands.getoutput(cmd2)
-    cmd = 'sudo cp %s /etc/init' % (path + f)
+    cmd = 'sudo cp %s /etc/init' % (path + conf_fn)
     print cmd
     commands.getoutput(cmd)
 
@@ -206,18 +213,16 @@ def copy_dfa_cfg():
 
 
 usage = ('\n'
-'python dfa_prepare_setup.py --dir-path filepath1[,filepath2,...]'
-'[control | compute]\n')
+         'python dfa_prepare_setup.py --dir-path filepath1[,filepath2,...]'
+         '[control | compute]\n')
 
 if __name__ == '__main__':
 
     parser = optparse.OptionParser(usage=usage)
 
     parser.add_option('--dir-path',
-                  type='string',
-                  dest='dir_path',
-                  default=default_path,
-                  help='Path to neutron.conf and keystone.conf files')
+                      type='string', dest='dir_path', default=default_path,
+                      help='Path to neutron.conf and keystone.conf files')
     (options, args) = parser.parse_args()
 
     copy_dfa_cfg()
