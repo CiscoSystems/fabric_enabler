@@ -21,6 +21,7 @@ module for port events.
 """
 
 import Queue
+import re
 import sys
 import os
 import paramiko
@@ -49,8 +50,6 @@ from dfa.server import dfa_listen_dcnm as dfa_dcnm
 
 
 LOG = logging.getLogger(__name__)
-
-
 
 
 class RpcCallBacks(object):
@@ -299,9 +298,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         for net in nets:
             self.network[net.network_id] = {}
             self.network[net.network_id]['segmentation_id'] = (
-                                                        net.segmentation_id)
+                net.segmentation_id)
             self.network[net.network_id]['config_profile'] = (
-                                                         net.config_profile)
+                net.config_profile)
             self.network[net.network_id]['fwd_mod'] = net.fwd_mod
             self.network[net.network_id]['tenant_id'] = net.tenant_id
             self.network[net.network_id]['name'] = net.name
@@ -416,7 +415,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         """
 
         LOG.debug("Processing project_update_event %(proj)s.",
-                                                   {'proj': proj_info})
+                  {'proj': proj_info})
         proj_id = proj_info.get('resource_info')
         try:
             proj = self.keystone_event._service.projects.get(proj_id)
@@ -433,7 +432,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             LOG.warning('Project update event for %(proj)s is received without'
                         ' changing in the project name: %(orig_proj)s'
                         'Ignoring the event.', (
-                        {'proj': proj_id, 'orig_proj': orig_proj_name}))
+                            {'proj': proj_id, 'orig_proj': orig_proj_name}))
             return
 
         if orig_proj_name != new_proj_name:
@@ -442,9 +441,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             LOG.debug('Update request cannot be processed as name of project'
                       ' is changed: %(proj)s %(orig_name)s %(orig_dci)s to '
                       '%(new_name)s %(new_dci)s.', (
-                      {'proj': proj_id, 'orig_name': orig_proj_name,
-                       'orig_dci': orig_dci_id, 'new_name': new_proj_name,
-                       'new_dci': new_dci_id}))
+                          {'proj': proj_id, 'orig_name': orig_proj_name,
+                           'orig_dci': orig_dci_id, 'new_name': new_proj_name,
+                           'new_dci': new_dci_id}))
             return
 
         # Valid update request.
@@ -455,7 +454,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
 
         try:
             self.dcnm_client.update_project(new_proj_name,
-            self.cfg.dcnm.default_partition_name, new_dci_id)
+                                            self.cfg.dcnm.
+                                            default_partition_name, new_dci_id)
         except dexc.DfaClientRequestFailed:
             # Failed to update project in DCNM.
             # Save the info and mark it as failure and retry it later.
@@ -468,8 +468,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             self.update_project_info_cache(proj_id, name=new_proj_name,
                                            dci_id=new_dci_id,
                                            opcode='update')
-            LOG.debug('Updated project %(proj)s %(name)s.', ({'proj': proj_id,
-                                                      'name': proj.name}))
+            LOG.debug('Updated project %(proj)s %(name)s.', (
+                {'proj': proj_id, 'name': proj.name}))
 
     def project_delete_event(self, proj_info):
         """Process project delete event."""
@@ -480,7 +480,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         if proj_name:
             try:
                 self.dcnm_client.delete_project(proj_name,
-                self.cfg.dcnm.default_partition_name)
+                                                self.cfg.dcnm.
+                                                default_partition_name)
             except dexc.DfaClientRequestFailed:
                 # Failed to delete project in DCNM.
                 # Save the info and mark it as failure and retry it later.
@@ -509,7 +510,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         """Create subnet."""
 
         snet_id = snet.get('id')
-        if not snet_id in self.subnet:
+        if snet_id not in self.subnet:
             self.subnet[snet_id] = {}
             self.subnet[snet_id].update(snet)
 
@@ -522,7 +523,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             # No need to process this event.
             LOG.info('create_subnet: network %(name)s was created by DCNM. '
                      'Ignoring processing the event.', (
-                                                 {'name': query_net.name}))
+                         {'name': query_net.name}))
             return
 
         tenant_name = self.get_project_name(snet['tenant_id'])
@@ -548,7 +549,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         try:
             newseg = (segid, self.segmentation_pool.remove(segid)
                       if segid and segid in self.segmentation_pool else
-                                                 self.segmentation_pool.pop())
+                      self.segmentation_pool.pop())
             return newseg[0] if newseg[0] else newseg[1]
         except KeyError:
             LOG.exception('Error: Segmentation id pool is empty')
@@ -567,8 +568,17 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         net_name = net.get('name')
         tenant_id = net.get('tenant_id')
 
+        # Extract segmentation_id from the network name
+        try:
+            net_ext_name = self.cfg.dcnm.dcnm_net_ext
+            nobj = re.search(net_ext_name, net_name)
+            seg_id = int((net_name[nobj.start(0)+len(net_ext_name)-1:]
+                         if nobj else None))
+        except (IndexError, TypeError, ValueError):
+            seg_id = None
+
         # Check if network is already created.
-        query_net = self.get_network_by_name(net_name)
+        query_net = self.get_network_by_segid(seg_id) if seg_id else None
         if query_net:
             # The network is already created no need to process the event.
             if query_net.source.lower() == 'dcnm':
@@ -582,9 +592,23 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                 prev_info['id'] = net_id
                 self.network[net_id] = prev_info
 
+                # Update the network name. After extracting the segmentation_id
+                # no need to keep it in the name. Removing it and update
+                # the network.
+                updated_net_name = net_name[:nobj.start(0)+len(net_ext_name)-1]
+                try:
+                    body = {'network': {'name': updated_net_name, }}
+                    dcnm_net = self.neutronclient.update_network(
+                        net_id, body=body).get('network')
+                except Exception as e:  # TODO get the proper exception
+                    LOG.exception('Failed to update network '
+                                  '%(network)s. Reason %(err)s.' % (
+                                      {'network': dcnm_net, 'err': str(e)}))
+                    return
+
             LOG.info('network_create_event: network %(name)s was created '
                      'by %(source)s. Ignoring processing the event.' % (
-                     {'name': net_name, 'source': 'dcnm'}))
+                         {'name': net_name, 'source': 'dcnm'}))
             return
 
         # Check if project (i.e. tenant) exist.
@@ -592,8 +616,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         if not tenant_name:
             LOG.error('Failed to create network %(name)s. Project '
                       '%(tenant_id)s does not exist.' % (
-                                                 {'name': net_name,
-                                                  'tenant_id': tenant_id}))
+                          {'name': net_name, 'tenant_id': tenant_id}))
             return
 
         pseg_id = self.network[net_id].get('provider:segmentation_id')
@@ -601,7 +624,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         self.network[net_id]['segmentation_id'] = seg_id
         try:
             cfgp, fwd_mod = self.dcnm_client.get_config_profile_for_network(
-                                                             net.get('name'))
+                net.get('name'))
             self.network[net_id]['config_profile'] = cfgp
             self.network[net_id]['fwd_mod'] = fwd_mod
             self.add_network_db(net_id, self.network[net_id],
@@ -622,7 +645,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         net_id = network_info['network_id']
         if net_id not in self.network:
             LOG.error('network_delete_event: net_id %s does not exist.',
-                                                                    net_id)
+                      net_id)
             return
 
         segid = self.network[net_id].get('segmentation_id')
@@ -667,8 +690,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         if pre_partition_name != self.cfg.dcnm.default_partition_name:
             LOG.error('Failed to create network. Partition %(part)s is not '
                       '%(os_part)s which is created by openstack.', {
-                      'part': pre_partition_name,
-                      'os_part': self.cfg.dcnm.default_partition_name})
+                          'part': pre_partition_name,
+                          'os_part': self.cfg.dcnm.default_partition_name})
             return
 
         query_net = self.get_network_by_segid(pre_seg_id)
@@ -676,15 +699,14 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             # The network is already created no need to process the event.
             LOG.info('dcnm_network_create_event: network %(name)s was '
                      'created. Ignoring processing the event.' % (
-                                                  {'name': query_net.name}))
+                         {'name': query_net.name}))
             return
 
         dcnm_net_info = self.dcnm_client.get_network(pre_project_name,
                                                      pre_seg_id)
         if not dcnm_net_info:
             LOG.info('No network details for %(org)s and %(segid)s' % (
-                                  {'org': pre_project_name,
-                                   'segid': pre_seg_id}))
+                {'org': pre_project_name, 'segid': pre_seg_id}))
             return
 
         net_id = utils.get_uuid()
@@ -724,22 +746,38 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         # Update network cache and add the network to the database.
         net_ext_name = self.cfg.dcnm.dcnm_net_ext
         self.network[net_id] = dict(segmentation_id=seg_id,
-                            config_profile=cfgp,
-                            fwd_mod=fwd_mod,
-                            tenant_id=tenant_id,
-                            name=net_name + net_ext_name,
-                            id=net_id,
-                            source='DCNM')
+                                    config_profile=cfgp,
+                                    fwd_mod=fwd_mod,
+                                    tenant_id=tenant_id,
+                                    name=net_name + net_ext_name,
+                                    id=net_id,
+                                    source='DCNM')
         self.add_network_db(net_id, self.network[net_id], 'DCNM',
                             constants.RESULT_SUCCESS)
 
         # 2. Send network create request to neutron
         try:
-            body = {'network': {'name': net_name + net_ext_name,
+            # With create_network (called below), the same request comes as
+            # notification and it will be processed in the
+            # create_network_event. The request should not be processed as it
+            # is already processed here.
+            # The only way to decide whether it is for a new network or not is
+            # the segmentation_id (DCNM does not have uuid for network) which
+            # is unique. For that reason it is needed to send segmentation_id
+            # when creating network in openstack.
+            # Moreover, we are using network_type=local and for that reason
+            # provider:segmentation_id cannot be added as parameter when
+            # creating network. One solution is to embed segmentation_id in the
+            # network name. Then, when processing the notification, if the
+            # request is from DCNM, the segmentation_id will be extracted from
+            # network name. With that create_network_event can decide to
+            # process or deny an event.
+            updated_net_name = net_name + net_ext_name + str(seg_id)
+            body = {'network': {'name': updated_net_name,
                                 'tenant_id': tenant_id,
                                 'admin_state_up': True}}
-            dcnm_net = self.neutronclient.create_network(body=
-                                                         body).get('network')
+            dcnm_net = self.neutronclient.create_network(
+                body=body).get('network')
             net_id = dcnm_net.get('id')
 
         except Exception as e:  # TODO get the proper exception
@@ -749,33 +787,32 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             self.delete_network_db(net_id)
             LOG.exception('dcnm_network_create_event: Failed to create '
                           '%(network)s. Reason %(err)s.' % (
-                          {'network': body, 'err': str(e)}))
+                              {'network': body, 'err': str(e)}))
             return
 
         LOG.debug('dcnm_network_create_event: Created network %(network)s' % (
-                                body))
+            body))
 
         # 3. Send subnet create request to neutron.
         pool = subnet.get('ipRange')
         allocation_pools = []
         if pool:
-            iprange = ["{'start': '%s', 'end': '%s'}" % (p.split('-')[0],
-                                  p.split('-')[1]) for p in pool.split(',')]
+            iprange = ["{'start': '%s', 'end': '%s'}" % (
+                p.split('-')[0], p.split('-')[1]) for p in pool.split(',')]
             [allocation_pools.append(eval(ip)) for ip in iprange]
 
         try:
             body = {'subnet': {'cidr': subnet.get('subnet'),
-                           'gateway_ip': subnet.get('gateway'),
-                           'ip_version': 4,
-                           'network_id': net_id,
-                           'tenant_id': tenant_id,
-                           'enable_dhcp': False,
-                           'allocation_pools': allocation_pools,
-                          }}
+                               'gateway_ip': subnet.get('gateway'),
+                               'ip_version': 4,
+                               'network_id': net_id,
+                               'tenant_id': tenant_id,
+                               'enable_dhcp': False,
+                               'allocation_pools': allocation_pools, }}
             # Send requenst to create subnet in neutron.
             LOG.debug('Creating subnet %(subnet)s for DCNM request.' % body)
-            dcnm_subnet = self.neutronclient.create_subnet(body=
-                                                           body).get('subnet')
+            dcnm_subnet = self.neutronclient.create_subnet(
+                body=body).get('subnet')
             subnet_id = dcnm_subnet.get('id')
             # Update subnet cache.
             self.subnet[subnet_id] = {}
@@ -784,21 +821,21 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             # Failed to create network, do clean up if necessary.
             LOG.exception('Failed to create subnet %(subnet)s for DCNM '
                           'request. Error %(err)s' % (
-                                 {'subnet': body['subnet'], 'err': str(e)}))
+                              {'subnet': body['subnet'], 'err': str(e)}))
 
         LOG.debug('dcnm_network_create_event: Created subnet %(subnet)s' % (
-                                body))
+            body))
 
     def dcnm_network_delete_event(self, network_info):
         """Process network delete event from DCNM."""
         seg_id = network_info.get('segmentation_id')
         if not seg_id:
             LOG.error('Failed to delete network. Invalid network info %s.' %
-                                      network_info)
+                      network_info)
         query_net = self.get_network_by_segid(seg_id)
         if not query_net:
             LOG.info('dcnm_network_delete_event: network %(segid)s does not '
-                      'exist.' % ({'segid': seg_id}))
+                     'exist.' % ({'segid': seg_id}))
             return
         # Send network delete request to neutron
         try:
@@ -811,7 +848,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             self.network[query_net.network_id] = del_net
             LOG.exception('dcnm_network_delete_event: Failed to delete '
                           '%(network)s. Reason %(err)s.' % (
-                          {'network': query_net.name, 'err': str(e)}))
+                              {'network': query_net.name, 'err': str(e)}))
 
     def _make_vm_info(self, port, status):
         port_id = port.get('id')
@@ -864,14 +901,13 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
 
     def port_delete_event(self, port_info):
         port_id = port_info.get('port_id')
-        if port_id == None:
+        if port_id is None:
             LOG.debug("port_delete_event : %s does not exist." % port_id)
             return
 
         vm = self.get_vm(port_id)
         if not vm:
-            LOG.error("port_delete_event: port %s does not exist." %
-                                                               port_id)
+            LOG.error("port_delete_event: port %s does not exist." % port_id)
             return
         vm_info = dict(status='down',
                        vm_mac=vm.mac,
@@ -903,8 +939,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             try:
                 self.events[data[0]](data[1])
             except Exception as exc:
-                LOG.exception('Failed to process %s. Reason: %s' % (data[0],
-                                                              str(exc)))
+                LOG.exception('Failed to process %s. Reason: %s' % (
+                    data[0], str(exc)))
                 raise exc
 
     def process_queue(self):
@@ -923,7 +959,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                 timestamp = events[1]
                 data = events[2]
                 LOG.debug('events: %s, pri: %s, timestamp: %s, data:%s' % (
-                                                 events, pri, timestamp, data))
+                    events, pri, timestamp, data))
                 self.process_data(data)
 
     def _get_ip_leases(self):
@@ -946,7 +982,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             ftp_session.close()
             ssh_session.close()
             LOG.error('Cannot open %(file)s.',
-            {'file': self.cfg.dcnm.dcnm_dhcp_leases})
+                      {'file': self.cfg.dcnm.dcnm_dhcp_leases})
 
     def update_port_ip_address(self):
         """Find the ip address that assinged to a port via DHCP and update the
@@ -1045,7 +1081,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         instances = self.get_vms_for_this_req(**req)
         for vm in instances:
             LOG.info('Updating IP address: %(ip)s %(mac)s.' % (
-                                  {'ip': ipaddr, 'mac': macaddr}))
+                {'ip': ipaddr, 'mac': macaddr}))
             # Send request to update the rule.
             try:
                 rule_info = dict(ip=ipaddr, mac=macaddr,
@@ -1140,7 +1176,6 @@ def save_my_pid(cfg):
         else:
             pid_file_path = os.path.join(pid_path, pid_file)
 
-
         LOG.debug('dfa_server pid=%s', mypid)
         with open(pid_file_path, 'w') as funcp:
             funcp.write(str(mypid))
@@ -1166,7 +1201,7 @@ def dfa_server():
                     pass
                 else:
                     emsg = 'Exception occured in %s thread. %s' % (
-                                            trd.name, exc)
+                        trd.name, exc)
                     LOG.error(emsg)
                     raise Exception(emsg)
             # Check on dfa agents
@@ -1177,9 +1212,9 @@ def dfa_server():
                        constants.MAIN_INTERVAL) > constants.HB_INTERVAL:
                     LOG.error("Agent on %(host)s is not seen for %(sec)s. "
                               "Last seen was %(time)s.", (
-                              {'host': agent,
-                               'sec': abs(cur_time - last_seen),
-                               'time': time_s}))
+                                  {'host': agent,
+                                   'sec': abs(cur_time - last_seen),
+                                   'time': time_s}))
 
     except Exception as exc:
         LOG.exception("ERROR: %s", exc)

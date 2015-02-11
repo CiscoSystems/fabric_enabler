@@ -16,9 +16,6 @@
 # @author: Nader Lahouti, Cisco Systems, Inc.
 
 
-from six import moves
-from oslo.db import exception as db_exc
-
 import sqlalchemy as sa
 import sqlalchemy.orm.exc as orm_exc
 
@@ -41,7 +38,8 @@ class DfaNetwork(db.Base):
     fwd_mod = sa.Column(sa.String(16))
     vlan = sa.Column(sa.Integer)
     source = sa.Column(sa.String(16))
-    result = sa.Column(sa.String(16)) 
+    result = sa.Column(sa.String(16))
+
 
 class DfaTenants(db.Base):
     """Represents DFA tenants."""
@@ -51,7 +49,7 @@ class DfaTenants(db.Base):
     id = sa.Column(sa.String(36), primary_key=True)
     name = sa.Column(sa.String(255), primary_key=True)
     dci_id = sa.Column(sa.Integer)
-    result = sa.Column(sa.String(16)) 
+    result = sa.Column(sa.String(16))
 
 
 class DfaVmInfo(db.Base):
@@ -70,7 +68,7 @@ class DfaVmInfo(db.Base):
     fwd_mod = sa.Column(sa.String(16))
     gw_mac = sa.Column(sa.String(17))
     host = sa.Column(sa.String(255))
-    result = sa.Column(sa.String(16)) 
+    result = sa.Column(sa.String(16))
 
 
 class DfaAgentsDb(db.Base):
@@ -79,8 +77,8 @@ class DfaAgentsDb(db.Base):
     __tablename__ = 'agents'
 
     host = sa.Column(sa.String(255), primary_key=True)
-    created =  sa.Column(sa.DateTime)
-    heartbeat =  sa.Column(sa.DateTime)
+    created = sa.Column(sa.DateTime)
+    heartbeat = sa.Column(sa.DateTime)
     configurations = sa.Column(sa.String(4095))
 
 
@@ -91,7 +89,7 @@ class DfaDBMixin(object):
     def __init__(self, cfg):
         # Configure database.
         db.configure_db(cfg)
-        
+
     def add_project_db(self, pid, name, dci_id, result):
         proj = DfaTenants(id=pid, name=name, dci_id=dci_id, result=result)
         session = db.get_session()
@@ -106,6 +104,9 @@ class DfaDBMixin(object):
                 session.delete(ent)
         except orm_exc.NoResultFound:
             LOG.info('Project %(id)s does not exist' % ({'id': pid}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for project %(id)s.' % (
+                {'id': pid}))
 
     def get_project_name(self, pid):
         session = db.get_session()
@@ -115,6 +116,9 @@ class DfaDBMixin(object):
             return ent and ent.name
         except orm_exc.NoResultFound:
             LOG.info('Project %(id)s does not exist' % ({'id': pid}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for project %(id)s.' % (
+                {'id': pid}))
 
     def get_project_id(self, name):
         session = db.get_session()
@@ -124,19 +128,21 @@ class DfaDBMixin(object):
             return ent and ent.id
         except orm_exc.NoResultFound:
             LOG.info('Project %(name)s does not exist' % ({'name': name}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for project %(name)s.' % (
+                {'name': name}))
 
     def get_all_projects(self):
         session = db.get_session()
         with session.begin(subtransactions=True):
             projs = session.query(DfaTenants).all()
-        return projs 
+        return projs
 
     def update_project_entry(self, pid, dci_id, result):
         session = db.get_session()
         with session.begin(subtransactions=True):
-             session.query(DfaTenants).filter_by(id=pid).update(
-                                                      {'result': result,
-                                                       'dci_id': dci_id})
+            session.query(DfaTenants).filter_by(id=pid).update(
+                {'result': result, 'dci_id': dci_id})
 
     def add_network_db(self, net_id, net_data, source, result):
         session = db.get_session()
@@ -155,7 +161,7 @@ class DfaDBMixin(object):
         session = db.get_session()
         with session.begin(subtransactions=True):
             net = session.query(DfaNetwork).filter_by(
-                                    network_id=net_id).first()
+                network_id=net_id).first()
             session.delete(net)
 
     def get_all_networks(self):
@@ -169,40 +175,47 @@ class DfaDBMixin(object):
         try:
             with session.begin(subtransactions=True):
                 net = session.query(DfaNetwork).filter_by(
-                                     network_id=net_id).one()
+                    network_id=net_id).one()
             return net
         except orm_exc.NoResultFound:
             LOG.info('Network %(id)s does not exist' % ({'id': net_id}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for network %(id)s.' % (
+                {'id': net_id}))
 
     def get_network_by_name(self, name):
         session = db.get_session()
         try:
             with session.begin(subtransactions=True):
-                net = session.query(DfaNetwork).filter_by(name=name).one()
+                net = session.query(DfaNetwork).filter_by(name=name).all()
             return net
         except orm_exc.NoResultFound:
             LOG.info('Network %(name)s does not exist' % ({'name': name}))
+
     def get_network_by_segid(self, segid):
         session = db.get_session()
         try:
             with session.begin(subtransactions=True):
-                net = session.query(DfaNetwork).filter_by(segmentation_id=
-                                                          segid).one()
+                net = session.query(DfaNetwork).filter_by(
+                    segmentation_id=segid).one()
             return net
         except orm_exc.NoResultFound:
             LOG.info('Network %(segid)s does not exist' % ({'segid': segid}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for seg-id %(id)s.' % (
+                {'id': segid}))
 
     def update_network_db(self, net_id, result):
         session = db.get_session()
         with session.begin(subtransactions=True):
-            net = session.query(DfaNetwork).filter_by(
-                                network_id=net_id).update({"result": result})
+            session.query(DfaNetwork).filter_by(
+                network_id=net_id).update({"result": result})
 
     def update_network(self, net_id, **params):
         session = db.get_session()
         with session.begin(subtransactions=True):
             session.query(DfaNetwork).filter_by(
-                          network_id=net_id).update(params.get('columns'))
+                network_id=net_id).update(params.get('columns'))
 
     def add_vms_db(self, vm_data,  vm_uuid, result):
         session = db.get_session()
@@ -214,7 +227,7 @@ class DfaDBMixin(object):
                            port_id=vm_data.get('port_uuid'),
                            ip=vm_data['oui'].get('ip_addr'),
                            mac=vm_data.get('vm_mac'),
-                           segmentation_id = vm_data.get('segmentation_id'),
+                           segmentation_id=vm_data.get('segmentation_id'),
                            fwd_mod=vm_data['oui'].get('fwd_mod'),
                            gw_mac=vm_data['oui'].get('gw_mac'),
                            host=vm_data.get('host'),
@@ -225,23 +238,26 @@ class DfaDBMixin(object):
         session = db.get_session()
         with session.begin(subtransactions=True):
             vm = session.query(DfaVmInfo).filter_by(
-                                instance_id=vm_uuid).first()
+                instance_id=vm_uuid).first()
             session.delete(vm)
 
     def update_vm_db(self, vm_port_id, **params):
         session = db.get_session()
         with session.begin(subtransactions=True):
             session.query(DfaVmInfo).filter_by(
-                            port_id=vm_port_id).update(params.get('columns'))
+                port_id=vm_port_id).update(params.get('columns'))
 
     def get_vm(self, port_id):
         session = db.get_session()
         try:
             with session.begin(subtransactions=True):
                 port = session.query(DfaVmInfo).filter_by(port_id=port_id).one()
-            return port 
+            return port
         except orm_exc.NoResultFound:
             LOG.info('Port %(id)s does not exist' % ({'id': port_id}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for Port %(id)s.' % (
+                {'id': port_id}))
 
     def get_vms(self):
         session = db.get_session()
@@ -252,7 +268,7 @@ class DfaDBMixin(object):
     def get_vms_for_this_req(self, **req):
         session = db.get_session()
         with session.begin(subtransactions=True):
-            vms= session.query(DfaVmInfo).filter_by(**req).all()
+            vms = session.query(DfaVmInfo).filter_by(**req).all()
         return vms
 
     def get_fialed_projects_entries(self, fail_res):
@@ -271,15 +287,18 @@ class DfaDBMixin(object):
 
                 # Entry exist, only update the heartbeat and configurations.
                 session.query(DfaAgentsDb).filter_by(host=host).update(
-                                {'heartbeat': agent_info.get('timestamp')})
+                    {'heartbeat': agent_info.get('timestamp')})
             except orm_exc.NoResultFound:
                 LOG.info('Creating new entry for agent on %(host)s.' % (
-                                                   {'host': host}))
+                    {'host': host}))
                 agent = DfaAgentsDb(host=host,
                                     created=agent_info.get('timestamp'),
                                     heartbeat=agent_info.get('timestamp'),
                                     configurations=agent_info.get('config'))
                 session.add(agent)
+            except orm_exc.MultipleResultsFound:
+                LOG.error('More than one enty found for agent %(host)s.' % (
+                    {'host': host}))
 
     def get_agent_configurations(self, host):
         session = db.get_session()
@@ -289,10 +308,13 @@ class DfaDBMixin(object):
                 return ent.configurations
             except orm_exc.NoResultFound:
                 LOG.info('Agent %(host)s does not exist.' % ({'host': host}))
+            except orm_exc.MultipleResultsFound:
+                LOG.error('More than one enty found for agent %(host)s.' % (
+                    {'host': host}))
 
     def update_agent_configurations(self, host, configs):
         session = db.get_session()
         with session.begin(subtransactions=True):
             # Update the configurations.
             return session.query(DfaAgentsDb).filter_by(host=host).update(
-                                                 {'configurations': configs})
+                {'configurations': configs})
