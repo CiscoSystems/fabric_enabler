@@ -15,37 +15,36 @@
 #
 # @author: Nader Lahouti, Cisco Systems, Inc.
 
+
 """This is the DFA enabler server module which is respnsible for processing
 neutron, keystone and DCNM events. Also interacting with DFA enabler agent
 module for port events.
 """
 
-import Queue
-import re
-import sys
-import os
-import paramiko
-
-
 import eventlet
 eventlet.monkey_patch()
-import time
-import platform
-from six import moves
 import json
+import os
+import paramiko
+import platform
+import Queue
+import re
+from six import moves
+import sys
+import time
 
 
-from dfa.server import cisco_dfa_rest as cdr
-from dfa.server import dfa_events_handler as deh
-from dfa.server import dfa_instance_api as dfa_inst
-from dfa.db import dfa_db_models as dfa_dbm
-from dfa.common import rpc
 from dfa.common import config
 from dfa.common import constants
 from dfa.common import dfa_exceptions as dexc
 from dfa.common import dfa_logger as logging
+from dfa.common import rpc
 from dfa.common import utils
+from dfa.db import dfa_db_models as dfa_dbm
+from dfa.server import cisco_dfa_rest as cdr
+from dfa.server import dfa_events_handler as deh
 from dfa.server import dfa_fail_recovery as dfr
+from dfa.server import dfa_instance_api as dfa_inst
 from dfa.server import dfa_listen_dcnm as dfa_dcnm
 
 
@@ -208,6 +207,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             'network.create.end': self.network_create_event,
             'network.delete.end': self.network_delete_event,
             'port.create.end': self.port_create_event,
+            'port.update.end': self.port_update_event,
             'port.delete.end': self.port_delete_event,
             'dcnm.network.create': self.dcnm_network_create_event,
             'dcnm.network.delete': self.dcnm_network_delete_event,
@@ -886,18 +886,92 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         vm_info = self._make_vm_info(port, 'up')
         port_id = port.get('id')
         self.port[port_id] = vm_info
-        vm_uuid = vm_info['oui'].get('vm_uuid')
         LOG.debug("port_create_event : %s" % vm_info)
+
+        if (not port.get('binding:host_id') and
+                port.get('binding:vif_type').lower() == 'unbound'):
+            # A port is created without binding host, vif_type,...
+            # Keep the info in the database.
+            self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
+
+            LOG.debug('Port %s created with no binding host and vif_type.')
+            return
+
         try:
             self.neutron_event.send_vm_info(str(vm_info.get('host')),
                                             str(vm_info))
         except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
             # Failed to send info to the agent. Keep the data in the
             # database as failure to send it later.
-            self.add_vms_db(vm_info, vm_uuid, constants.CREATE_FAIL)
+            self.add_vms_db(vm_info, constants.CREATE_FAIL)
             LOG.error('Failed to send VM info to agent.')
         else:
-            self.add_vms_db(vm_info, vm_uuid, constants.RESULT_SUCCESS)
+            self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
+
+    def port_update_event(self, port_info):
+        port = port_info.get('port')
+        if not port:
+            return
+
+        bhost_id = port.get('binding:host_id')
+        if not bhost_id:
+            return
+
+        port_id = port.get('id')
+        LOG.debug("port_update_event for %(port)s %(host)s." %
+                  {'port': port_id, 'host': bhost_id})
+
+        # Get the port info from DB and check if the instance is migrated.
+        vm = self.get_vm(port_id)
+        if not vm:
+            LOG.error("port_update_event: port %s does not exist." % port_id)
+            return
+
+        if vm.host == bhost_id:
+            # Port update is received without binding host change.
+            LOG.info('Port %(port)s update event is received but host %(host)s'
+                     ' is the same.' % {'port': port_id, 'host': vm.host})
+            return
+
+        vm_info = self._make_vm_info(port, 'up')
+        self.port[port_id] = vm_info
+        LOG.debug("port_update_event : %s" % vm_info)
+        if not vm.host and bhost_id:
+            # Port updated event received as a result of binding existing port
+            # to a VM.
+            try:
+                self.neutron_event.send_vm_info(str(bhost_id),
+                                                str(vm_info))
+            except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
+                # Failed to send info to the agent. Keep the data in the
+                # database as failure to send it later.
+                LOG.error('Failed to send VM info to agent %s.' % bhost_id)
+                params = dict(columns=dict(host=bhost_id,
+                                           instance_id=vm_info.get('oui').
+                                           get('vm_uuid'),
+                                           name=vm_info.get('oui').
+                                           get('vm_name'),
+                                           result=constants.CREATE_FAIL))
+                self.update_vm_db(vm.port_id, **params)
+            else:
+                # Update the database with info.
+                params = dict(columns=dict(host=bhost_id,
+                                           instance_id=vm_info.get('oui').
+                                           get('vm_uuid'),
+                                           name=vm_info.get('oui').
+                                           get('vm_name'),
+                                           result=constants.RESULT_SUCCESS))
+                self.update_vm_db(vm.port_id, **params)
+
+        elif vm.host != bhost_id:
+            # TODO support for live migration should be added here.
+            LOG.debug("Binding host for port %(port)s changed"
+                      "from %(host_p)s to %(host_n)s."
+                      "This is live migration and currently "
+                      "it is not supported." % (
+                          {'port': port_id,
+                           'host_p': vm.host,
+                           'host_n': bhost_id}))
 
     def port_delete_event(self, port_info):
         port_id = port_info.get('port_id')
@@ -985,14 +1059,15 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                       {'file': self.cfg.dcnm.dcnm_dhcp_leases})
 
     def update_port_ip_address(self):
-        """Find the ip address that assinged to a port via DHCP and update the
-        it in the database.
+        """Find the ip address that assinged to a port via DHCP
+
+        The port database will be updated with the ip address.
         """
         # TODO Move it to create port
         leases = None
         instances = self.get_vms()
         for vm in instances:
-            if vm.ip != '0.0.0.0':
+            if vm.ip != '0.0.0.0' or not vm.host:
                 continue
 
             if not leases:

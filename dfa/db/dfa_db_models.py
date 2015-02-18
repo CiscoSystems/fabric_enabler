@@ -19,8 +19,8 @@
 import sqlalchemy as sa
 import sqlalchemy.orm.exc as orm_exc
 
-import dfa_db_api as db
 from dfa.common import dfa_logger as logging
+import dfa_db_api as db
 
 LOG = logging.getLogger(__name__)
 
@@ -217,7 +217,7 @@ class DfaDBMixin(object):
             session.query(DfaNetwork).filter_by(
                 network_id=net_id).update(params.get('columns'))
 
-    def add_vms_db(self, vm_data,  vm_uuid, result):
+    def add_vms_db(self, vm_data, result):
         session = db.get_session()
         with session.begin(subtransactions=True):
             vm = DfaVmInfo(instance_id=vm_data['oui'].get('vm_uuid'),
@@ -251,7 +251,8 @@ class DfaDBMixin(object):
         session = db.get_session()
         try:
             with session.begin(subtransactions=True):
-                port = session.query(DfaVmInfo).filter_by(port_id=port_id).one()
+                port = session.query(DfaVmInfo).filter_by(
+                    port_id=port_id).one()
             return port
         except orm_exc.NoResultFound:
             LOG.info('Port %(id)s does not exist' % ({'id': port_id}))
