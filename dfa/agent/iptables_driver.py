@@ -28,10 +28,11 @@ class IpMacPort(object):
     """This class keeps host rule information."""
 
     def __init__(self, ip, mac, port):
-       self.ip = ip
-       self.mac = mac
-       self.port = port
-       self.chain = 'neutron-openvswi-s' + port[:10]
+        self.ip = ip
+        self.mac = mac
+        self.port = port
+        self.chain = 'neutron-openvswi-s' + port[:10]
+
 
 class IptablesDriver(object):
     """This class provides API to update iptables rule."""
@@ -68,7 +69,7 @@ class IptablesDriver(object):
         for rule in temp_list:
             if (rule.ip == rule_info.get('ip') and
                 rule.mac == rule_info.get('mac') and
-                rule.port == rule_info.get('port')):
+                    rule.port == rule_info.get('port')):
                 LOG.debug('Removed rule info %s from the list' % rule_info)
                 self.rule_info.remove(rule)
 
@@ -76,24 +77,25 @@ class IptablesDriver(object):
         """Find a rule associated with a given mac."""
 
         ipt_cmd = ['iptables', '-t', 'filter', '-S']
-        cmdo = dsl.execute(ipt_cmd, root_helper=self._root_helper)
+        cmdo = dsl.execute(ipt_cmd, root_helper=self._root_helper,
+                           log_output=False)
         for o in cmdo.split('\n'):
             if mac in o.lower():
                 chain = o.split()[1]
-                LOG.info('Find %(chain)s for %(mac)s.' % ( {'chain': chain,
-                                                            'mac': mac}))
+                LOG.info('Find %(chain)s for %(mac)s.' % ({'chain': chain,
+                                                           'mac': mac}))
                 return chain
 
     def _find_rule_no(self, mac):
         """Find rule number associated with a given mac."""
 
         ipt_cmd = ['iptables', '-L', '--line-numbers']
-        cmdo = dsl.execute(ipt_cmd, self._root_helper)
+        cmdo = dsl.execute(ipt_cmd, self._root_helper, log_output=False)
         for o in cmdo.split('\n'):
             if mac in o.lower():
                 rule_no = o.split()[0]
-                LOG.info('Found rule %(rule)s for %(mac)s.' % ({'rule': rule_no,
-                                                               'mac': mac}))
+                LOG.info('Found rule %(rule)s for %(mac)s.' % (
+                    {'rule': rule_no, 'mac': mac}))
                 return rule_no
 
     def update_ip_rule(self, ip, mac):
@@ -103,14 +105,14 @@ class IptablesDriver(object):
         chain = self._find_chain_name(mac)
         if not rule_no or not chain:
             LOG.error('Failed to update ip rule for %(ip)s %(mac)s' % (
-                                    {'ip': ip, 'mac': mac}))
+                {'ip': ip, 'mac': mac}))
             return
 
         update_cmd = ['iptables', '-R', '%s' % chain, '%s' % rule_no,
                       '-s', '%s/32' % ip, '-m', 'mac', '--mac-source',
                       '%s' % mac, '-j', 'RETURN']
-        LOG.info('Execute command: %s' % (update_cmd))
-        dsl.execute(update_cmd, self._root_helper)
+        LOG.debug('Execute command: %s' % (update_cmd))
+        dsl.execute(update_cmd, self._root_helper, log_output=False)
 
     def enqueue_event(self, event):
         """Enqueue the given event.
@@ -124,7 +126,7 @@ class IptablesDriver(object):
             for rule in self.rule_info:
                 if (rule.mac == event.get('mac') and
                     rule.ip == event.get('ip') and
-                    rule.port == event.get('port')):
+                        rule.port == event.get('port')):
                     # Entry already exist in the list.
                     return
         self._iptq.put(event)
@@ -136,49 +138,54 @@ class IptablesDriver(object):
                                                'process_rule_info')
         return ipt_thrd
 
-    def updtate_iptables(self):
+    def update_iptables(self):
         """Update iptables based on information in the rule_info."""
 
-        LOG.info('Starting update_iptables...')
         # Read the iptables
         iptables_cmds = ['iptables-save', '-c']
-        all_rules = dsl.execute(iptables_cmds, root_helper=self._root_helper)
+        all_rules = dsl.execute(iptables_cmds, root_helper=self._root_helper,
+                                log_output=False)
 
-        LOG.debug('iptables rules: %s' % all_rules)
         # For each rule in rule_info update the rule if necessary.
         new_rules = []
+        is_modified = False
         for line in all_rules.split('\n'):
             new_line = line
-            for rule in self.rule_info:
-                if rule.mac in line.lower() and rule.chain in line.lower():
-                    newl = line.split()
-                    newl[4] = rule.ip + '/32'
-                    new_line = ' '.join(newl)
-                    LOG.info('Modified %s. New rule is %s' % (line, new_line))
+            line_content = line.split()
+            # The spoofing rule which includes mac and ip should have 11
+            # entries, and also -s option for ip address. Otherwise no rule
+            # will be modified.
+            if len(line_content) == 11 and '-s' in line_content:
+                for rule in self.rule_info:
+                    if (rule.mac in line.lower() and
+                        rule.chain in line.lower() and
+                            rule.ip not in line.lower()):
+                        ip_loc = line_content.index('-s')+1
+                        line_content[ip_loc] = rule.ip + '/32'
+                        new_line = ' '.join(line_content)
+                        LOG.debug('Modified %(old_rule)s. '
+                                  'New rule is %(new_rule)s.' % (
+                                      {'old_rule': line,
+                                       'new_rule': new_line}))
+                        is_modified = True
             new_rules.append(new_line)
 
-        if new_rules:
+        if is_modified and new_rules:
             # Updated all the rules. Now commit the new rules.
-            LOG.info('Applying new rules...')
             iptables_cmds = ['iptables-restore', '-c']
             dsl.execute(iptables_cmds, process_input='\n'.join(new_rules),
-                                              root_helper=self._root_helper)
+                        root_helper=self._root_helper, log_output=False)
 
     def process_rule_info(self):
         """Task responsible for processing event queue."""
 
-        new_event = False
         while True:
             try:
                 event = self._iptq.get(block=False)
                 LOG.debug('Dequeue event: %s.' % (event))
                 self.update_rule_entry(event)
-                new_event = True
             except Queue.Empty:
-                if new_event:
-                    LOG.info('Queue is empty now start updating iptables...')
-                    self.updtate_iptables()
-                    new_event = False
+                self.update_iptables()
                 time.sleep(1)
             except Exception:
                 LOG.exception('ERROR: failed to process queue')

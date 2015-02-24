@@ -11,11 +11,14 @@ LOG = logging.getLogger(__name__)
 # Default timeout for ovs-vsctl command
 DEFAULT_OVS_VSCTL_TIMEOUT = 10
 
+
 class InvalidInput():
     message = ("Invalid input for operation: %(error_message)s.")
 
+
 def is_valid_vlan_tag(vlan):
     return q_const.MIN_VLAN_TAG <= vlan <= q_const.MAX_VLAN_TAG
+
 
 def get_bridges(root_helper):
     args = ["ovs-vsctl", "--timeout=%d" % DEFAULT_OVS_VSCTL_TIMEOUT, "list-br"]
@@ -24,18 +27,20 @@ def get_bridges(root_helper):
     except Exception as e:
         LOG.error("Unable to retrieve bridges. Exception: %s", e)
 
+
 def is_patch(root_helper, port):
     args = ["ovs-vsctl", "--timeout=%d" % DEFAULT_OVS_VSCTL_TIMEOUT, "get",
             "Interface", port, "type"]
     try:
         output = execute(args, root_helper=root_helper).strip().split("\n")
-    except Exception as e:
+    except Exception:
         LOG.error("Unable to retrieve Interface type")
-        return False 
+        return False
     if 'patch' in output:
         return True
     else:
-        return False 
+        return False
+
 
 def get_peer(root_helper, port):
     args = ["ovs-vsctl", "--timeout=%d" % DEFAULT_OVS_VSCTL_TIMEOUT, "get",
@@ -43,10 +48,11 @@ def get_peer(root_helper, port):
     try:
         output = execute(args, root_helper=root_helper).strip().split("\n")
         output1 = output[0].split("=")[1].strip('}')
-    except Exception as e:
+    except Exception:
         LOG.error("Unable to retrieve Peer")
-        return None 
+        return None
     return output1
+
 
 def get_bridge_name_for_port_name_glob(root_helper, port_name):
     try:
@@ -54,9 +60,10 @@ def get_bridge_name_for_port_name_glob(root_helper, port_name):
                 "port-to-br", port_name]
         output = execute(args, root_helper=root_helper)
         return output
-    except RuntimeError as e:
+    except RuntimeError:
         LOG.error("Error Running vsctl for getting bridge name for portname")
         return False
+
 
 def port_exists_glob(root_helper, port_name):
     output = get_bridge_name_for_port_name_glob(root_helper, port_name)
@@ -66,13 +73,15 @@ def port_exists_glob(root_helper, port_name):
     else:
         return output, port_exists
 
+
 def delete_port_glob(root_helper, br_ex, port_name):
     try:
         args = ["ovs-vsctl", "--timeout=%d" % DEFAULT_OVS_VSCTL_TIMEOUT, "--",
                 "--if-exists", "del-port", br_ex, port_name]
         execute(args, root_helper=root_helper)
-    except RuntimeError as e:
+    except RuntimeError:
         LOG.error("Error Running vsctl for port delete")
+
 
 class BaseOVS(object):
 
@@ -99,14 +108,14 @@ class BaseOVS(object):
     def bridge_exists(self, bridge_name):
         try:
             self.run_vsctl(['br-exists', bridge_name], check_error=True)
-        except RuntimeError as e:
+        except RuntimeError:
             return False
         return True
 
     def get_bridge_name_for_port_name(self, port_name):
         try:
             return self.run_vsctl(['port-to-br', port_name], check_error=True)
-        except RuntimeError as e:
+        except RuntimeError:
             LOG.error("Error Running vsctl")
             return False
 
@@ -150,7 +159,7 @@ class OVSBridge(BaseOVS):
         full_args = ["ovs-ofctl", cmd, self.br_name] + args
         try:
             return execute(full_args, root_helper=self.root_helper,
-                                 process_input=process_input)
+                           process_input=process_input)
         except Exception as e:
             LOG.error("Unable to execute %(cmd)s. Exception: %(exception)s",
                       {'cmd': full_args, 'exception': e})
@@ -213,10 +222,12 @@ class OVSBridge(BaseOVS):
     def __exit__(self, exc_type, exc_value, exc_tb):
         self.destroy()
 
+
 def _subprocess_setup():
     # Python installs a SIGPIPE handler by default. This is usually not what
     # non-Python subprocesses expect.
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
 
 def subprocess_popen(args, stdin=None, stdout=None, stderr=None, shell=False,
                      env=None):
@@ -224,7 +235,8 @@ def subprocess_popen(args, stdin=None, stdout=None, stderr=None, shell=False,
                             stderr=stderr, preexec_fn=_subprocess_setup,
                             close_fds=True, env=env)
 
-def create_process(cmd, root_helper=None, addl_env=None):
+
+def create_process(cmd, root_helper=None, addl_env=None, log_output=True):
     """Create a process object for the given command.
 
     The return value will be a tuple of the process object and the
@@ -234,7 +246,7 @@ def create_process(cmd, root_helper=None, addl_env=None):
         cmd = shlex.split(root_helper) + cmd
     cmd = map(str, cmd)
 
-    LOG.info("Running command: %s", cmd)
+    log_output and LOG.info("Running command: %s", cmd)
     env = os.environ.copy()
     if addl_env:
         env.update(addl_env)
@@ -244,11 +256,13 @@ def create_process(cmd, root_helper=None, addl_env=None):
                            env=env)
     return obj, cmd
 
+
 def execute(cmd, root_helper=None, process_input=None, addl_env=None,
-            check_exit_code=True, return_stderr=False, log_fail_as_error=True):
+            check_exit_code=True, return_stderr=False, log_fail_as_error=True,
+            log_output=True):
     try:
         obj, cmd = create_process(cmd, root_helper=root_helper,
-                                  addl_env=addl_env)
+                                  addl_env=addl_env, log_output=log_output)
         _stdout, _stderr = (process_input and
                             obj.communicate(process_input) or
                             obj.communicate())
@@ -260,7 +274,7 @@ def execute(cmd, root_helper=None, process_input=None, addl_env=None,
         if obj.returncode and log_fail_as_error:
             LOG.error(m)
         else:
-            LOG.info(m)
+            log_output and LOG.info(m)
 
         if obj.returncode and check_exit_code:
             raise RuntimeError(m)
@@ -271,6 +285,7 @@ def execute(cmd, root_helper=None, process_input=None, addl_env=None,
         greenthread.sleep(0)
 
     return return_stderr and (_stdout, _stderr) or _stdout
+
 
 def _build_flow_expr_str(flow_dict, cmd):
     flow_expr_arr = []
