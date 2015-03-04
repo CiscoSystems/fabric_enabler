@@ -33,7 +33,7 @@ script0='sudo rm -f /tmp/uplink*'
 script0_1='cp %s/%s /tmp' % (src_dir, uplink_file)
 script1= 'sudo python %s/dfa_prepare_setup.py' % script_dir
 script1_1='touch %s/requirements.txt' % src_dir 
-script2='cd  %s;python setup.py build;python setup.py bdist_egg;  sudo python setup.py install' % src_dir
+script2='cd  %s;python setup.py build;python setup.py bdist_egg;  sudo -E python setup.py install' % src_dir
  
 script3='sudo stop fabric_enabler_agent'
 script4='sudo start fabric_enabler_agent'
