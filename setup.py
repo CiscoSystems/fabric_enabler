@@ -2,7 +2,7 @@
 
 PROJECT = 'openstack_fabric_enabler'
 
-VERSION = '0.1'
+VERSION = '1.0'
 
 from setuptools import setup, find_packages
 
