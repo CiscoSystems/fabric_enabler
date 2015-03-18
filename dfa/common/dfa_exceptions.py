@@ -18,6 +18,10 @@
 """Exceptions used by DFA enabler"""
 
 from neutron.common import exceptions
+from neutronclient.common import exceptions as ncexc
+
+# Neutronclient exceptions
+ConnectionFailed = ncexc.ConnectionFailed
 
 
 class NetworkNotFound(exceptions.NotFound):
@@ -36,7 +40,7 @@ class ConfigProfileFwdModeNotFound(exceptions.NotFound):
     """Config Profile forwarding mode cannot be found."""
 
     message = ("Forwarding Mode for network %(network_id)s"
-                " could not be found.")
+               " could not be found.")
 
 
 class ConfigProfileIdNotFound(exceptions.NotFound):

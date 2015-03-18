@@ -119,8 +119,13 @@ class DfaFailureRecovery(object):
             if (net.result == constants.CREATE_FAIL
                     and net.source.lower() == 'openstack'):
                 net_id = net.network_id
-                subnets = self.neutron_event.nclient.list_subnets(
-                    network_id=net_id).get('subnets')
+                try:
+                    subnets = self.neutron_event.nclient.list_subnets(
+                        network_id=net_id).get('subnets')
+                except dexc.ConnectionFailed:
+                    LOG.exception('Failed to get subnets list.')
+                    continue
+
                 for subnet in subnets:
                     tenant_name = self.get_project_name(subnet['tenant_id'])
                     snet = utils.dict_to_obj(subnet)

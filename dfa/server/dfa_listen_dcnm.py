@@ -1,13 +1,13 @@
 import json
-import socket
-import time
-
-# for AMQP
 import pika
+import socket
+import sys
+import time
 
 from dfa.common import dfa_logger as logging
 
 LOG = logging.getLogger(__name__)
+
 
 class DCNMListener(object):
     """This AMQP client class listens to DCNM's AMQP notification and
@@ -16,7 +16,7 @@ class DCNMListener(object):
     """
 
     def __init__(self, name, ip, user, password, pqueue=None,
-                 c_pri=100,d_pri=100):
+                 c_pri=100, d_pri=100):
         """Create a new instance of AMQP client.
 
         :param dict params: AMQP configuration parameters,
@@ -35,7 +35,8 @@ class DCNMListener(object):
         self._dcnm_exchange_name = 'DCNMExchange'
         self._dcnm_queue_name = socket.gethostname()
         # specify the key of interest.
-        key = 'success.cisco.dcnm.event.auto-config.organization.partition.network.*'
+        key = ('success.cisco.dcnm.event.auto-config.organization.'
+               'partition.network.*')
         self._conn = None
         self.consume_channel = None
         try:
@@ -44,38 +45,38 @@ class DCNMListener(object):
                 credentials = pika.PlainCredentials(self._user, self._pwd)
             # create connection, channel
             self._conn = pika.BlockingConnection(
-                                  pika.ConnectionParameters(
-                                                    host=self._server_ip,
-                                                    port=self._port,
-                                                    credentials=credentials))
+                pika.ConnectionParameters(host=self._server_ip,
+                                          port=self._port,
+                                          credentials=credentials))
 
             # create channels for consuming
             self.consume_channel = self._conn.channel()
 
             # declare vCD exchange
-            dcnm_exchange = self.consume_channel.exchange_declare(
-                                        exchange=self._dcnm_exchange_name,
-                                        exchange_type='topic',
-                                        durable=True,
-                                        auto_delete=False)
+            self.consume_channel.exchange_declare(
+                exchange=self._dcnm_exchange_name,
+                exchange_type='topic',
+                durable=True,
+                auto_delete=False)
 
             result = self.consume_channel.queue_declare(
-                                    queue=self._dcnm_queue_name,
-                                    durable=True, 
-                                    auto_delete=False)
+                queue=self._dcnm_queue_name, durable=True, auto_delete=False)
             self._dcnm_queue_name = result.method.queue
-            self.consume_channel.queue_bind(exchange=
-                                       self._dcnm_exchange_name,
-                                       queue=self._dcnm_queue_name,
-                                       routing_key=key)
+            self.consume_channel.queue_bind(
+                exchange=self._dcnm_exchange_name,
+                queue=self._dcnm_queue_name,
+                routing_key=key)
             # for info only
             msg_count = result.method.message_count
-            LOG.debug('The exchange %r queue %r has totally %d messages. ' % (
-                   self._dcnm_exchange_name, self._dcnm_queue_name, msg_count))
+            LOG.debug('The exchange %(exch)s queue %(que)s has totally '
+                      ' %(count)s messages.', {
+                          'exch': self._dcnm_exchange_name,
+                          'que': self._dcnm_queue_name,
+                          'count': msg_count})
 
             LOG.debug('DCNM Listener initialization done....')
-        except Exception as ex:
-            LOG.exception('Failed to initialize DCNMListener %s' % ex)
+        except:
+            LOG.exception('Failed to initialize DCNMListener.')
 
     def _cb_dcnm_msg(self, method, body):
         """ Callback function to process DCNM network creation/update/deletion
@@ -94,12 +95,8 @@ class DCNMListener(object):
         partition_keyword = 'auto-config.organization.partition'
         network_keyword = partition_keyword + '.network'
 
-        partition_create_key = partition_keyword + '.create'
-        partition_delete_key = partition_keyword + '.delete'
-
         network_create_key = network_keyword + '.create'
         network_update_key = network_keyword + '.update'
-        network_delete_key = network_keyword + '.delete'
         msg = json.loads(body)
         LOG.debug('_cb_dcnm_msg: RX message: %s' % msg)
 
@@ -107,16 +104,16 @@ class DCNMListener(object):
             LOG.debug("error, return")
             return
 
-        url=msg['link']
-        url_fields=url.split('/')
+        url = msg['link']
+        url_fields = url.split('/')
         pre_project_name = url_fields[4]
-        pre_partition_name=url_fields[6]
+        pre_partition_name = url_fields[6]
         pre_seg_id = url_fields[9]
         data = {"project_name": pre_project_name,
                 "partition_name": pre_partition_name,
                 "segmentation_id": pre_seg_id}
         if (network_create_key in method.routing_key) or (
-            network_update_key in method.routing_key):
+                network_update_key in method.routing_key):
             pri = self._create_pri
             event_type = 'dcnm.network.create'
 
@@ -124,9 +121,9 @@ class DCNMListener(object):
             pri = self._delete_pri
             event_type = 'dcnm.network.delete'
 
-        if (self._pq != None):
-           payload=(event_type, data)
-           self._pq.put((pri, time.ctime, payload))
+        if self._pq is not None:
+            payload = (event_type, data)
+            self._pq.put((pri, time.ctime, payload))
 
     def process_amqp_msgs(self):
         """Process AMQP queue messages.
@@ -139,14 +136,23 @@ class DCNMListener(object):
         LOG.info('Starting process_amqp_msgs...')
         while True:
             (mtd_fr, hdr_fr, body) = (None, None, None)
-            if self.consume_channel:
-                (mtd_fr, hdr_fr, body) = self.consume_channel.basic_get(
-                                                       self._dcnm_queue_name)
-            if mtd_fr:
-                # Queue has messages.
-                LOG.info('RX message: %s' % body)
-                self._cb_dcnm_msg(mtd_fr, body)
-                self.consume_channel.basic_ack(mtd_fr.delivery_tag)
-            else:
-                # Queue is empty.
-                time.sleep(1)
+            try:
+                if self.consume_channel:
+                    (mtd_fr, hdr_fr, body) = self.consume_channel.basic_get(
+                        self._dcnm_queue_name)
+                if mtd_fr:
+                    # Queue has messages.
+                    LOG.info('RX message: %s' % body)
+                    self._cb_dcnm_msg(mtd_fr, body)
+                    self.consume_channel.basic_ack(mtd_fr.delivery_tag)
+                else:
+                    # Queue is empty.
+                    time.sleep(1)
+            except:
+                exc_type, exc_value, exc_tb = sys.exc_info()
+                LOG.exception("Failed to read from queue: %(queue)s "
+                              "%(exc_type)s, %(exc_value)s, %(exc_tb)s.", {
+                                  'queue': self._dcnm_queue_name,
+                                  'exc_type': exc_type,
+                                  'exc_value': exc_value,
+                                  'exc_tb': exc_tb})

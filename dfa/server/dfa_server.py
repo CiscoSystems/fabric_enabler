@@ -600,10 +600,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                     body = {'network': {'name': updated_net_name, }}
                     dcnm_net = self.neutronclient.update_network(
                         net_id, body=body).get('network')
-                except Exception as e:  # TODO get the proper exception
+                except:
                     LOG.exception('Failed to update network '
-                                  '%(network)s. Reason %(err)s.' % (
-                                      {'network': dcnm_net, 'err': str(e)}))
+                                  '%(network)s.', {'network': dcnm_net})
                     return
 
             LOG.info('network_create_event: network %(name)s was created '
@@ -780,14 +779,13 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                 body=body).get('network')
             net_id = dcnm_net.get('id')
 
-        except Exception as e:  # TODO get the proper exception
+        except:
             # Failed to create network, do clean up.
             # Remove the entry from database and local cache.
             del self.network[net_id]
             self.delete_network_db(net_id)
             LOG.exception('dcnm_network_create_event: Failed to create '
-                          '%(network)s. Reason %(err)s.' % (
-                              {'network': body, 'err': str(e)}))
+                          '%(network)s.', {'network': body})
             return
 
         LOG.debug('dcnm_network_create_event: Created network %(network)s' % (
@@ -817,11 +815,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             # Update subnet cache.
             self.subnet[subnet_id] = {}
             self.subnet[subnet_id].update(body.get('subnet'))
-        except Exception as e:  # TODO get the proper exception
+        except:
             # Failed to create network, do clean up if necessary.
             LOG.exception('Failed to create subnet %(subnet)s for DCNM '
-                          'request. Error %(err)s' % (
-                              {'subnet': body['subnet'], 'err': str(e)}))
+                          'request.', {'subnet': body['subnet']})
 
         LOG.debug('dcnm_network_create_event: Created subnet %(subnet)s' % (
             body))
@@ -842,13 +839,12 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             del_net = self.network.pop(query_net.network_id)
             self.neutronclient.delete_network(query_net.network_id)
             self.delete_network_db(query_net.network_id)
-        except Exception as e:  # TODO get the proper exception
+        except:
             # Failed to delete network.
             # Put back the entry to the local cache???
             self.network[query_net.network_id] = del_net
             LOG.exception('dcnm_network_delete_event: Failed to delete '
-                          '%(network)s. Reason %(err)s.' % (
-                              {'network': query_net.name, 'err': str(e)}))
+                          '%(network)s.', {'network': query_net.name})
 
     def _make_vm_info(self, port, status):
         port_id = port.get('id')
@@ -1040,11 +1036,16 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         if not self.cfg.dcnm.dcnm_dhcp_leases:
             LOG.debug('DHCP lease file is not defined.')
             return
-        ssh_session = paramiko.SSHClient()
-        ssh_session.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh_session.connect(self.cfg.dcnm.dcnm_ip,
-                            username=self.cfg.dcnm.dcnm_user,
-                            password=self.cfg.dcnm.dcnm_password)
+        try:
+            ssh_session = paramiko.SSHClient()
+            ssh_session.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh_session.connect(self.cfg.dcnm.dcnm_ip,
+                                username=self.cfg.dcnm.dcnm_user,
+                                password=self.cfg.dcnm.dcnm_password)
+        except:
+            LOG.exception('Failed to establish connection with DCNM.')
+            return
+
         try:
             ftp_session = ssh_session.open_sftp()
             dhcpd_leases = ftp_session.file(self.cfg.dcnm.dcnm_dhcp_leases)
@@ -1065,11 +1066,12 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         """
         # TODO Move it to create port
         leases = None
-        instances = self.get_vms()
-        for vm in instances:
-            if vm.ip != '0.0.0.0' or not vm.host:
-                continue
+        req = dict(ip='0.0.0.0')
+        instances = self.get_vms_for_this_req(**req)
+        if instances is None:
+            return
 
+        for vm in instances:
             if not leases:
                 # For the first time finding the leases file.
                 leases = self._get_ip_leases()
@@ -1263,7 +1265,6 @@ def dfa_server():
         dfa = DfaServer(cfg)
         save_my_pid(cfg)
         dfa.create_threads()
-        LOG.debug('Done...')
         while True:
             time.sleep(constants.MAIN_INTERVAL)
             dfa.update_port_ip_address()
@@ -1275,10 +1276,9 @@ def dfa_server():
                 except Queue.Empty:
                     pass
                 else:
-                    emsg = 'Exception occured in %s thread. %s' % (
+                    emsg = 'Exception occurred in %s thread. %s' % (
                         trd.name, exc)
                     LOG.error(emsg)
-                    raise Exception(emsg)
             # Check on dfa agents
             cur_time = time.time()
             for agent, time_s in dfa.agents_status_table.iteritems():

@@ -178,7 +178,9 @@ class DFARESTClient(object):
                 "vrfProfileName": self.default_vrf_profile,
                 "vrfName": ':'.join((org_name, part_name)),
                 "dciId": dci_id,
-                "enableDCIExtension": "true" if dci_id and int(dci_id) != 0 else "false"}
+                "enableDCIExtension": ("true" if dci_id and int(dci_id) != 0
+                                       else "false")
+            }
             payload.update(extra_payload)
 
         return self._send_request(operation, url, payload, 'partition')
@@ -275,7 +277,7 @@ class DFARESTClient(object):
         """Return config profile list from DCNM."""
         profile_list = []
         these_profiles = []
-        these_profiles = self._config_profile_list()
+        these_profiles = self._config_profile_list() or []
         profile_list = [q for p in these_profiles for q in
                         [p.get('profileName')]]
         return profile_list
