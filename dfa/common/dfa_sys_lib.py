@@ -33,7 +33,7 @@ def is_patch(root_helper, port):
             "Interface", port, "type"]
     try:
         output = execute(args, root_helper=root_helper).strip().split("\n")
-    except Exception:
+    except Exception as e:
         LOG.error("Unable to retrieve Interface type")
         return False
     if 'patch' in output:
@@ -48,7 +48,7 @@ def get_peer(root_helper, port):
     try:
         output = execute(args, root_helper=root_helper).strip().split("\n")
         output1 = output[0].split("=")[1].strip('}')
-    except Exception:
+    except Exception as e:
         LOG.error("Unable to retrieve Peer")
         return None
     return output1
@@ -60,7 +60,7 @@ def get_bridge_name_for_port_name_glob(root_helper, port_name):
                 "port-to-br", port_name]
         output = execute(args, root_helper=root_helper)
         return output
-    except RuntimeError:
+    except RuntimeError as e:
         LOG.error("Error Running vsctl for getting bridge name for portname")
         return False
 
@@ -79,7 +79,7 @@ def delete_port_glob(root_helper, br_ex, port_name):
         args = ["ovs-vsctl", "--timeout=%d" % DEFAULT_OVS_VSCTL_TIMEOUT, "--",
                 "--if-exists", "del-port", br_ex, port_name]
         execute(args, root_helper=root_helper)
-    except RuntimeError:
+    except RuntimeError as e:
         LOG.error("Error Running vsctl for port delete")
 
 
@@ -108,14 +108,14 @@ class BaseOVS(object):
     def bridge_exists(self, bridge_name):
         try:
             self.run_vsctl(['br-exists', bridge_name], check_error=True)
-        except RuntimeError:
+        except RuntimeError as e:
             return False
         return True
 
     def get_bridge_name_for_port_name(self, port_name):
         try:
             return self.run_vsctl(['port-to-br', port_name], check_error=True)
-        except RuntimeError:
+        except RuntimeError as e:
             LOG.error("Error Running vsctl")
             return False
 
@@ -124,6 +124,7 @@ class BaseOVS(object):
 
 
 class OVSBridge(BaseOVS):
+
     def __init__(self, br_name, root_helper):
         super(OVSBridge, self).__init__(root_helper)
         self.br_name = br_name
@@ -299,7 +300,7 @@ def _build_flow_expr_str(flow_dict, cmd):
         flow_expr_arr.append("priority=%s" %
                              flow_dict.pop('priority', '1'))
     elif 'priority' in flow_dict:
-        msg = _("Cannot match priority on flow deletion or modification")
+        msg = "Cannot match priority on flow deletion or modification"
         raise InvalidInput(error_message=msg)
 
     if cmd != 'del':
