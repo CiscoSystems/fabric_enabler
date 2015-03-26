@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import platform
 import time
 import ConfigParser
 import cisco_scp
@@ -35,10 +36,33 @@ script1= 'sudo python %s/dfa_prepare_setup.py' % script_dir
 script1_1='touch %s/requirements.txt' % src_dir 
 script2='cd  %s;python setup.py build;python setup.py bdist_egg;  sudo -E python setup.py install' % src_dir
  
-script3='sudo stop fabric_enabler_agent'
-script4='sudo start fabric_enabler_agent'
+distr_name = platform.dist()[0].lower()
+if distr_name == 'ubuntu':
+    script3='sudo stop fabric_enabler_agent'
+    script4='sudo start fabric_enabler_agent'
+    stop_keystone = 'sudo service apache2 stop'
+    start_keystone = 'sudo service apache2 start'
+    stop_enabler_server = 'sudo stop fabric_enabler_server'
+    start_enabler_server = 'sudo start fabric_enabler_server'
+    get_pty = False
+else:
+    if distr_name == 'centos' or distr_name == 'redhat':
+        script3='sudo systemctl stop fabric_enabler_agent'
+        script4='sudo systemctl start fabric_enabler_agent'
+        stop_keystone = 'sudo systemctl stop httpd'
+        start_keystone = 'sudo systemctl start httpd'
+        stop_enabler_server = 'sudo systemctl stop fabric_enabler_server'
+        start_enabler_server = 'sudo systemctl start fabric_enabler_server'
+        get_pty = True
+    else:
+        print '%s distribution is not supported.' % distr_name
+        sys.exit(1)
+
+
 script5='sudo %s/run_lldpad.sh %s' % (script_dir, src_dir)
-script_list = [script0, script0_1,script1,script1_1, script2, script3, script4, script5]
+script_list = [script0, script0_1, script1, script1_1, script2, script3,
+script4, script5]
+
 neutron_restart_procs = [
     'neutron-server']
 def restart_neutron_processes():
@@ -46,7 +70,7 @@ def restart_neutron_processes():
     reg_exes = {}
     for proc in neutron_restart_procs:
         reg_exes[proc] = re.compile(
-            "^(?P<uid>\S+)\s+(?P<pid>\d+)\s+(?P<ppid>\d+).*python(?P<cmd>.*%s.*)"
+        "^(?P<uid>\S+)\s+(?P<pid>\d+)\s+(?P<ppid>\d+).*python(?P<cmd>.*%s.*)"
             % proc)
     ps_output, rc = run_cmd_line('ps -ef')
     for line in ps_output.splitlines():
@@ -157,7 +181,8 @@ def invoke_scripts(compute_host, compute_uplink, compute_user, compute_passwd):
     client = create_sshClient(compute_host,  compute_user, compute_passwd)
     for script in script_list:
       print "invoking script " + script + " on " + compute_host 
-      ssh_stdin, ssh_stdout, ssh_stderr = client.exec_command(script)
+      ssh_stdin, ssh_stdout, ssh_stderr = client.exec_command(script,
+                                                              get_pty=get_pty)
       ssh_stdin.write(compute_passwd)
       ssh_stdin.write('\n')
       for line in ssh_stdout:
@@ -234,16 +259,17 @@ if __name__ == '__main__':
        sys.exit(1)
     os.chdir("../")
 
-    if (input_compute_name==None):     
+    if (input_compute_name == None):
         setup_control()
         print "restarting keystone"
-        run_cmd_line('sudo service apache2 stop',check_result=False)
+        run_cmd_line(stop_keystone, check_result=False)
         time.sleep(5)
-        run_cmd_line('sudo service apache2 start',check_result=False)
+        run_cmd_line(start_keystone, check_result=False)
+
         time.sleep(10)
         restart_neutron_processes()
         time.sleep(10)
-        run_cmd_line('sudo stop fabric_enabler_server', check_result=False)
+        run_cmd_line(stop_enabler_server, check_result=False)
         time.sleep(5)
-        run_cmd_line('sudo start fabric_enabler_server' )
+        run_cmd_line(start_enabler_server)
     setup_compute(input_compute_name, input_uplink)

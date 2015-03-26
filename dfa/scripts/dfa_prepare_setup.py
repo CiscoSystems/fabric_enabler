@@ -19,10 +19,11 @@
 
 import ConfigParser
 import commands
-import sys
 import optparse
 import os
+import platform
 import re
+import sys
 
 CONF_TMP_FILE = '%s_conf.new'
 NEUTRON = 'neutron'
@@ -35,6 +36,18 @@ conf_file_list = [
 ]
 default_path = '/opt/stack,/etc/neutron,/etc/keystone'
 dfa_cfg_file = '/etc/enabler_conf.ini'
+
+dist_data = {
+    'ubuntu': {'init_dir': '/etc/init/',
+               'server_conf': 'fabric_enabler_server.conf',
+               'agent_conf': 'fabric_enabler_agent.conf'},
+    'centos': {'init_dir': '/usr/lib/systemd/system/',
+               'server_conf': 'fabric_enabler_server.service',
+               'agent_conf': 'fabric_enabler_agent.service'},
+    'redhat': {'init_dir': '/usr/lib/systemd/system/',
+               'server_conf': 'fabric_enabler_server.service',
+               'agent_conf': 'fabric_enabler_agent.service'},
+}
 
 
 def get_mysql_credentials(cfg_file):
@@ -188,17 +201,30 @@ def copy_init_conf_files(node):
     # copy fabric_enabler_server.conf and fabric_enabler_agent.conf
     # to /etc/init.
     path = 'openstack_fabric_enabler/dfa/scripts/'
+    dist = platform.dist()[0].lower()
+    if dist not in dist_data:
+        print 'This %s Linux distribution is not supported.' % dist
+        sys.exit(1)
+
+    init_dir = dist_data[dist].get('init_dir')
     if node == 'control':
-        conf_fn = 'fabric_enabler_server.conf'
+        conf_fn = dist_data[dist].get('server_conf')
     else:
-        conf_fn = 'fabric_enabler_agent.conf'
+        conf_fn = dist_data[dist].get('agent_conf')
         uplink_script = 'openstack_fabric_enabler/dfa/agent/detect_uplink.sh'
         cmd2 = 'sudo cp %s /usr/local/bin' % uplink_script
         print cmd2
-        commands.getoutput(cmd2)
-    cmd = 'sudo cp %s /etc/init' % (path + conf_fn)
+        outstr = commands.getoutput(cmd2)
+        print 'output for %s: %s' % (cmd2, outstr)
+    cmd = 'sudo cp %s %s' % ((path + conf_fn), init_dir)
     print cmd
-    commands.getoutput(cmd)
+    outstr = commands.getoutput(cmd)
+    print 'output for %s: %s' % (cmd, outstr)
+
+    if dist == 'centos' or dist == 'redhat':
+        cmd3 = 'sudo systemctl enable %s' % conf_fn
+        print cmd3
+        commands.getoutput(cmd3)
 
 
 def copy_dfa_cfg():
@@ -210,7 +236,6 @@ def copy_dfa_cfg():
     cmd = 'sudo cp %s /etc/' % (path + dfa_cfg)
     print cmd
     commands.getoutput(cmd)
-
 
 usage = ('\n'
          'python dfa_prepare_setup.py --dir-path filepath1[,filepath2,...]'
