@@ -157,6 +157,20 @@ class OVSNeutronVdp(object):
         # Reason for not removing it is the same as given in function below.
         # ip_lib.IPDevice(lldp_ovs_veth_str, self.root_helper).link.delete()
 
+    def gen_veth_str(self, const_str, intf_str):
+        '''Generate a veth string
+
+        Concatenates the constant string with remaining available length
+        of interface string from trailing position
+        '''
+        avl_len = constants.MAX_VETH_NAME - len(const_str)
+        if avl_len <= 0:
+            LOG.error("veth string name too short")
+            raise dfae.DfaAgentFailed(reason="Veth Unavailable")
+        start_pos = len(intf_str) - avl_len
+        veth_str = const_str + intf_str[start_pos:]
+        return veth_str
+
     def setup_lldpad_ports(self):
         '''Setup the flows for passing LLDP/VDP frames in OVS.'''
         # Creating the physical bridge and setting up patch ports is done by
@@ -177,7 +191,15 @@ class OVSNeutronVdp(object):
             raise dfae.DfaAgentFailed(reason="Ports Unconfigured")
 
         lldp_ovs_veth_str = constants.LLDPAD_OVS_VETH_PORT + self.uplink
+        if len(lldp_ovs_veth_str) > constants.MAX_VETH_NAME:
+            lldp_ovs_veth_str = self.gen_veth_str(
+                constants.LLDPAD_OVS_VETH_PORT,
+                self.uplink)
         lldp_loc_veth_str = constants.LLDPAD_LOC_VETH_PORT + self.uplink
+        if len(lldp_loc_veth_str) > constants.MAX_VETH_NAME:
+            lldp_loc_veth_str = self.gen_veth_str(
+                constants.LLDPAD_LOC_VETH_PORT,
+                self.uplink)
         ip_wrapper = ip_lib.IPWrapper(self.root_helper)
         self.delete_vdp_flows()
         br.delete_port(lldp_ovs_veth_str)
