@@ -147,7 +147,7 @@ class DCNMListener(object):
                     self.consume_channel.basic_ack(mtd_fr.delivery_tag)
                 else:
                     # Queue is empty.
-                    time.sleep(1)
+                    self._conn.sleep(1)
             except:
                 exc_type, exc_value, exc_tb = sys.exc_info()
                 LOG.exception("Failed to read from queue: %(queue)s "

@@ -1044,6 +1044,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                                 password=self.cfg.dcnm.dcnm_password)
         except:
             LOG.exception('Failed to establish connection with DCNM.')
+            if ssh_session:
+                ssh_session.close()
             return
 
         try:
@@ -1079,7 +1081,6 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                     # File does not exist.
                     return
 
-            LOG.info('Looking for IP address for %(mac)s.' % ({'mac': vm.mac}))
             for line in leases:
                 if line.startswith('lease') and line.endswith('{\n'):
                     ip_addr = line.split()[1]
