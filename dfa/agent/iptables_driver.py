@@ -29,7 +29,7 @@ class IpMacPort(object):
 
     def __init__(self, ip, mac, port):
         self.ip = ip
-        self.mac = mac
+        self.mac = mac and mac.lower()
         self.port = port
         self.chain = 'neutron-openvswi-s' + port[:10]
 
@@ -124,11 +124,17 @@ class IptablesDriver(object):
         LOG.debug('Enqueue iptable event %s.' % event)
         if event.get('status') == 'up':
             for rule in self.rule_info:
-                if (rule.mac == event.get('mac') and
-                    rule.ip == event.get('ip') and
+                LOG.debug('enqueue_event: Entry already exist in the list.')
+                if (rule.mac == event.get('mac').lower() and
                         rule.port == event.get('port')):
                     # Entry already exist in the list.
-                    return
+                    if rule.ip != event.get('ip'):
+                        LOG.debug('enqueue_event: Only updating IP from %s'
+                                  ' to %s.' % (rule.ip, event.get('ip')))
+                        # Only update the IP address if it is different.
+                        rule.ip = event.get('ip')
+                return
+
         self._iptq.put(event)
 
     def create_thread(self):
@@ -137,6 +143,14 @@ class IptablesDriver(object):
         ipt_thrd = utils.EventProcessingThread('iptables', self,
                                                'process_rule_info')
         return ipt_thrd
+
+    def _is_ip_in_rule(self, ip, rule):
+        try:
+            ip_loc = rule.index('-s')+1
+            rule_ip = rule[ip_loc].split('/')[0]
+            return ip == rule_ip
+        except:
+            return False
 
     def update_iptables(self):
         """Update iptables based on information in the rule_info."""
@@ -156,10 +170,11 @@ class IptablesDriver(object):
             # entries, and also -s option for ip address. Otherwise no rule
             # will be modified.
             if len(line_content) == 11 and '-s' in line_content:
-                for rule in self.rule_info:
+                tmp_rule_info = list(self.rule_info)
+                for rule in tmp_rule_info:
                     if (rule.mac in line.lower() and
-                        rule.chain in line.lower() and
-                            rule.ip not in line.lower()):
+                        rule.chain.lower() in line.lower() and
+                            not self._is_ip_in_rule(rule.ip, line_content)):
                         ip_loc = line_content.index('-s')+1
                         line_content[ip_loc] = rule.ip + '/32'
                         new_line = ' '.join(line_content)
