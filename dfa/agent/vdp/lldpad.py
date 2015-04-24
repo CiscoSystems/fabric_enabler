@@ -164,6 +164,11 @@ class LldpadDriver(object):
                     oui_id = loui_dict.get('oui_id')
                     oui_data = loui_dict.get('oui_data')
                 with self.mutex_lock:
+                    # VLAN of 0 should be used. This is because a query is
+                    # first done to lldpad. If it returns 0, it should be
+                    # queried from the switch. It you send a assoc to switch
+                    # specifying the VLAN, it may be stale which is wrong.
+                    # lldpad sending right VLAN in keepalives is ok.
                     if key in self.vdp_vif_map:
                         LOG.debug("Sending Refresh for VSI %s" % lvdp_dict)
                         vdp_vlan = self.send_vdp_assoc(
@@ -175,8 +180,8 @@ class LldpadDriver(object):
                             filter_frmt=lvdp_dict.get('filter_frmt'),
                             gid=lvdp_dict.get('gid'),
                             mac=lvdp_dict.get('mac'),
-                            vlan=lvdp_dict.get('vdp_vlan'),
-                            oui_id=oui_id, oui_data=oui_data, sw_resp=True)
+                            vlan=0, oui_id=oui_id, oui_data=oui_data,
+                            sw_resp=True)
                 # check validity.
                 if not utils.is_valid_vlan_tag(vdp_vlan):
                     emsg = "Returned vlan %(vlan)s is invalid."
@@ -240,7 +245,7 @@ class LldpadDriver(object):
         :param vsw_cb_data: Callback data for the app.
         '''
         if port_uuid in self.vdp_vif_map:
-            LOG.debug("Not Storing VDP VSI MAC %s UUID %s" %
+            LOG.debug("VDP VSI Already present MAC %s UUID %s" %
                       (mac, vsiid))
         if new_network:
             vdp_vlan = reply
@@ -464,11 +469,6 @@ class LldpadDriver(object):
             return
         oui_cmd_str = self.gen_oui_str(vdp_key_str['oui_list'])
         if sw_resp:
-            # If filter is not VID and if VLAN is 0, Query for the TLV first,
-            # if found VDP will return the VLAN. Add support for this once
-            # vdptool has the support for querying exact VSI filters
-            # fixme(padkrish)
-
             reply = self.run_vdptool(["-T", "-i", self.port_name, "-W",
                                       "-V", mode, "-c", vdp_key_str['mode'],
                                       "-c", vdp_key_str['mgrid'], "-c",
@@ -498,6 +498,7 @@ class LldpadDriver(object):
                 return constants.INVALID_VLAN
         except Exception:
             LOG.error("Incorrect Reply,no mode information found: %s" % reply)
+            return constants.INVALID_VLAN
         try:
             f_ind = reply.index("filter = ")
         except Exception:
