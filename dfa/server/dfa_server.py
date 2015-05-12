@@ -46,7 +46,7 @@ from dfa.server import dfa_events_handler as deh
 from dfa.server import dfa_fail_recovery as dfr
 from dfa.server import dfa_instance_api as dfa_inst
 from dfa.server import dfa_listen_dcnm as dfa_dcnm
-
+from dfa.server.services.firewall.native import fw_mgr as fw_native
 
 LOG = logging.getLogger(__name__)
 
@@ -186,7 +186,8 @@ class RpcCallBacks(object):
         return 0
 
 
-class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
+class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
+                fw_native.FwMgr):
 
     """Process keystone and neutron events.
 
@@ -195,11 +196,12 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
     """
 
     def __init__(self, cfg):
+        self.events = {}
         super(DfaServer, self).__init__(cfg)
         self._cfg = cfg
         self._host = platform.node()
         self.server = None
-        self.events = {
+        self.events.update({
             'identity.project.created': self.project_create_event,
             'identity.project.deleted': self.project_delete_event,
             'identity.project.updated': self.project_update_event,
@@ -216,7 +218,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             'agent.request.uplink': self.request_uplink_info,
             'cli.static_ip.set': self.set_static_ip_address,
             'agent.vm_result.update': self.vm_result_update,
-        }
+        })
         self.project_info_cache = {}
         self.network = {}
         self.subnet = {}
@@ -247,6 +249,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         dcnm_amqp_user = cfg.dcnm.dcnm_amqp_user
         dcnm_password = cfg.dcnm.dcnm_password
         self.dcnm_client = cdr.DFARESTClient(cfg)
+        self.populate_cfg_dcnm(cfg, self.dcnm_client)
 
         self.keystone_event = deh.EventsHandler('keystone', self.pqueue,
                                                 self.PRI_HIGH_START,

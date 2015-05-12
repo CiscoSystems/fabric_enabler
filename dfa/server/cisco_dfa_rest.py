@@ -73,6 +73,9 @@ class DFARESTClient(object):
         self._network_url = ('http://%s/rest/auto-config/organizations' %
                              self._ip + '/%s/partitions/%s/networks/'
                              'segment/%s')
+        self._network_mob_url = ('http://%s/rest/auto-config/organizations' %
+                                 self._ip + '/%s/partitions/%s/networks/'
+                                 'vlan/%s/mobility-domain/%s')
         self._login_url = 'http://%s/rest/logon' % (self._ip)
         self._logout_url = 'http://%s/rest/logout' % (self._ip)
         self._exp_time = 100000
@@ -154,20 +157,26 @@ class DFARESTClient(object):
 
         return self._send_request('POST', url, payload, 'organization')
 
-    def _create_or_update_partition(self, org_name, part_name, dci_id, desc,
-                                    operation='POST'):
+    def _create_or_update_partition(self, org_name, part_name, dci_id,
+                                    desc, vrf_prof=None,
+                                    service_node_ip=None, operation='POST'):
         """Send create or update partition request to the DCNM.
 
         :param org_name: name of organization
         :param part_name: name of partition
         :param desc: description of partition
         """
+        if part_name is None:
+            part_name = self._part_name
+        if vrf_prof is None:
+            vrf_prof = self.default_vrf_profile
         url = ((self._create_part_url % (org_name)) if operation == 'POST' else
                self._update_part_url % (org_name, part_name))
 
         payload = {
             "partitionName": part_name,
             "description": part_name if len(desc) == 0 else desc,
+            "serviceNodeIpAddress": service_node_ip,
             "organizationName": org_name}
 
         # Check the DCNM version and find out whether it is need to have
@@ -175,7 +184,7 @@ class DFARESTClient(object):
         if self.is_iplus:
             # Need to add extra payload for the new version.
             extra_payload = {
-                "vrfProfileName": self.default_vrf_profile,
+                "vrfProfileName": vrf_prof,
                 "vrfName": ':'.join((org_name, part_name)),
                 "dciId": dci_id,
                 "enableDCIExtension": "true" if dci_id and int(dci_id) != 0 else "false"}
@@ -207,7 +216,13 @@ class DFARESTClient(object):
         org_name = network_info.get('organizationName', '')
         part_name = network_info.get('partitionName', '')
         segment_id = network_info['segmentId']
-        url = self._network_url % (org_name, part_name, segment_id)
+        if 'mobDomainName' in network_info:
+            vlan_id = network_info['vlanId']
+            mob_dom_name = network_info['mobDomainName']
+            url = self._network_mob_url % (org_name, part_name, vlan_id,
+                                           mob_dom_name)
+        else:
+            url = self._network_url % (org_name, part_name, segment_id)
         return self._send_request('DELETE', url, '', 'network')
 
     def _get_network(self, network_info):
@@ -368,6 +383,77 @@ class DFARESTClient(object):
             LOG.error("Failed to create %s network in DCNM.", network_info)
             raise dexc.DfaClientRequestFailed(reason=res)
 
+    def create_service_network(self, tenant_name, network, subnet):
+        """Create network on the DCNM.
+
+        :param tenant_name: name of tenant the network belongs to
+        :param network: network parameters
+        :param subnet: subnet parameters of the network
+        """
+        network_info = {}
+        subnet_ip_mask = subnet.cidr.split('/')
+        gw_ip = subnet.gateway_ip
+        part_name = network.part_name
+        if not part_name:
+            part_name = self._part_name
+        if network.mob_domain:
+            mob_domain_name = network.mob_domain_name
+            vlan_id = str(network.segmentation_id)
+            seg_str = ""
+            # Specify a seg ID tomorrow TODO
+            seg_id = 0
+        else:
+            seg_id = str(network.segmentation_id)
+            vlan_id = '0'
+            mob_domain_name = None
+            seg_str = "$segmentId=" + seg_id
+        cfg_args = [
+            seg_str,
+            "$netMaskLength=" + subnet_ip_mask[1],
+            "$gatewayIpAddress=" + gw_ip,
+            "$networkName=" + network.name,
+            "$vlanId=" + vlan_id,
+            "$vrfName=" + tenant_name + ':' + part_name
+        ]
+        cfg_args = ';'.join(cfg_args)
+
+        ip_range = ','.join(["%s-%s" % (p['start'], p['end']) for p in
+                             subnet.allocation_pools])
+
+        dhcp_scopes = {'ipRange': ip_range,
+                       'subnet': subnet.cidr,
+                       'gateway': gw_ip}
+
+        network_info = {"vlanId": vlan_id,
+                        "mobilityDomainId": mob_domain_name,
+                        "profileName": network.config_profile,
+                        "networkName": network.name,
+                        "configArg": cfg_args,
+                        "organizationName": tenant_name,
+                        "partitionName": part_name,
+                        "description": network.name,
+                        "dhcpScope": dhcp_scopes}
+        if seg_id:
+            network_info["segmentId"] = seg_id
+        if self.is_iplus:
+            # Need to add the vrf name to the network info
+            prof = self._config_profile_get(network.config_profile)
+            if prof and prof.get('profileSubType') == 'network:universal':
+                # For universal profile vrf has to e organization:partition
+                network_info["vrfName"] = ':'.join((tenant_name, part_name))
+            else:
+                # Otherwise, it should be left empty.
+                network_info["vrfName"] = ""
+
+        LOG.debug("Creating %s network in DCNM.", network_info)
+
+        res = self._create_network(network_info)
+        if res and res.status_code in self._resp_ok:
+            LOG.debug("Created %s network in DCNM.", network_info)
+        else:
+            LOG.error("Failed to create %s network in DCNM.", network_info)
+            raise dexc.DfaClientRequestFailed(reason=res)
+
     def delete_network(self, tenant_name, network):
         """Delete network on the DCNM.
 
@@ -379,6 +465,42 @@ class DFARESTClient(object):
         network_info = {
             'organizationName': tenant_name,
             'partitionName': self._part_name,
+            'segmentId': seg_id,
+        }
+        LOG.debug("Deleting %s network in DCNM.", network_info)
+
+        res = self._delete_network(network_info)
+        if res and res.status_code in self._resp_ok:
+            LOG.debug("Deleted %s network in DCNM.", network_info)
+        else:
+            LOG.error("Failed to delete %s network in DCNM.", network_info)
+            raise dexc.DfaClientRequestFailed(reason=res)
+
+    def delete_service_network(self, tenant_name, network):
+	"""Delete network on the DCNM.
+
+        :param tenant_name: name of tenant the network belongs to
+        :param network: object that contains network parameters
+        """
+
+        network_info = {}
+        part_name = network.part_name
+        if not part_name:
+            part_name = self._part_name
+        if network.mob_domain_name:
+            mob_domain_name = network.mob_domain_name
+            vlan_id = str(network.segmentation_id)
+            seg_id = '0'
+        else:
+            seg_id = str(network.segmentation_id)
+            vlan_id = '0'
+            mob_domain_name = None
+        seg_id = network.segmentation_id
+        network_info = {
+            'organizationName': tenant_name,
+            'partitionName': part_name,
+            'mobDomainName': mob_domain_name,
+            'vlanId': vlan_id,
             'segmentId': seg_id,
         }
         LOG.debug("Deleting %s network in DCNM.", network_info)
@@ -413,6 +535,20 @@ class DFARESTClient(object):
                            'res': res}))
             raise dexc.DfaClientRequestFailed(reason=res)
 
+    def delete_partition(self, org_name, partition_name):
+        """Send partition delete request to DCNM.
+
+        :param partition_name: name of partition to be deleted
+        """
+        res = self._delete_partition(org_name, partition_name)
+        if res and res.status_code in self._resp_ok:
+            LOG.debug("Deleted %s partition in DCNM.", partition_name)
+        else:
+            LOG.error("Failed to delete %(part)s partition in DCNM."
+                      "Response: %(res)s",
+                      ({'part': partition_name, 'res': res}))
+            raise dexc.DfaClientRequestFailed(reason=res)
+
     def create_project(self, org_name, part_name, dci_id, desc=None):
         """Create project on the DCNM.
 
@@ -428,16 +564,11 @@ class DFARESTClient(object):
                       "Response: %(res)s", ({'org': org_name, 'res': res}))
             raise dexc.DfaClientRequestFailed(reason=res)
 
-        res = self._create_or_update_partition(org_name, part_name,
-                                               dci_id, desc)
-        if res and res.status_code in self._resp_ok:
-            LOG.debug("Created %s partition in DCNM.", part_name)
-        else:
-            LOG.error("Failed to create %(part)s partition in DCNM."
-                      "Response: %(res)s", ({'part': part_name, 'res': res}))
-            raise dexc.DfaClientRequestFailed(reason=res)
+        self.create_partition(org_name, part_name, dci_id,
+                              self.default_vrf_profile, desc=desc)
 
-    def update_project(self, org_name, part_name, dci_id, desc=None):
+    def update_project(self, org_name, part_name, dci_id, service_node_ip=None,
+                       vrf_prof=None, desc=None):
         """Update project on the DCNM.
 
         :param org_name: name of organization to be created
@@ -445,11 +576,36 @@ class DFARESTClient(object):
         """
         desc = desc or org_name
         res = self._create_or_update_partition(org_name, part_name, dci_id,
-                                               desc, operation='PUT')
+                                               desc,
+                                               service_node_ip=service_node_ip,
+                                               vrf_prof=vrf_prof,
+                                               operation='PUT')
         if res and res.status_code in self._resp_ok:
             LOG.debug("Update %s partition in DCNM.", part_name)
         else:
             LOG.error("Failed to update %(part)s partition in DCNM."
+                      "Response: %(res)s", ({'part': part_name, 'res': res}))
+            raise dexc.DfaClientRequestFailed(reason=res)
+
+    def create_partition(self, org_name, part_name, dci_id, vrf_prof,
+                         service_node_ip=None, desc=None):
+        """Create partition on the DCNM.
+
+        :param org_name: name of organization to be created
+        :param part_name: name of partition to be created
+        :param dci_id: DCI ID
+        :vrf_prof: VRF profile for the partition
+        :param desc: string that describes organization
+        """
+        desc = desc or org_name
+        res = self._create_or_update_partition(org_name, part_name,
+                                               dci_id, desc,
+                                               service_node_ip=service_node_ip,
+                                               vrf_prof=vrf_prof)
+        if res and res.status_code in self._resp_ok:
+            LOG.debug("Created %s partition in DCNM.", part_name)
+        else:
+            LOG.error("Failed to create %(part)s partition in DCNM."
                       "Response: %(res)s", ({'part': part_name, 'res': res}))
             raise dexc.DfaClientRequestFailed(reason=res)
 

@@ -33,6 +33,9 @@ setup(
             'fabric_enabler_agent = dfa.dfa_enabler_agent:dfa_agent',
             'fabric_enabler_cli = dfa.dfa_cli:dfa_cli',
         ],
+        'services.firewall.native.drivers': [
+            'phy_asa = dfa.server.services.firewall.native.drivers.phy_asa:PhyAsa',
+        ]
     },
     zip_safe=False,
 )

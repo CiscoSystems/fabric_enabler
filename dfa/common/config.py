@@ -20,6 +20,7 @@ from oslo.config import cfg
 import sys
 
 from dfa.agent.vdp import lldpad_constants as vdp_const
+import dfa.server.services.firewall.native.fw_constants as fw_const
 from dfa.common import utils
 
 
@@ -39,6 +40,26 @@ default_vdp_opts = {
         'hints': 'none',
         'filter': vdp_const.VDP_FILTER_GIDMACVID,
         'vdp_sync_timeout': vdp_const.VDP_SYNC_TIMEOUT,
+    },
+}
+
+default_firewall_opts = {
+    'firewall': {
+        'device': fw_const.DEVICE,
+        'fw_auto_serv_nwk_create': fw_const.AUTO_NWK_CREATE,
+        'fw_service_vlan_id_min': fw_const.VLAN_ID_MIN,
+        'fw_service_vlan_id_max': fw_const.VLAN_ID_MAX,
+        'mob_domain_name': fw_const.MOB_DOMAIN_NAME,
+        'fw_service_host_profile': fw_const.HOST_PROF,
+        'fw_service_host_fwd_mode': fw_const.HOST_FWD_MODE,
+        'fw_service_part_vrf_profile': fw_const.PART_PROF,
+        'fw_service_ext_profile': fw_const.EXT_PROF,
+        'fw_service_ext_fwd_mode': fw_const.EXT_FWD_MODE,
+        'fw_service_in_ip_start': fw_const.IN_IP_START,
+        'fw_service_in_ip_end': fw_const.IN_IP_END,
+        'fw_service_out_ip_start': fw_const.OUT_IP_START,
+        'fw_service_out_ip_end': fw_const.OUT_IP_END,
+        'fw_service_dummy_ip_subnet': fw_const.DUMMY_IP_SUBNET,
     },
 }
 
@@ -92,6 +113,7 @@ default_opts_list = [
     default_sys_opts,
     default_dcnm_opts,
     default_notify_opts,
+    default_firewall_opts,
 ]
 
 

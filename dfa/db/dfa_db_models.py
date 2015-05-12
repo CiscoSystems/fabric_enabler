@@ -88,6 +88,7 @@ class DfaDBMixin(object):
 
     def __init__(self, cfg):
         # Configure database.
+        super(DfaDBMixin, self).__init__(cfg)
         db.configure_db(cfg)
 
     def add_project_db(self, pid, name, dci_id, result):
