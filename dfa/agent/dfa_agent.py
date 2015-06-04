@@ -109,7 +109,7 @@ class DfaAgent(object):
         # TODO read it from config.
         br_int = 'br-int'
         br_ext = 'br-ethd'
-        root_helper = 'sudo'
+        root_helper = self._cfg.sys.root_helper
         self._vdpm = vdpm.VdpMgr(br_int, br_ext, root_helper, self.clnt,
                                  thishost)
         self.pool = eventlet.GreenPool()

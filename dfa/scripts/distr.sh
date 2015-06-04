@@ -52,7 +52,7 @@ if [ "$name" == centos ] || [ "$name" == "\"centos\"" ]
 then
     echo "centos"
 fi
-if [ "$name" == redhat ] || [ "$name" == "\"redhat\"" ]
+if [ "$name" == rhel ] || [ "$name" == "\"rhel\"" ]
 then
     echo "redhat"
 fi

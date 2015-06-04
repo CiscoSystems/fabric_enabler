@@ -19,10 +19,162 @@
 import sqlalchemy as sa
 import sqlalchemy.orm.exc as orm_exc
 
+from oslo.db import exception as db_exc
+from six import moves
+
 from dfa.common import dfa_logger as logging
 import dfa_db_api as db
 
 LOG = logging.getLogger(__name__)
+
+DB_MAX_RETRIES = 10
+
+
+class DfaSegmentatationId(db.Base):
+    """Represents DFA segmentation ID."""
+
+    __tablename__ = 'segmentation_id'
+
+    segmentation_id = sa.Column(sa.Integer, nullable=False, primary_key=True,
+                                autoincrement=False)
+    allocated = sa.Column(sa.Boolean, nullable=False, default=False)
+
+
+class DfaSegmentTypeDriver(object):
+
+    def __init__(self, segid_min, segid_max):
+        self.seg_id_ranges = []
+        self.seg_id_ranges.append((segid_min, segid_max))
+        self._seg_id_allocations()
+
+    def _allocate_specified_segment(self, session, seg_id):
+        """Allocate specified segment.
+
+        If segment exists, then try to allocate it and return db object
+        If segment does not exists, then try to create it and return db object
+        If allocation/creation failed, then return None
+        """
+        try:
+            with session.begin(subtransactions=True):
+                alloc = (session.query(DfaSegmentatationId).filter_by(
+                    segmentation_id=seg_id).first())
+                if alloc:
+                    if alloc.allocated:
+                        # Segment already allocated
+                        return
+                    else:
+                        # Segment not allocated
+                        count = (session.query(DfaSegmentatationId).
+                                 filter_by(allocated=False,
+                                           segmentation_id=seg_id).update(
+                                               {"allocated": True}))
+                        if count:
+                            return alloc
+
+                # Segment to create or already allocated
+                alloc = DfaSegmentatationId(segmentation_id=seg_id,
+                                            allocated=True)
+                session.add(alloc)
+
+        except db_exc.DBDuplicateEntry:
+            # Segment already allocated (insert failure)
+            alloc = None
+
+        return alloc
+
+    def _allocate_segment(self, session):
+        """Allocate segment from pool.
+
+        Return allocated db object or None.
+        """
+
+        with session.begin(subtransactions=True):
+            select = (session.query(DfaSegmentatationId).filter_by(
+                allocated=False))
+
+            # Selected segment can be allocated before update by someone else,
+            # We retry until update success or DB_MAX_RETRIES retries
+            for attempt in range(1, DB_MAX_RETRIES + 1):
+                alloc = select.first()
+                if not alloc:
+                    # No resource available
+                    return
+
+                count = (session.query(DfaSegmentatationId).
+                         filter_by(segmentation_id=alloc.segmentation_id,
+                         allocated=False).update({"allocated": True}))
+                if count:
+                    return alloc
+
+        LOG.error('ERROR: Failed to allocate segment.')
+
+    def _reserve_provider_segment(self, session, seg_id=None):
+
+        if seg_id is None:
+            alloc = self._allocate_segment(session)
+            if not alloc:
+                LOG.error('ERROR: No segment is available')
+                return
+        else:
+            alloc = self._allocate_specified_segment(session, seg_id)
+            if not alloc:
+                LOG.error('ERROR: Segmentation_id %s is in use.' % seg_id)
+                return
+
+        return alloc.segmentation_id
+
+    def release_segmentation_id(self, seg_id):
+
+        inside = any(lo <= seg_id <= hi for lo, hi in self.seg_id_ranges)
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            query = session.query(DfaSegmentatationId).filter_by(
+                segmentation_id=seg_id)
+            if inside:
+                count = query.update({"allocated": False})
+                if count:
+                    LOG.debug("Releasing segmentation id %s to pool" % seg_id)
+            else:
+                count = query.delete()
+                if count:
+                    LOG.debug("Releasing segmentation_id %s outside pool" % (
+                        seg_id))
+
+        if not count:
+            LOG.debug("segmentation_id %s not found" % seg_id)
+
+    def _seg_id_allocations(self):
+
+        seg_ids = set()
+        for seg_id_range in self.seg_id_ranges:
+            seg_min, seg_max = seg_id_range
+            seg_ids |= set(moves.xrange(seg_min, seg_max + 1))
+
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            allocs = (session.query(DfaSegmentatationId).all())
+            for alloc in allocs:
+                try:
+                    seg_ids.remove(alloc.segmentation_id)
+                except KeyError:
+                    # it's not allocatable, so check if its allocated
+                    if not alloc.allocated:
+                        # it's not, so remove it from table
+                        LOG.debug("Removing seg_id %s from pool" %
+                                  alloc.segmentation_id)
+                        session.delete(alloc)
+
+            for seg_id in sorted(seg_ids):
+                alloc = DfaSegmentatationId(segmentation_id=seg_id)
+                session.add(alloc)
+
+    def get_segid_allocation(self, session, seg_id):
+        return (session.query(DfaSegmentatationId).filter_by(
+            segmentation_id=seg_id).first())
+
+    def allocate_segmentation_id(self, seg_id=None):
+        session = db.get_session()
+        return self._reserve_provider_segment(session, seg_id=seg_id)
 
 
 class DfaNetwork(db.Base):
