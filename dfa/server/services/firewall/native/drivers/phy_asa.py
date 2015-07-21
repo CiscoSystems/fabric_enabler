@@ -15,14 +15,14 @@
 #
 
 from dfa.common import dfa_logger as logging
-from dfa.server.services.firewall.native import fabric_setup_phy as FP
+from dfa.server.services.firewall.native import fabric_setup_base as FP
 from dfa.server.services.firewall.native.drivers import base
 
 
 LOG = logging.getLogger(__name__)
 
 
-class PhyAsa(base.BaseDrvr, FP.FabricPhys):
+class PhyAsa(base.BaseDrvr, FP.FabricApi):
 
     '''Physical ASA Driver'''
 
@@ -32,6 +32,9 @@ class PhyAsa(base.BaseDrvr, FP.FabricPhys):
 
     def initialize(self, cfg):
         LOG.debug("Initialize for PhyAsa")
+
+    def is_device_virtual(self):
+        return False
 
     def get_name(self):
         # Put it in a constant TODO(padkrish)
@@ -43,13 +46,14 @@ class PhyAsa(base.BaseDrvr, FP.FabricPhys):
     def create_fw(self, tenant_id, data):
         LOG.debug("In creating phy ASA FW data is %s" % data)
         tenant_name = data.get('tenant_name')
-        self.prepare_fabric_fw(tenant_id, tenant_name)
         in_subnet, in_ip_start, in_ip_end, in_gw = (
             self.get_in_ip_addr(tenant_id))
         out_subnet, out_ip_start, out_ip_end, out_ip_gw = (
             self.get_out_ip_addr(tenant_id))
-        in_vlan, in_mob_dom = self.get_in_vlan_mob_domain(tenant_id)
-        out_vlan, out_mob_dom = self.get_out_vlan_mob_domain(tenant_id)
+        in_seg, in_vlan, in_mob_dom = \
+            self.get_in_seg_vlan_mob_dom(tenant_id)
+        out_seg, out_vlan, out_mob_dom = \
+            self.get_out_seg_vlan_mob_dom(tenant_id)
         # Setup the physical ASA appliance
         # self.get_mgmt_ip_addr(tenant_id)
         # self.get_vlan_in_out(tenant_id)
@@ -59,7 +63,6 @@ class PhyAsa(base.BaseDrvr, FP.FabricPhys):
         LOG.debug("In Delete fw data is %s" % data)
         # Do the necessary stuffs in ASA
         tenant_name = data.get('tenant_name')
-        self.delete_fabric_fw(tenant_id, tenant_name)
         return True
 
     def modify_fw(self, tenant_id, data):

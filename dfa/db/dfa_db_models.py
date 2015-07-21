@@ -15,37 +15,123 @@
 #
 # @author: Nader Lahouti, Cisco Systems, Inc.
 
-
+import json
+import netaddr
 import sqlalchemy as sa
 import sqlalchemy.orm.exc as orm_exc
 
 from oslo.db import exception as db_exc
 from six import moves
 
+from dfa.common import constants as const
 from dfa.common import dfa_logger as logging
 import dfa_db_api as db
 
 LOG = logging.getLogger(__name__)
 
 DB_MAX_RETRIES = 10
+RULE_LEN = 400
 
 
-class DfaSegmentatationId(db.Base):
+class DfaSegmentationId(db.Base):
     """Represents DFA segmentation ID."""
 
     __tablename__ = 'segmentation_id'
 
     segmentation_id = sa.Column(sa.Integer, nullable=False, primary_key=True,
                                 autoincrement=False)
+    network_id = sa.Column(sa.String(36))
     allocated = sa.Column(sa.Boolean, nullable=False, default=False)
+
+
+class DfaVlanId(db.Base):
+    """Represents DFA VLAN ID."""
+
+    __tablename__ = 'vlan_id'
+
+    segmentation_id = sa.Column(sa.Integer, nullable=False, primary_key=True,
+                                autoincrement=False)
+    network_id = sa.Column(sa.String(36))
+    allocated = sa.Column(sa.Boolean, nullable=False, default=False)
+
+
+class DfaInServiceSubnet(db.Base):
+    """Represents DFA Service Subnet."""
+
+    __tablename__ = 'in_service_subnet'
+
+    subnet_address = sa.Column(sa.String(20), nullable=False, primary_key=True,
+                               autoincrement=False)
+    network_id = sa.Column(sa.String(36))
+    subnet_id = sa.Column(sa.String(36))
+    allocated = sa.Column(sa.Boolean, nullable=False, default=False)
+
+
+class DfaOutServiceSubnet(db.Base):
+    """Represents DFA Service Subnet."""
+
+    __tablename__ = 'out_service_subnet'
+
+    subnet_address = sa.Column(sa.String(20), nullable=False, primary_key=True,
+                               autoincrement=False)
+    network_id = sa.Column(sa.String(36))
+    subnet_id = sa.Column(sa.String(36))
+    allocated = sa.Column(sa.Boolean, nullable=False, default=False)
+
+
+class DfaResource(object):
+
+    def is_res_init_done(self, num_init):
+        if num_init > 0:
+            return True
+        else:
+            return False
+
+
+class DfaSegment(DfaResource):
+    dfa_segment_init = 0
+
+    def get_model(cls):
+        return DfaSegmentationId
+
+    @classmethod
+    def init_done(cls):
+        cls.dfa_segment_init = cls.dfa_segment_init + 1
+
+    def is_init_done(cls):
+        return cls.is_res_init_done(cls.dfa_segment_init)
+
+
+class DfaVlan(DfaResource):
+    dfa_vlan_init = 0
+
+    def get_model(cls):
+        return DfaVlanId
+
+    @classmethod
+    def init_done(cls):
+        cls.dfa_vlan_init = cls.dfa_vlan_init + 1
+
+    def is_init_done(cls):
+        return cls.is_res_init_done(cls.dfa_vlan_init)
 
 
 class DfaSegmentTypeDriver(object):
 
-    def __init__(self, segid_min, segid_max):
+    # Tested for both Segment and VLAN
+    def __init__(self, segid_min, segid_max, res_name, cfg):
+        # Have a check here to ensure a crazy init is not called TODO(padkrish)
+        db.configure_db(cfg)
         self.seg_id_ranges = []
         self.seg_id_ranges.append((segid_min, segid_max))
-        self._seg_id_allocations()
+        if res_name is const.RES_SEGMENT:
+            self.model_obj = DfaSegment()
+        if res_name is const.RES_VLAN:
+            self.model_obj = DfaVlan()
+        self.model = self.model_obj.get_model()
+        if not self.model_obj.is_init_done():
+            self._seg_id_allocations()
+            self.model_obj.init_done()
 
     def _allocate_specified_segment(self, session, seg_id):
         """Allocate specified segment.
@@ -56,7 +142,7 @@ class DfaSegmentTypeDriver(object):
         """
         try:
             with session.begin(subtransactions=True):
-                alloc = (session.query(DfaSegmentatationId).filter_by(
+                alloc = (session.query(self.model).filter_by(
                     segmentation_id=seg_id).first())
                 if alloc:
                     if alloc.allocated:
@@ -64,7 +150,7 @@ class DfaSegmentTypeDriver(object):
                         return
                     else:
                         # Segment not allocated
-                        count = (session.query(DfaSegmentatationId).
+                        count = (session.query(self.model).
                                  filter_by(allocated=False,
                                            segmentation_id=seg_id).update(
                                                {"allocated": True}))
@@ -72,8 +158,8 @@ class DfaSegmentTypeDriver(object):
                             return alloc
 
                 # Segment to create or already allocated
-                alloc = DfaSegmentatationId(segmentation_id=seg_id,
-                                            allocated=True)
+                alloc = self.model(segmentation_id=seg_id,
+                                   allocated=True)
                 session.add(alloc)
 
         except db_exc.DBDuplicateEntry:
@@ -82,14 +168,14 @@ class DfaSegmentTypeDriver(object):
 
         return alloc
 
-    def _allocate_segment(self, session):
+    def _allocate_segment(self, session, net_id):
         """Allocate segment from pool.
 
         Return allocated db object or None.
         """
 
         with session.begin(subtransactions=True):
-            select = (session.query(DfaSegmentatationId).filter_by(
+            select = (session.query(self.model).filter_by(
                 allocated=False))
 
             # Selected segment can be allocated before update by someone else,
@@ -100,22 +186,24 @@ class DfaSegmentTypeDriver(object):
                     # No resource available
                     return
 
-                count = (session.query(DfaSegmentatationId).
+                count = (session.query(self.model).
                          filter_by(segmentation_id=alloc.segmentation_id,
-                         allocated=False).update({"allocated": True}))
+                         allocated=False).update({"allocated": True,
+                                                  "network_id": net_id}))
                 if count:
                     return alloc
 
         LOG.error('ERROR: Failed to allocate segment.')
 
-    def _reserve_provider_segment(self, session, seg_id=None):
+    def _reserve_provider_segment(self, session, net_id=None, seg_id=None):
 
         if seg_id is None:
-            alloc = self._allocate_segment(session)
+            alloc = self._allocate_segment(session, net_id)
             if not alloc:
                 LOG.error('ERROR: No segment is available')
                 return
         else:
+            # TODO net_id not passed here
             alloc = self._allocate_specified_segment(session, seg_id)
             if not alloc:
                 LOG.error('ERROR: Segmentation_id %s is in use.' % seg_id)
@@ -128,10 +216,10 @@ class DfaSegmentTypeDriver(object):
         inside = any(lo <= seg_id <= hi for lo, hi in self.seg_id_ranges)
         session = db.get_session()
         with session.begin(subtransactions=True):
-            query = session.query(DfaSegmentatationId).filter_by(
+            query = session.query(self.model).filter_by(
                 segmentation_id=seg_id)
             if inside:
-                count = query.update({"allocated": False})
+                count = query.update({"allocated": False, "network_id": None})
                 if count:
                     LOG.debug("Releasing segmentation id %s to pool" % seg_id)
             else:
@@ -143,6 +231,7 @@ class DfaSegmentTypeDriver(object):
         if not count:
             LOG.debug("segmentation_id %s not found" % seg_id)
 
+    # Tested for both Segment and VLAN
     def _seg_id_allocations(self):
 
         seg_ids = set()
@@ -152,7 +241,7 @@ class DfaSegmentTypeDriver(object):
 
         session = db.get_session()
         with session.begin(subtransactions=True):
-            allocs = (session.query(DfaSegmentatationId).all())
+            allocs = (session.query(self.model).all())
             for alloc in allocs:
                 try:
                     seg_ids.remove(alloc.segmentation_id)
@@ -165,16 +254,26 @@ class DfaSegmentTypeDriver(object):
                         session.delete(alloc)
 
             for seg_id in sorted(seg_ids):
-                alloc = DfaSegmentatationId(segmentation_id=seg_id)
+                alloc = self.model(segmentation_id=seg_id)
                 session.add(alloc)
 
     def get_segid_allocation(self, session, seg_id):
-        return (session.query(DfaSegmentatationId).filter_by(
+        return (session.query(self.model).filter_by(
             segmentation_id=seg_id).first())
 
-    def allocate_segmentation_id(self, seg_id=None):
+    def allocate_segmentation_id(self, net_id, seg_id=None):
         session = db.get_session()
-        return self._reserve_provider_segment(session, seg_id=seg_id)
+        return self._reserve_provider_segment(session, net_id, seg_id=seg_id)
+
+    # Tested for clean case
+    def get_all_seg_netid(self):
+        session = db.get_session()
+        netid_dict = {}
+        allocs = (session.query(self.model).all())
+        for alloc in allocs:
+            if alloc.network_id is not None:
+                netid_dict[alloc.network_id] = alloc.segmentation_id
+        return netid_dict
 
 
 class DfaNetwork(db.Base):
@@ -189,6 +288,7 @@ class DfaNetwork(db.Base):
     tenant_id = sa.Column(sa.String(36))
     fwd_mod = sa.Column(sa.String(16))
     vlan = sa.Column(sa.Integer)
+    mob_domain = sa.Column(sa.String(16))
     source = sa.Column(sa.String(16))
     result = sa.Column(sa.String(16))
 
@@ -234,6 +334,28 @@ class DfaAgentsDb(db.Base):
     configurations = sa.Column(sa.String(4095))
 
 
+class DfaFwInfo(db.Base):
+    """Represents Firewall info."""
+
+    __tablename__ = 'firewall'
+
+    fw_id = sa.Column(sa.String(36), primary_key=True)
+    name = sa.Column(sa.String(255))
+    tenant_id = sa.Column(sa.String(36))
+    in_network_id = sa.Column(sa.String(36))
+    in_service_node_ip = sa.Column(sa.String(16))
+    out_network_id = sa.Column(sa.String(36))
+    out_service_node_ip = sa.Column(sa.String(16))
+    router_id = sa.Column(sa.String(36))
+    router_net_id = sa.Column(sa.String(36))
+    router_subnet_id = sa.Column(sa.String(36))
+    openstack_provision_status = sa.Column(sa.String(34))
+    dcnm_provision_status = sa.Column(sa.String(38))
+    device_provision_status = sa.Column(sa.String(30))
+    rules = sa.Column(sa.String(RULE_LEN))
+    result = sa.Column(sa.String(16))
+
+
 class DfaDBMixin(object):
 
     """Database API."""
@@ -266,7 +388,9 @@ class DfaDBMixin(object):
         try:
             with session.begin(subtransactions=True):
                 ent = session.query(DfaTenants).filter_by(id=pid).one()
-            return ent and ent.name
+            # Check with Nader if it's ok to make this change
+            # return ent and ent.name
+            return ent.name
         except orm_exc.NoResultFound:
             LOG.info('Project %(id)s does not exist' % ({'id': pid}))
         except orm_exc.MultipleResultsFound:
@@ -306,6 +430,8 @@ class DfaDBMixin(object):
                              segmentation_id=net_data.get('segmentation_id'),
                              tenant_id=net_data.get('tenant_id'),
                              fwd_mod=net_data.get('fwd_mod'),
+                             vlan=net_data.get('vlan'),
+                             mob_domain=net_data.get('mob_domain_name'),
                              source=source,
                              result=result)
             session.add(net)
@@ -324,6 +450,7 @@ class DfaDBMixin(object):
         return nets
 
     def get_network(self, net_id):
+        net = None
         session = db.get_session()
         try:
             with session.begin(subtransactions=True):
@@ -335,6 +462,7 @@ class DfaDBMixin(object):
         except orm_exc.MultipleResultsFound:
             LOG.error('More than one enty found for network %(id)s.' % (
                 {'id': net_id}))
+        return net
 
     def get_network_by_name(self, name):
         session = db.get_session()
@@ -472,3 +600,354 @@ class DfaDBMixin(object):
             # Update the configurations.
             return session.query(DfaAgentsDb).filter_by(host=host).update(
                 {'configurations': configs})
+
+    def get_str_dict(self, fw_data):
+        fw_dict = {}
+        fw_dict['firewall_policy_id'] = fw_data.get('firewall_policy_id')
+        fw_dict['rules'] = fw_data.get('rules')
+        str_dic = json.dumps(fw_dict)
+        return str_dic
+
+    def add_fw_db(self, fw_id, fw_data, result=None):
+        session = db.get_session()
+        rule_str = self.get_str_dict(fw_data)
+        if len(rule_str) > RULE_LEN:
+            return False
+        with session.begin(subtransactions=True):
+            fw = DfaFwInfo(fw_id=fw_id,
+                           name=fw_data.get('name'),
+                           tenant_id=fw_data.get('tenant_id'),
+                           in_network_id=fw_data.get('in_network_id'),
+                           in_service_node_ip=fw_data.get('in_service_ip'),
+                           out_network_id=fw_data.get('out_network_id'),
+                           out_service_node_ip=fw_data.get('out_service_ip'),
+                           router_id=fw_data.get('router_id'),
+                           router_net_id=fw_data.get('router_net_id'),
+                           router_subnet_id=fw_data.get('router_subnet_id'),
+                           openstack_provision_status=fw_data.get('os_status'),
+                           dcnm_provision_status=fw_data.get('dcnm_status'),
+                           device_provision_status=fw_data.get('dev_status'),
+                           rules=rule_str, result=result)
+            session.add(fw)
+        return True
+
+    def get_fw_rule_by_id(self, fw_id):
+        session = db.get_session()
+        rule_dict = {}
+        try:
+            with session.begin(subtransactions=True):
+                fw = session.query(DfaFwInfo).filter_by(fw_id=fw_id).one()
+                rule_str = fw.rules
+                rule_dict = json.loads(rule_str)
+        except orm_exc.NoResultFound:
+            LOG.info('FWID %(fwid)s does not exist' % ({'fw_id': fw_id}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for fw-id %(id)s.' % (
+                {'id': fw_id}))
+        return rule_dict
+
+    def update_fw_db(self, fw_id, fw_data):
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            session.query(DfaFwInfo).filter_by(fw_id=fw_id).update(
+                {'name': fw_data.get('name'),
+                 'in_network_id': fw_data.get('in_network_id'),
+                 'in_service_node_ip': fw_data.get('in_service_ip'),
+                 'out_network_id': fw_data.get('out_network_id'),
+                 'out_service_node_ip': fw_data.get('out_service_ip'),
+                 'router_id': fw_data.get('router_id'),
+                 'router_net_id': fw_data.get('router_net_id'),
+                 'router_subnet_id': fw_data.get('router_subnet_id')})
+
+    def update_fw_db_result(self, fw_id, fw_data):
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            session.query(DfaFwInfo).filter_by(fw_id=fw_id).update(
+                {'openstack_provision_status': fw_data.get('os_status'),
+                 'dcnm_provision_status': fw_data.get('dcnm_status')})
+
+    # Pass
+    def update_fw_db_final_result(self, fw_id, result):
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            session.query(DfaFwInfo).filter_by(fw_id=fw_id).update(
+                {'result': result})
+
+    # Pass
+    def update_fw_db_dev_status(self, fw_id, status):
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            session.query(DfaFwInfo).filter_by(fw_id=fw_id).update(
+                {'device_provision_status': status})
+
+    # Tested with 1 FW
+    def get_all_fw_db(self):
+        session = db.get_session()
+        allocs = (session.query(DfaFwInfo).all())
+        fw_ret_dict = dict()
+        for alloc in allocs:
+            fw_id = alloc.fw_id
+            fw_dict = dict()
+            fw_dict['tenant_id'] = alloc.tenant_id
+            fw_dict['in_network_id'] = alloc.in_network_id
+            fw_dict['in_service_node_ip'] = alloc.in_service_node_ip
+            fw_dict['out_network_id'] = alloc.out_network_id
+            fw_dict['out_service_node_ip'] = alloc.out_service_node_ip
+            fw_dict['router_id'] = alloc.router_id
+            fw_dict['router_net_id'] = alloc.router_net_id
+            fw_dict['router_subnet_id'] = alloc.router_subnet_id
+            fw_dict['os_status'] = alloc.openstack_provision_status
+            fw_dict['dcnm_status'] = alloc.dcnm_provision_status
+            fw_dict['device_status'] = alloc.device_provision_status
+            fw_dict['name'] = alloc.name
+            rule_str = alloc.rules
+            rule_dict = json.loads(rule_str)
+            fw_dict['rules'] = rule_dict
+            fw_ret_dict[fw_id] = fw_dict
+        return fw_ret_dict
+
+    def get_fw_by_netid(self, netid):
+        session = db.get_session()
+        try:
+            with session.begin(subtransactions=True):
+                net = session.query(DfaFwInfo).filter(
+                    (DfaFwInfo.in_network_id == netid) |
+                    (DfaFwInfo.out_network_id == netid)).one()
+            return net
+        except orm_exc.NoResultFound:
+            LOG.info('Network %(segid)s does not exist' % ({'netid': netid}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for netid-id %(id)s.' % (
+                {'id': netid}))
+
+    def get_fw_by_rtr_netid(self, netid):
+        session = db.get_session()
+        try:
+            with session.begin(subtransactions=True):
+                net = session.query(DfaFwInfo).filter_by(
+                    (router_net_id == netid)).one()
+            return net
+        except orm_exc.NoResultFound:
+            LOG.info('Network %(segid)s does not exist' % ({'netid': netid}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for netid-id %(id)s.' % (
+                {'id': netid}))
+
+    # Tested
+    def get_fw_by_rtrid(self, rtrid):
+        session = db.get_session()
+        try:
+            with session.begin(subtransactions=True):
+                rtr = session.query(DfaFwInfo).filter_by(router_id=rtrid)
+        except orm_exc.NoResultFound:
+            LOG.info('rtr %(rtrid)s does not exist' % ({'rtrid': rtrid}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for rtrid-id %(id)s.' % (
+                {'id': rtrid}))
+        return rtr
+
+    def delete_fw(self, fw_id):
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            fw = session.query(DfaFwInfo).filter_by(fw_id=fw_id).first()
+            session.delete(fw)
+
+    def get_fw(self, fw_id):
+        session = db.get_session()
+        fw = None
+        try:
+            with session.begin(subtransactions=True):
+                fw = session.query(DfaFwInfo).filter_by(fw_id=fw_id).first()
+        except orm_exc.NoResultFound:
+            LOG.info('fw %(fwid)s does not exist' % ({'fw_id': fw_id}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for fwid-id %(id)s.' % (
+                {'id': fw_id}))
+        return fw
+
+    def clear_fw_entry_by_netid(self, net_id):
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            fw = session.query(DfaFwInfo).filter_by(in_network_id=net_id).\
+                update({'in_network_id': '', 'in_service_node_ip': ''})
+            # We don't need to do the below if above succeeds, TODO
+            fw = session.query(DfaFwInfo).filter_by(out_network_id=net_id).\
+                update({'out_network_id': '',
+                        'out_service_node_ip': ''})
+
+
+class DfaInSubnet(DfaResource):
+    dfa_in_subnet_init = 0
+
+    def get_model(cls):
+        return DfaInServiceSubnet
+
+    @classmethod
+    def init_done(cls):
+        cls.dfa_in_subnet_init = cls.dfa_in_subnet_init + 1
+
+    def is_init_done(cls):
+        return cls.is_res_init_done(cls.dfa_in_subnet_init)
+
+
+class DfaOutSubnet(DfaResource):
+    dfa_out_subnet_init = 0
+
+    def get_model(cls):
+        return DfaOutServiceSubnet
+
+    @classmethod
+    def init_done(cls):
+        cls.dfa_out_subnet_init = cls.dfa_out_subnet_init + 1
+
+    def is_init_done(cls):
+        return cls.is_res_init_done(cls.dfa_out_subnet_init)
+
+
+class DfasubnetDriver(object):
+
+    # Tested
+    def __init__(self, subnet_min_str, subnet_max_str, res_name):
+        # Have a check here to ensure a crazy init is not called TODO(padkrish)
+        self.subnet_ranges = []
+        self.subnet_min = int(netaddr.IPAddress(subnet_min_str.split('/')[0]))
+        self.subnet_max = int(netaddr.IPAddress(subnet_max_str.split('/')[0]))
+        self.mask = int(subnet_max_str.split('/')[1])
+        self.subnet_ranges.append((self.subnet_min, self.subnet_max))
+        step = 1 << (32 - self.mask)
+        self.step = step
+        if res_name is const.RES_IN_SUBNET:
+            self.model_obj = DfaInSubnet()
+        if res_name is const.RES_OUT_SUBNET:
+            self.model_obj = DfaOutSubnet()
+        self.model = self.model_obj.get_model()
+        if not self.model_obj.is_init_done():
+            self._subnet_id_allocations()
+            self.model_obj.init_done()
+
+    # Tested
+    def _subnet_id_allocations(self):
+
+        subnet_ids = sorted(set(moves.xrange(self.subnet_min, self.subnet_max,
+                                             self.step)))
+        # seg_ids = set()
+        # for subnet_range in self.subnet_ranges:
+        #    subnet_min, subnet_max = subnet_range
+        #    subnet_ids |= set(moves.xrange(subnet_min, subnet_max, self.step))
+
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            allocs = (session.query(self.model).all())
+            for alloc in allocs:
+                try:
+                    ip = int(netaddr.IPAddress(alloc.subnet_address))
+                    subnet_ids.remove(ip)
+                except KeyError:
+                    # it's not allocatable, so check if its allocated
+                    if not alloc.allocated:
+                        # it's not, so remove it from table
+                        LOG.debug("Removing subnet %s from pool" %
+                                  alloc.subnet_address)
+                        session.delete(alloc)
+
+            for subnet_id in subnet_ids:
+                subnet_add = str(netaddr.IPAddress(subnet_id))
+                alloc = self.model(subnet_address=subnet_add)
+                session.add(alloc)
+
+    # Tested
+    def allocate_subnet(self, net_id=None):
+        """Allocate subnet from pool.
+
+        Return allocated db object or None.
+        """
+
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            select = (session.query(self.model).filter_by(
+                allocated=False))
+
+            # Selected segment can be allocated before update by someone else,
+            # We retry until update success or DB_MAX_RETRIES retries
+            for attempt in range(1, DB_MAX_RETRIES + 1):
+                alloc = select.first()
+                if not alloc:
+                    # No resource available
+                    return
+
+                count = (session.query(self.model).
+                         filter_by(subnet_address=alloc.subnet_address,
+                         allocated=False).update({"allocated": True,
+                                                  "network_id": net_id}))
+                if count:
+                    return alloc.subnet_address
+
+        LOG.error('ERROR: Failed to allocate segment.')
+        return None
+
+    def update_subnet(self, subnet, net_id, subnet_id):
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            query = session.query(self.model).filter_by(
+                subnet_address=subnet).update({"network_id": net_id,
+                                               "subnet_id": subnet_id})
+
+    # Tested with a negative case
+    def release_subnet(self, subnet_address):
+
+        subnet_addr_int = int(netaddr.IPAddress(subnet_address))
+        inside = any(lo <= subnet_addr_int <= hi for lo, hi in
+                     self.subnet_ranges)
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            query = session.query(self.model).filter_by(
+                subnet_address=subnet_address)
+            if inside:
+                count = query.update({"allocated": False, "network_id": None,
+                                      "subnet_id": None})
+                if count:
+                    LOG.debug("Releasing subnet id %s to pool" %
+                              subnet_address)
+            else:
+                count = query.delete()
+                if count:
+                    LOG.debug("Releasing subnet %s outside pool" % (
+                        subnet_address))
+
+        if not count:
+            LOG.debug("subnet %s not found" % subnet_address)
+
+    def release_subnet_by_netid(self, netid):
+
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            allocs = (session.query(self.model).filter_by({"allocated":
+                                                           True,
+                                                           "network_id":
+                                                           netid}).
+                      update({"allocated": False}))
+
+    def release_subnet_no_netid(self):
+
+        net = ''
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            allocs = (session.query(self.model).filter_by(allocated=True,
+                                                          network_id=net).
+                      update({"allocated": False}))
+
+    # Tested
+    def get_subnet_by_netid(self, netid):
+        session = db.get_session()
+        try:
+            with session.begin(subtransactions=True):
+                net = session.query(self.model).filter_by(allocated=True,
+                                                          network_id=netid).\
+                    one()
+            return net.subnet_address
+        except orm_exc.NoResultFound:
+            LOG.info('Network %(segid)s does not exist' % ({'netid': netid}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for netid-id %(id)s.' % (
+                {'id': netid}))
+        return None

@@ -46,6 +46,7 @@ from dfa.server import dfa_events_handler as deh
 from dfa.server import dfa_fail_recovery as dfr
 from dfa.server import dfa_instance_api as dfa_inst
 from dfa.server import dfa_listen_dcnm as dfa_dcnm
+from dfa.server.services.firewall.native import fabric_setup_base as FP
 from dfa.server.services.firewall.native import fw_mgr as fw_native
 
 LOG = logging.getLogger(__name__)
@@ -198,6 +199,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
     def __init__(self, cfg):
         self.events = {}
         super(DfaServer, self).__init__(cfg)
+        self.fw_api = FP.FabricApi()
         self._cfg = cfg
         self._host = platform.node()
         self.server = None
@@ -230,6 +232,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         seg_id_min = int(cfg.dcnm.segmentation_id_min)
         seg_id_max = int(cfg.dcnm.segmentation_id_max)
         self.segmentation_pool = set(moves.xrange(seg_id_min, seg_id_max + 1))
+        # Needs to be implemented here along with restart TODO(nlahouti)
+        # self.seg_drvr = dfa_dbm.DfaSegmentTypeDriver(seg_id_min, seg_id_max,
+        #                                              constants.RES_SEGMENT)
 
         # Create queue for exception returned by a thread.
         self._excpq = Queue.Queue()
@@ -513,6 +518,12 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         """Create subnet."""
 
         snet_id = snet.get('id')
+        # This checks if the source of the subnet creation is FW,
+        # If yes, this event is ignored.
+        if self.fw_api.is_subnet_source_fw(snet.get('tenant_id'),
+                                           snet.get('cidr')):
+            LOG.info("Service subnet %s, returning", snet.get('cidr'))
+            return
         if snet_id not in self.subnet:
             self.subnet[snet_id] = {}
             self.subnet[snet_id].update(snet)
@@ -539,7 +550,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             return
 
         try:
-            self.dcnm_client.create_network(tenant_name, dcnm_net, subnet)
+            part = net['partition']
+            self.dcnm_client.create_network(tenant_name, dcnm_net, subnet,
+                                            part)
         except dexc.DfaClientRequestFailed:
             emsg = 'Failed to create network %(net)s.'
             LOG.exception(emsg, {'net': dcnm_net.name})
@@ -565,10 +578,17 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         """
         net = network_info['network']
         net_id = net['id']
+        net_name = net.get('name')
+        nwk_db_elem = self.get_network(net_id)
+        # Check if the source of network creation is FW and if yes, skip
+        # this event.
+        # Check if there's a way to read the DB from service class TODO
+        if self.fw_api.is_network_source_fw(nwk_db_elem, net_name):
+            LOG.info("Service network %s, returning", net_name)
+            return
         self.network[net_id] = {}
         self.network[net_id].update(net)
 
-        net_name = net.get('name')
         tenant_id = net.get('tenant_id')
 
         # Extract segmentation_id from the network name
@@ -628,6 +648,12 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         try:
             cfgp, fwd_mod = self.dcnm_client.get_config_profile_for_network(
                 net.get('name'))
+            part = net.get('name').partition('::')[2]
+            if part:
+                self.network[net_id]['partition'] = part
+            else:
+                def_part = self._cfg.dcnm.default_partition_name
+                self.network[net_id]['partition'] = def_part
             self.network[net_id]['config_profile'] = cfgp
             self.network[net_id]['fwd_mod'] = fwd_mod
             self.add_network_db(net_id, self.network[net_id],

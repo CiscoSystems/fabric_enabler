@@ -37,6 +37,11 @@ class BaseDrvr(object):
         Pass
 
     @abc.abstractmethod
+    def is_device_virtual(self):
+        '''Return False if device is physical, True otherwise'''
+        Pass
+
+    @abc.abstractmethod
     def get_name(self):
         '''Return the name of the driver service'''
         Pass

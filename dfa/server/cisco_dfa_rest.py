@@ -325,7 +325,7 @@ class DFARESTClient(object):
         fwd_mod = self.config_profile_fwding_mode_get(prof)
         return (prof, fwd_mod)
 
-    def create_network(self, tenant_name, network, subnet):
+    def create_network(self, tenant_name, network, subnet, part=None):
         """Create network on the DCNM.
 
         :param tenant_name: name of tenant the network belongs to
@@ -336,13 +336,15 @@ class DFARESTClient(object):
         seg_id = str(network.segmentation_id)
         subnet_ip_mask = subnet.cidr.split('/')
         gw_ip = subnet.gateway_ip
+        if part is None:
+            part = self._part_name
         cfg_args = [
             "$segmentId=" + seg_id,
             "$netMaskLength=" + subnet_ip_mask[1],
             "$gatewayIpAddress=" + gw_ip,
             "$networkName=" + network.name,
             "$vlanId=0",
-            "$vrfName=" + tenant_name + ':' + self._part_name
+            "$vrfName=" + tenant_name + ':' + part
         ]
         cfg_args = ';'.join(cfg_args)
 
@@ -360,7 +362,7 @@ class DFARESTClient(object):
                         "networkName": network.name,
                         "configArg": cfg_args,
                         "organizationName": tenant_name,
-                        "partitionName": self._part_name,
+                        "partitionName": part,
                         "description": network.name,
                         "dhcpScope": dhcp_scopes}
         if self.is_iplus:
@@ -369,7 +371,7 @@ class DFARESTClient(object):
             if prof and prof.get('profileSubType') == 'network:universal':
                 # For universal profile vrf has to e organization:partition
                 network_info["vrfName"] = ':'.join((tenant_name,
-                                                    self._part_name))
+                                                    part))
             else:
                 # Otherwise, it should be left empty.
                 network_info["vrfName"] = ""
@@ -398,15 +400,13 @@ class DFARESTClient(object):
             part_name = self._part_name
         if network.mob_domain:
             mob_domain_name = network.mob_domain_name
-            vlan_id = str(network.segmentation_id)
-            seg_str = ""
-            # Specify a seg ID tomorrow TODO
-            seg_id = 0
+            vlan_id = str(network.vlan_id)
         else:
             seg_id = str(network.segmentation_id)
             vlan_id = '0'
             mob_domain_name = None
-            seg_str = "$segmentId=" + seg_id
+        seg_id = str(network.segmentation_id)
+        seg_str = "$segmentId=" + seg_id
         cfg_args = [
             seg_str,
             "$netMaskLength=" + subnet_ip_mask[1],
@@ -489,13 +489,11 @@ class DFARESTClient(object):
             part_name = self._part_name
         if network.mob_domain_name:
             mob_domain_name = network.mob_domain_name
-            vlan_id = str(network.segmentation_id)
-            seg_id = '0'
+            vlan_id = str(network.vlan_id)
         else:
-            seg_id = str(network.segmentation_id)
             vlan_id = '0'
             mob_domain_name = None
-        seg_id = network.segmentation_id
+        seg_id = str(network.segmentation_id)
         network_info = {
             'organizationName': tenant_name,
             'partitionName': part_name,

@@ -16,9 +16,9 @@
 
 
 # RPC message type exchange between server and agent.
-VM_INFO        = 1000
+VM_INFO = 1000
 UPDATE_IP_RULE = 1001
-UPLINK_NAME    = 1002
+UPLINK_NAME = 1002
 
 
 # RPC queue name on agent side.
@@ -63,3 +63,7 @@ UPLINK_DOWN_THRES = 2
 Q_UPL_PRIO = 1
 Q_VM_PRIO = 2
 
+RES_SEGMENT = "SEGMENT"
+RES_VLAN = "VLAN"
+RES_IN_SUBNET = 'IN_SUB'
+RES_OUT_SUBNET = 'OUT_SUB'
