@@ -47,8 +47,8 @@ class BaseDrvr(object):
         Pass
 
     @abc.abstractmethod
-    def store_dcnm_obj(self):
-        '''Store the DCNM obj'''
+    def get_max_quota(self):
+        '''Retrieves the maximumnumber of FW that could be created'''
         Pass
 
     @abc.abstractmethod

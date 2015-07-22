@@ -16,13 +16,13 @@
 # @author: Padmanabhan Krishnan, Cisco Systems, Inc.
 
 import stevedore
-from stevedore.named import NamedExtensionManager as nm
 
 from dfa.db import dfa_db_models as dfa_dbm
 from dfa.common import dfa_logger as logging
 from dfa.server.dfa_openstack_helper import DfaNeutronHelper as OsHelper
 from dfa.server.services.firewall.native import fabric_setup_base as fabric
 from dfa.server.services.firewall.native import fw_constants
+from dfa.server.services.firewall.native.drivers import dev_mgr
 
 LOG = logging.getLogger(__name__)
 
@@ -197,20 +197,13 @@ class FwMapAttr(object):
         return fw_dict
 
 
-class FwMgr(stevedore.named.NamedExtensionManager):
+class FwMgr(dev_mgr.DeviceMgr):
 
     '''Firewall Native Manager'''
 
     def __init__(self, cfg):
         LOG.debug("Initializing Native FW Manager")
-        # It's very unlikely to have more than one FW services. But, just
-        # providing that option.
-        self.drvr_obj = {}
-        super(FwMgr, self).__init__('services.firewall.native.drivers',
-                                    cfg.firewall.device,
-                                    invoke_on_load=True)
-        self.register_types()
-        self.drvr_initialize(cfg)
+        super(FwMgr, self).__init__(cfg)
         self.events.update({
             'firewall_rule.create.end': self.fw_rule_create,
             'firewall_rule.delete.end': self.fw_rule_delete,
@@ -226,21 +219,8 @@ class FwMgr(stevedore.named.NamedExtensionManager):
         self.fabric = fabric.FabricBase()
         self.temp_db = FwTempDb()
         self.os_helper = OsHelper()
-        self.pop_local_cache()
-
-    def register_types(self):
-        for ext in self:
-            drvr_name = ext.obj.get_name()
-            if drvr_name not in self.drvr_obj:
-                self.drvr_obj[drvr_name] = ext
-                LOG.debug("Registering Service %s" % drvr_name)
-            else:
-                LOG.debug("%s already registered" % drvr_name)
-
-    def drvr_initialize(self, cfg):
-        for drvr_name in self.drvr_obj:
-            drvr = self.drvr_obj.get(drvr_name)
-            drvr.obj.initialize(cfg)
+        fw_dict = self.pop_local_cache()
+        self.pop_local_sch_cache(fw_dict)
 
     def populate_cfg_dcnm(self, cfg, dcnm_obj):
         self.dcnm_obj = dcnm_obj
@@ -248,9 +228,8 @@ class FwMgr(stevedore.named.NamedExtensionManager):
 
     def _check_create_fw(self, tenant_id, drvr_name):
         if self.fwid_attr[tenant_id].is_fw_drvr_create_needed():
-            drvr = self.drvr_obj.get(drvr_name)
             fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
-            is_fw_virt = drvr.obj.is_device_virtual()
+            is_fw_virt = self.is_device_virtual()
             # What's the third argumennt really doing? TODO
             ret = self.add_fw_db(fw_dict.get('fw_id'), fw_dict,
                                  fw_constants.RESULT_FW_CREATE_INIT)
@@ -266,15 +245,15 @@ class FwMgr(stevedore.named.NamedExtensionManager):
             else:
                 self.update_fw_db_final_result(fw_dict.get('fw_id'), (
                     fw_constants.RESULT_FW_CREATE_DONE))
-            ret = drvr.obj.create_fw(tenant_id, fw_dict)
+            ret = self.create_fw_device(tenant_id, fw_dict.get('fw_id'),
+                                        fw_dict)
             if ret:
                 self.fwid_attr[tenant_id].fw_drvr_created(True)
                 self.update_fw_db_dev_status(fw_dict.get('fw_id'), 'SUCCESS')
 
     def _check_delete_fw(self, tenant_id, drvr_name):
-        drvr = self.drvr_obj.get(drvr_name)
         fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
-        is_fw_virt = drvr.obj.is_device_virtual()
+        is_fw_virt = self.is_device_virtual()
         self.update_fw_db_final_result(fw_dict.get('fw_id'), (
             fw_constants.RESULT_FW_DELETE_INIT))
         ret = self.fabric.delete_fabric_fw(tenant_id,
@@ -287,16 +266,16 @@ class FwMgr(stevedore.named.NamedExtensionManager):
         self.update_fw_db_final_result(fw_dict.get('fw_id'), (
             fw_constants.RESULT_FW_DELETE_DONE))
         if self.fwid_attr[tenant_id].is_fw_drvr_created():
-            ret = drvr.obj.delete_fw(tenant_id, fw_dict)
+            ret = self.delete_fw_device(tenant_id, fw_dict.get('fw_id'),
+                                        fw_dict)
             if ret:
                 self.fwid_attr[tenant_id].fw_drvr_created(False)
                 self.delete_fw(fw_dict.get('fw_id'))
 
     def _check_update_fw(self, tenant_id, drvr_name):
         if self.fwid_attr[tenant_id].is_fw_complete():
-            drvr = self.drvr_obj.get(drvr_name)
             fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
-            drvr.obj.modify_fw(tenant_id, fw_dict)
+            self.modify_fw_device(tenant_id, fw_dict)
 
     def _fw_create(self, drvr_name, data, cache):
         fw = data.get('firewall')
@@ -322,17 +301,10 @@ class FwMgr(stevedore.named.NamedExtensionManager):
             pol_data = self.os_helper.get_fw_policy(fw_pol_id)
             self.fw_policy_create(pol_data, cache=cache)
 
-    def _fw_create_all(self, data, cache):
-        for drvr_name in self.drvr_obj:
-            self._fw_create(drvr_name, data, cache)
-
     def fw_create(self, data, fw_name=None, cache=False):
         LOG.debug("FW Debug")
         try:
-            if fw_name is None:
-                self._fw_create_all(data, cache)
-            else:
-                self._fw_create(fw_name, data, cache)
+            self._fw_create(fw_name, data, cache)
         except Exception as e:
             LOG.error("Exception in fw_create %s" % str(e))
 
@@ -348,17 +320,10 @@ class FwMgr(stevedore.named.NamedExtensionManager):
         tenant_obj.delete_fw(fw_id)
         self.temp_db.del_fw_tenant(fw_id)
 
-    def _fw_delete_all(self, data):
-        for drvr_name in self.drvr_obj:
-            self._fw_delete(drvr_name, data)
-
     def fw_delete(self, data, fw_name=None):
         LOG.debug("FW Debug")
         try:
-            if fw_name is None:
-                self._fw_delete_all(data)
-            else:
-                self._fw_delete(fw_name, data)
+            self._fw_delete(fw_name, data)
         except Exception as e:
             LOG.error("Exception in fw_delete %s" % str(e))
 
@@ -387,17 +352,10 @@ class FwMgr(stevedore.named.NamedExtensionManager):
             pol_data = self.os_helper.get_fw_policy(fw_pol_id)
             self.fw_policy_create(pol_data, cache=cache)
 
-    def _fw_rule_create_all(self, data, cache):
-        for drvr_name in self.drvr_obj:
-            self._fw_rule_create(drvr_name, data, cache)
-
     def fw_rule_create(self, data, fw_name=None, cache=False):
         LOG.debug("FW Rule Debug")
         try:
-            if fw_name is None:
-                self._fw_rule_create_all(data, cache)
-            else:
-                self._fw_rule_create(fw_name, data, cache)
+            self._fw_rule_create(fw_name, data, cache)
         except Exception as e:
             LOG.error("Exception in fw_rule_create %s" % str(e))
 
@@ -414,17 +372,10 @@ class FwMgr(stevedore.named.NamedExtensionManager):
         tenant_obj.delete_rule(rule_id)
         self.temp_db.del_rule_tenant(rule_id)
 
-    def _fw_rule_delete_all(self, data):
-        for drvr_name in self.drvr_obj:
-            self._fw_rule_delete(drvr_name, data)
-
     def fw_rule_delete(self, data, fw_name=None):
         LOG.debug("FW Rule delete")
         try:
-            if fw_name is None:
-                self._fw_rule_delete_all(data)
-            else:
-                self._fw_rule_delete(fw_name, data)
+            self._fw_rule_delete(fw_name, data)
         except Exception as e:
             LOG.error("Exception in fw_rule_delete %s" % str(e))
 
@@ -449,17 +400,10 @@ class FwMgr(stevedore.named.NamedExtensionManager):
         self.fwid_attr[tenant_id].rule_update(rule_id, rule)
         self._check_update_fw(tenant_id, drvr_name)
 
-    def _fw_rule_update_all(self, data):
-        for drvr_name in self.drvr_obj:
-            self._fw_rule_update(drvr_name, data)
-
     def fw_rule_update(self, data, fw_name=None):
         LOG.debug("FW Update Debug")
         try:
-            if fw_name is None:
-                self._fw_rule_update_all(data)
-            else:
-                self._fw_rule_update(fw_name, data)
+            self._fw_rule_update(fw_name, data)
         except Exception as e:
             LOG.error("Exception in fw_rule_update %s" % str(e))
 
@@ -476,17 +420,10 @@ class FwMgr(stevedore.named.NamedExtensionManager):
         tenant_obj.delete_policy(policy_id)
         self.temp_db.del_policy_tenant(policy_id)
 
-    def _fw_policy_delete_all(self, data):
-        for drvr_name in self.drvr_obj:
-            self._fw_policy_delete(drvr_name, data)
-
     def fw_policy_delete(self, data, fw_name=None):
         LOG.debug("FW Policy Debug")
         try:
-            if fw_name is None:
-                self._fw_policy_delete_all(data)
-            else:
-                self._fw_policy_delete(fw_name, data)
+            self._fw_policy_delete(fw_name, data)
         except Exception as e:
             LOG.error("Exception in fw_policy_delete %s" % str(e))
 
@@ -511,17 +448,10 @@ class FwMgr(stevedore.named.NamedExtensionManager):
                 rule_data = self.os_helper.get_fw_rule(rule_id)
                 self.fw_rule_create(rule_data, cache=cache)
 
-    def _fw_policy_create_all(self, data, cache):
-        for drvr_name in self.drvr_obj:
-            self._fw_policy_create(drvr_name, data, cache)
-
     def fw_policy_create(self, data, fw_name=None, cache=False):
         LOG.debug("FW Policy Debug")
         try:
-            if fw_name is None:
-                self._fw_policy_create_all(data, cache)
-            else:
-                self._fw_policy_create(fw_name, data, cache)
+            self._fw_policy_create(fw_name, data, cache)
         except Exception as e:
             LOG.error("Exception in fw_policy_create %s" % str(e))
 
@@ -547,3 +477,4 @@ class FwMgr(stevedore.named.NamedExtensionManager):
                 self.fw_rule_create(fw_evt_data, cache=True)
             fw_data = self.os_helper.get_fw(fw_id)
             self.fw_create(fw_data, cache=True)
+        return fw_dict

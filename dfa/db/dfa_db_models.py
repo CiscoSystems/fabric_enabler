@@ -349,6 +349,7 @@ class DfaFwInfo(db.Base):
     router_id = sa.Column(sa.String(36))
     router_net_id = sa.Column(sa.String(36))
     router_subnet_id = sa.Column(sa.String(36))
+    fw_mgmt_ip = sa.Column(sa.String(16))
     openstack_provision_status = sa.Column(sa.String(34))
     dcnm_provision_status = sa.Column(sa.String(38))
     device_provision_status = sa.Column(sa.String(30))
@@ -680,6 +681,12 @@ class DfaDBMixin(object):
             session.query(DfaFwInfo).filter_by(fw_id=fw_id).update(
                 {'device_provision_status': status})
 
+    def update_fw_db_mgmt_ip(self, fw_id, mgmt_ip):
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            session.query(DfaFwInfo).filter_by(fw_id=fw_id).update(
+                {'fw_mgmt_ip': mgmt_ip})
+
     # Tested with 1 FW
     def get_all_fw_db(self):
         session = db.get_session()
@@ -700,6 +707,7 @@ class DfaDBMixin(object):
             fw_dict['dcnm_status'] = alloc.dcnm_provision_status
             fw_dict['device_status'] = alloc.device_provision_status
             fw_dict['name'] = alloc.name
+            fw_dict['fw_mgmt_ip'] = alloc.fw_mgmt_ip
             rule_str = alloc.rules
             rule_dict = json.loads(rule_str)
             fw_dict['rules'] = rule_dict
