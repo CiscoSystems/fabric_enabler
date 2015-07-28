@@ -3,6 +3,8 @@ import pika
 import socket
 import sys
 import time
+import traceback
+
 
 from dfa.common import dfa_logger as logging
 
@@ -150,9 +152,10 @@ class DCNMListener(object):
                     self._conn.sleep(1)
             except:
                 exc_type, exc_value, exc_tb = sys.exc_info()
+                tb_str = traceback.format_exception(exc_type, exc_value, exc_tb)
                 LOG.exception("Failed to read from queue: %(queue)s "
                               "%(exc_type)s, %(exc_value)s, %(exc_tb)s.", {
                                   'queue': self._dcnm_queue_name,
                                   'exc_type': exc_type,
                                   'exc_value': exc_value,
-                                  'exc_tb': exc_tb})
+                                  'exc_tb': tb_str})

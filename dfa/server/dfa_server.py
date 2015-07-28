@@ -1277,8 +1277,10 @@ def dfa_server():
                 except Queue.Empty:
                     pass
                 else:
+                    trd_name = eval(exc).get('name')
+                    exc_tb = eval(exc).get('tb')
                     emsg = 'Exception occurred in %s thread. %s' % (
-                        trd.name, exc)
+                        trd_name, exc_tb)
                     LOG.error(emsg)
             # Check on dfa agents
             cur_time = time.time()

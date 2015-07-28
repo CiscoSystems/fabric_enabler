@@ -18,9 +18,11 @@
 import datetime
 import socket
 import struct
+import sys
 import threading
 from threading import Lock
 import time
+import traceback
 import uuid
 
 
@@ -79,9 +81,12 @@ class EventProcessingThread(threading.Thread):
     def run(self):
         try:
             getattr(self._hdlr, self._task)()
-        except Exception as e:
+        except:
             if self._excq:
-                self._excq.put(str(e), block=False)
+                exc_type, exc_value, exc_tb = sys.exc_info()
+                tbstr = traceback.format_exception(exc_type, exc_value, exc_tb)
+                exstr = str(dict(name=self._thread_name, tb=tbstr))
+                self._excq.put(exstr, block=False)
 
     @property
     def am_i_active(self):
