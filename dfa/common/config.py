@@ -106,6 +106,18 @@ default_notify_opts = {
     },
 }
 
+default_loadbalance_opts = {
+    'loadbalance': {
+        'lb_enabled': 'false',
+        'lb_service_vlan_id_min': '600',
+        'lb_service_vlan_id_max': '650',
+        'lb_vrf_profile': 'vrf-common-universal-dynamic-LB-ES',
+        'lb_svc_net_profile': 'serviceNetworkUniversalDynamicRoutingLBProfile',
+        'lb_svc_net': '199.199.1.0/24',
+        'lb_svc_net_name_prefix': 'lbaasinternal',
+    },
+}
+
 default_opts_list = [
     default_log_opts,
     default_neutron_opts,
@@ -114,6 +126,7 @@ default_opts_list = [
     default_dcnm_opts,
     default_notify_opts,
     default_firewall_opts,
+    default_loadbalance_opts,
 ]
 
 

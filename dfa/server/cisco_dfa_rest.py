@@ -62,6 +62,8 @@ class DFARESTClient(object):
         self._cfg_profile_list_url = ('http://%s/rest/auto-config/profiles' %
                                       self._ip)
         self._cfg_profile_get_url = self._cfg_profile_list_url + '/%s'
+        self._global_settings_url = ('http://%s/rest/auto-config/settings' %
+                                     self._ip)
         self._create_part_url = ('http://%s/rest/auto-config/' % self._ip +
                                  'organizations/%s/partitions')
         self._update_part_url = ('http://%s/rest/auto-config/' % self._ip +
@@ -85,6 +87,7 @@ class DFARESTClient(object):
 
         # Update the default network profile based on version of DCNM.
         self._set_default_cfg_profile()
+        self._default_md=None
 
     @property
     def is_iplus(self):
@@ -142,6 +145,27 @@ class DFARESTClient(object):
         res = self._send_request('GET', url, payload, 'config-profile')
         if res and res.status_code in self._resp_ok:
             return res.json()
+
+    def _get_settings(self):
+        """Get global mobility domain from DCNM."""
+        url = self._global_settings_url
+        payload = {}
+        res = self._send_request('GET', url, payload, 'settings')
+        if res and res.status_code in self._resp_ok:
+            return res.json()
+
+    def _set_default_mobility_domain(self):
+        settings = self._get_settings()
+        LOG.info("settings is %s" % settings) 
+        
+        if ('globalMobilityDomain' in settings.keys()): 
+            global_md = settings.get('globalMobilityDomain')
+            self._default_md = global_md.get('name')
+            LOG.info("setting default mobility domain to be %s" % self._default_md)
+        else:
+            self._default_md = "md0"
+            
+           
 
     def _create_org(self, name, desc):
         """Create organization on the DCNM.
@@ -385,7 +409,7 @@ class DFARESTClient(object):
             LOG.error("Failed to create %s network in DCNM.", network_info)
             raise dexc.DfaClientRequestFailed(reason=res)
 
-    def create_service_network(self, tenant_name, network, subnet):
+    def create_service_network(self, tenant_name, network, subnet,dhcp_range=True):
         """Create network on the DCNM.
 
         :param tenant_name: name of tenant the network belongs to
@@ -394,17 +418,21 @@ class DFARESTClient(object):
         """
         network_info = {}
         subnet_ip_mask = subnet.cidr.split('/')
+        if self._default_md is None:
+            self._set_default_mobility_domain()
+        vlan_id = 0
         gw_ip = subnet.gateway_ip
         part_name = network.part_name
         if not part_name:
             part_name = self._part_name
         if network.mob_domain:
             mob_domain_name = network.mob_domain_name
+        else: 
+            mob_domain_name = self._default_md
+           
+        if network.vlan_id:
             vlan_id = str(network.vlan_id)
-        else:
-            seg_id = str(network.segmentation_id)
-            vlan_id = '0'
-            mob_domain_name = None
+        
         seg_id = str(network.segmentation_id)
         seg_str = "$segmentId=" + seg_id
         cfg_args = [
@@ -431,10 +459,11 @@ class DFARESTClient(object):
                         "configArg": cfg_args,
                         "organizationName": tenant_name,
                         "partitionName": part_name,
-                        "description": network.name,
-                        "dhcpScope": dhcp_scopes}
+                        "description": network.name}
         if seg_id:
             network_info["segmentId"] = seg_id
+        if dhcp_range:
+            network_info["dhcpScope"] = dhcp_scopes
         if self.is_iplus:
             # Need to add the vrf name to the network info
             prof = self._config_profile_get(network.config_profile)

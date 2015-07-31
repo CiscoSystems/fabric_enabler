@@ -67,11 +67,12 @@ class DfaRpcServer(object):
         super(DfaRpcServer, self).__init__()
         transport = messaging.get_transport(cfg.CONF)
         target = messaging.Target(topic=topic, server=server, fanout=fanout)
-        endpoints=[endpoints]
+        endpoints = [endpoints]
         self._server = messaging.get_rpc_server(transport, target, endpoints,
                                                 executor=executor)
         LOG.debug('RPC server: topic=%s, server=%s, endpoints=%s' % (
                    topic, server, endpoints))
+
     def start(self):
         if self._server:
             self._server.start()
@@ -83,6 +84,7 @@ class DfaRpcServer(object):
     def stop(self):
         pass
 
+
 class DfaNotificationEndpoints(object):
 
     """Notification endpoints."""
@@ -91,6 +93,8 @@ class DfaNotificationEndpoints(object):
         self._endpoint = endp
 
     def info(self, ctxt, publisher_id, event_type, payload, metadata):
+        if "tenant_id" not in payload and "project_id" in ctxt:
+            payload["tenant_id"] = ctxt["project_id"]
         self._endpoint.callback(metadata.get('timestamp'), event_type, payload)
 
 
