@@ -19,6 +19,7 @@
 
 AUTO_NWK_CREATE = True
 DEVICE = 'phy_asa'
+SCHED_POLICY = 'max_sched'
 VLAN_ID_MIN = 2550
 VLAN_ID_MAX = 2650
 MOB_DOMAIN_NAME = 'md0'

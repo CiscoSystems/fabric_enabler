@@ -30,8 +30,9 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
         LOG.debug("Initializing physical ASA")
         super(PhyAsa, self).__init__()
 
-    def initialize(self, cfg):
+    def initialize(self, mgmt_ip_addr):
         LOG.debug("Initialize for PhyAsa")
+        self.mgmt_ip_addr = mgmt_ip_addr
 
     def is_device_virtual(self):
         return False
@@ -40,8 +41,9 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
         # Put it in a constant TODO(padkrish)
         return 'phy_asa'
 
-    def store_dcnm_obj(self, dcnm_obj):
-        self.dcnm_obj = dcnm_obj
+    def get_max_quota(self):
+        # Return the right value TODO
+        return 4
 
     def create_fw(self, tenant_id, data):
         LOG.debug("In creating phy ASA FW data is %s" % data)

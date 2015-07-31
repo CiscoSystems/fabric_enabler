@@ -46,6 +46,7 @@ default_vdp_opts = {
 default_firewall_opts = {
     'firewall': {
         'device': fw_const.DEVICE,
+        'sched_policy': fw_const.SCHED_POLICY,
         'fw_auto_serv_nwk_create': fw_const.AUTO_NWK_CREATE,
         'fw_service_vlan_id_min': fw_const.VLAN_ID_MIN,
         'fw_service_vlan_id_max': fw_const.VLAN_ID_MAX,
