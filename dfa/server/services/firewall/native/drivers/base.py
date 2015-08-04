@@ -34,34 +34,34 @@ class BaseDrvr(object):
     @abc.abstractmethod
     def initialize(self):
         '''Initialize method'''
-        Pass
+        pass
 
     @abc.abstractmethod
     def is_device_virtual(self):
         '''Return False if device is physical, True otherwise'''
-        Pass
+        pass
 
     @abc.abstractmethod
     def get_name(self):
         '''Return the name of the driver service'''
-        Pass
+        pass
 
     @abc.abstractmethod
     def get_max_quota(self):
         '''Retrieves the maximumnumber of FW that could be created'''
-        Pass
+        pass
 
     @abc.abstractmethod
     def create_fw(self, tenant_id, data):
         '''Create the Firewall'''
-        Pass
+        pass
 
     @abc.abstractmethod
     def delete_fw(self, tenant_id, data):
         '''Create the Firewall'''
-        Pass
+        pass
 
     @abc.abstractmethod
     def modify_fw(self, tenant_id, data):
         '''Create the Firewall'''
-        Pass
+        pass

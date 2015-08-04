@@ -233,4 +233,7 @@ class DfaFailureRecovery(object):
                 LOG.debug("Success on failure recovery to deleted "
                           "%(project)s" % ({'project': proj.name}))
 
+        # 6. Do failure recovery for Firewall service
+        self.fw_retry_failures()
+
         LOG.info("Finished failure_recovery.")

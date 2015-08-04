@@ -15,10 +15,9 @@
 #
 # @author: Padmanabhan Krishnan, Cisco Systems, Inc.
 
-import stevedore
-
 from dfa.db import dfa_db_models as dfa_dbm
 from dfa.common import dfa_logger as logging
+from dfa.common import utils as sys_utils
 from dfa.server.dfa_openstack_helper import DfaNeutronHelper as OsHelper
 from dfa.server.services.firewall.native import fabric_setup_base as fabric
 from dfa.server.services.firewall.native import fw_constants
@@ -27,8 +26,7 @@ from dfa.server.services.firewall.native.drivers import dev_mgr
 LOG = logging.getLogger(__name__)
 
 
-# Remove after DB is implemented
-class FwTempDb(dfa_dbm.DfaDBMixin):
+class FwTempDb(object):
 
     '''
     This class maintains a mapping of rule, policies and FW and its associated
@@ -36,35 +34,45 @@ class FwTempDb(dfa_dbm.DfaDBMixin):
     '''
 
     def __init__(self):
+        ''' Initialize '''
         self.rule_tenant_dict = {}
         self.policy_tenant_dict = {}
         self.fw_tenant_dict = {}
 
     def store_rule_tenant(self, rule_id, tenant_id):
+        ''' Stores the tenant ID corresponding to the rule'''
         self.rule_tenant_dict[rule_id] = tenant_id
 
     def get_rule_tenant(self, rule_id):
+        ''' Retrieves the tenant ID corresponding to the rule'''
         return self.rule_tenant_dict[rule_id]
 
     def store_policy_tenant(self, policy_id, tenant_id):
+        ''' Stores the tenant ID corresponding to the policy'''
         self.policy_tenant_dict[policy_id] = tenant_id
 
     def get_policy_tenant(self, policy_id):
+        ''' Retrieves the tenant ID corresponding to the policy'''
         return self.policy_tenant_dict[policy_id]
 
     def store_fw_tenant(self, fw_id, tenant_id):
+        ''' Stores the tenant ID corresponding to the firewall'''
         self.fw_tenant_dict[fw_id] = tenant_id
 
     def get_fw_tenant(self, fw_id):
+        ''' Retrieves the tenant ID corresponding to the firewall'''
         return self.fw_tenant_dict[fw_id]
 
     def del_fw_tenant(self, fw_id):
+        ''' Deletes the FW Tenant mapping '''
         del self.fw_tenant_dict[fw_id]
 
     def del_policy_tenant(self, pol_id):
+        ''' Deletes the Tenant policy mapping '''
         del self.policy_tenant_dict[pol_id]
 
     def del_rule_tenant(self, rule_id):
+        ''' Deletes the Tenant policy mapping '''
         del self.rule_tenant_dict[rule_id]
 
 
@@ -73,6 +81,7 @@ class FwMapAttr(object):
     '''Firewall Attributes. This is created per tenant'''
 
     def __init__(self, tenant_id):
+        ''' Initialize '''
         self.rules = {}
         self.policies = {}
         self.tenant_id = tenant_id
@@ -82,20 +91,28 @@ class FwMapAttr(object):
         self.fw_created = False
         self.fw_drvr_status = False
         self.fw_id = None
+        self.tenant_name = None
+        self.fw_name = None
+        self.mutex_lock = sys_utils.lock()
 
     def store_policy(self, pol_id, policy):
+        ''' Store the policy. Policy is maintained as a dictionary of pol ID
+        '''
         if pol_id not in self.policies:
             self.policies[pol_id] = policy
             self.policy_cnt += 1
 
     def store_rule(self, rule_id, rule):
+        ''' Store the rules. Policy is maintained as a dictionary of Rule ID
+        '''
         if rule_id not in self.rules:
             self.rules[rule_id] = rule
             self.rule_cnt += 1
 
     def delete_rule(self, rule_id):
+        ''' Delete the specific Rule from the dictionary indexed by rule id '''
         if rule_id not in self.rules:
-            LOG.error("No Rule id present for deleting %s" % rule_id)
+            LOG.error("No Rule id present for deleting %s", rule_id)
             return
         del self.rules[rule_id]
         self.rule_cnt -= 1
@@ -104,27 +121,38 @@ class FwMapAttr(object):
         # that rule
 
     def is_rule_present(self, rule_id):
+        ''' Returns if the rule specified by rule id is present in the
+            dictionary
+        '''
         if rule_id not in self.rules:
             return False
         else:
             return True
 
     def rule_update(self, rule_id, rule):
+        ''' Update the rule '''
         if rule_id not in self.rules:
-            LOG.error("Rule ID not present %s" % rule_id)
+            LOG.error("Rule ID not present %s", rule_id)
             return
         self.rules[rule_id].update(rule)
 
     def is_policy_present(self, pol_id):
+        ''' Returns a boolean based on if the policy index by ID is present
+            in the dictionary
+        '''
         return pol_id in self.policies
 
     def is_fw_present(self, fw_id):
+        ''' Returns a boolean based on if the firewall index by ID is present
+            in the dictionary
+        '''
         if self.fw_id is None or self.fw_id != fw_id:
             return False
         else:
             return True
 
     def create_fw(self, proj_name, pol_id, fw_id, fw_name):
+        ''' Fills up the local attributes when FW is created '''
         self.tenant_name = proj_name
         self.fw_id = fw_id
         self.fw_name = fw_name
@@ -132,23 +160,38 @@ class FwMapAttr(object):
         self.active_pol_id = pol_id
 
     def delete_fw(self, fw_id):
+        ''' Deletes the FW local attributes '''
         self.fw_id = None
         self.fw_name = None
         self.fw_created = False
         self.active_pol_id = None
 
     def delete_policy(self, pol_id):
+        ''' Deletes the policy from the local dictionary '''
         if pol_id not in self.policies:
-            LOG.error("Invalid policy %s" % pol_id)
+            LOG.error("Invalid policy %s", pol_id)
             return
         del self.policies[pol_id]
         self.policy_cnt -= 1
 
     def is_fw_complete(self):
-        # This API returns the complete status of FW.
-        # This returns True if a FW is created with a active policy that has
-        # more than one rule associated with it and if a driver init is done
-        # successfully.
+        ''' This API returns the complete status of FW.
+            This returns True if a FW is created with a active policy that has
+            more than one rule associated with it and if a driver init is done
+            successfully.
+        '''
+        LOG.info("In fw_complete needed %(fw_created)s %(active_policy_id)s"
+                 " %(is_fw_drvr_created)s %(pol_present)s",
+                 {'fw_created': self.fw_created,
+                  'active_policy_id': self.active_pol_id,
+                  'is_fw_drvr_created': self.is_fw_drvr_created(),
+                  'pol_present': self.active_pol_id in self.policies})
+        if self.active_pol_id is not None:
+            LOG.info("In Drvr create needed %(len_policy)s %(one_rule)s",
+                     {'len_policy':
+                      len(self.policies[self.active_pol_id]['rule_dict']),
+                      'one_rule':
+                      self.one_rule_present(self.active_pol_id)})
         return self.fw_created and self.active_pol_id and (
             self.is_fw_drvr_created()) and (
             self.active_pol_id in self.policies) and (
@@ -156,10 +199,23 @@ class FwMapAttr(object):
             self.one_rule_present(self.active_pol_id))
 
     def is_fw_drvr_create_needed(self):
-        # This API returns True if a driver init needs to be performed
-        # This returns True if a FW is created with a active policy that has
-        # more than one rule associated with it and if a driver init is NOT
-        # done.
+        ''' This API returns True if a driver init needs to be performed
+            This returns True if a FW is created with a active policy that has
+            more than one rule associated with it and if a driver init is NOT
+            done.
+        '''
+        LOG.info("In Drvr create needed %(fw_created)s %(active_policy_id)s"
+                 " %(is_fw_drvr_created)s %(pol_present)s",
+                 {'fw_created': self.fw_created,
+                  'active_policy_id': self.active_pol_id,
+                  'is_fw_drvr_created': self.is_fw_drvr_created(),
+                  'pol_present': self.active_pol_id in self.policies})
+        if self.active_pol_id is not None:
+            LOG.info("In Drvr create needed %(len_policy)s %(one_rule)s",
+                     {'len_policy':
+                      len(self.policies[self.active_pol_id]['rule_dict']),
+                      'one_rule':
+                      self.one_rule_present(self.active_pol_id)})
         return self.fw_created and self.active_pol_id and (
             not self.is_fw_drvr_created()) and (
             self.active_pol_id in self.policies) and (
@@ -167,6 +223,7 @@ class FwMapAttr(object):
             self.one_rule_present(self.active_pol_id))
 
     def one_rule_present(self, pol_id):
+        ''' Returns if atleast one rule is present in the policy '''
         pol_dict = self.policies[pol_id]
         for rule in pol_dict['rule_dict']:
             if self.is_rule_present(rule):
@@ -174,17 +231,24 @@ class FwMapAttr(object):
         return False
 
     def fw_drvr_created(self, status):
-        # This stores the status of the driver init, this API assumes only one
-        # FW driver
+        ''' This stores the status of the driver init, this API assumes only
+            one FW driver
+        '''
         self.fw_drvr_status = status
 
     def is_fw_drvr_created(self):
-        # This returns the status of the driver, this API assumes only one FW
-        # driver
+        ''' This returns the status of the driver, this API assumes only one FW
+            driver
+        '''
         return self.fw_drvr_status
 
     def get_fw_dict(self):
+        ''' This API creates a FW dictionary from the local attributes and
+            returns it.
+        '''
         fw_dict = {}
+        if self.fw_id is None:
+            return fw_dict
         fw_dict['rules'] = {}
         fw_dict['tenant_name'] = self.tenant_name
         fw_dict['tenant_id'] = self.tenant_id
@@ -202,7 +266,13 @@ class FwMgr(dev_mgr.DeviceMgr):
     '''Firewall Native Manager'''
 
     def __init__(self, cfg):
-        LOG.debug("Initializing Native FW Manager")
+        ''' Initialization routine. It populates the local cache after reading
+            the DB. It initializes the Fabric class and DeviceMgr class.
+        '''
+        LOG.debug("Initializing Native FW Manager %s", cfg.firewall.device)
+        self.fw_init = False
+        if cfg.firewall.device is None or cfg.firewall.device is '':
+            return
         super(FwMgr, self).__init__(cfg)
         self.events.update({
             'firewall_rule.create.end': self.fw_rule_create,
@@ -221,47 +291,81 @@ class FwMgr(dev_mgr.DeviceMgr):
         self.os_helper = OsHelper()
         fw_dict = self.pop_local_cache()
         self.pop_local_sch_cache(fw_dict)
+        self.dcnm_obj = None
+        self.fw_init = True
 
     def populate_cfg_dcnm(self, cfg, dcnm_obj):
+        ''' This routine is for storing the DCNM obj to make use of the
+            utility functions.
+        '''
+        if not self.fw_init:
+            return
         self.dcnm_obj = dcnm_obj
         self.fabric.store_dcnm(dcnm_obj)
 
+    def _create_fw_fab_dev(self, tenant_id, drvr_name, fw_dict):
+        '''
+            This routine calls the fabric class to prepare the fabric when
+            a firewall is created. It also calls the device manager to
+            configure the device. It updates the database with the final
+            result.
+        '''
+        is_fw_virt = self.is_device_virtual()
+        ret = self.fabric.prepare_fabric_fw(tenant_id,
+                                            fw_dict.get('tenant_name'),
+                                            fw_dict.get('fw_id'),
+                                            fw_dict.get('fw_name'),
+                                            is_fw_virt)
+        if not ret:
+            LOG.error("Prepare Fabric failed")
+            return
+        else:
+            self.update_fw_db_final_result(fw_dict.get('fw_id'), (
+                fw_constants.RESULT_FW_CREATE_DONE))
+        ret = self.create_fw_device(tenant_id, fw_dict.get('fw_id'),
+                                    fw_dict)
+        if ret:
+            self.fwid_attr[tenant_id].fw_drvr_created(True)
+            self.update_fw_db_dev_status(fw_dict.get('fw_id'), 'SUCCESS')
+            LOG.info("FW device create returned success")
+        else:
+            LOG.error("FW device create returned failure")
+
     def _check_create_fw(self, tenant_id, drvr_name):
+        '''
+            This function first checks if all the configuration are done
+            for a FW to be launched. After that it creates the FW entry in the
+            DB. After that, it calls the routine to prepare the fabric and
+            configure the device
+        '''
         if self.fwid_attr[tenant_id].is_fw_drvr_create_needed():
             fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
-            is_fw_virt = self.is_device_virtual()
-            # What's the third argumennt really doing? TODO
-            ret = self.add_fw_db(fw_dict.get('fw_id'), fw_dict,
-                                 fw_constants.RESULT_FW_CREATE_INIT)
-            if not ret:
-                return
-            ret = self.fabric.prepare_fabric_fw(tenant_id,
-                                                fw_dict.get('tenant_name'),
-                                                fw_dict.get('fw_id'),
-                                                fw_dict.get('fw_name'),
-                                                is_fw_virt)
-            if not ret:
-                return
-            else:
-                self.update_fw_db_final_result(fw_dict.get('fw_id'), (
-                    fw_constants.RESULT_FW_CREATE_DONE))
-            ret = self.create_fw_device(tenant_id, fw_dict.get('fw_id'),
-                                        fw_dict)
-            if ret:
-                self.fwid_attr[tenant_id].fw_drvr_created(True)
-                self.update_fw_db_dev_status(fw_dict.get('fw_id'), 'SUCCESS')
+            try:
+                with self.fwid_attr[tenant_id].mutex_lock:
+                    ret = self.add_fw_db(fw_dict.get('fw_id'), fw_dict,
+                                         fw_constants.RESULT_FW_CREATE_INIT)
+                    if not ret:
+                        LOG.error("Adding FW DB failed")
+                        return
+                    self._create_fw_fab_dev(tenant_id, drvr_name, fw_dict)
+            except Exception as exc:
+                LOG.error("Exception raised in create fw %s", str(exc))
 
-    def _check_delete_fw(self, tenant_id, drvr_name):
-        fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
+    def _delete_fw_fab_dev(self, tenant_id, drvr_name, fw_dict):
+        '''
+            This routine calls the fabric class to delete the fabric when
+            a firewall is deleted. It also calls the device manager to
+            unconfigure the device. It updates the database with the final
+            result.
+        '''
         is_fw_virt = self.is_device_virtual()
-        self.update_fw_db_final_result(fw_dict.get('fw_id'), (
-            fw_constants.RESULT_FW_DELETE_INIT))
         ret = self.fabric.delete_fabric_fw(tenant_id,
                                            fw_dict.get('tenant_name'),
                                            fw_dict.get('fw_id'),
                                            fw_dict.get('fw_name'),
                                            is_fw_virt)
         if not ret:
+            LOG.error("Error in delete_fabric_fw")
             return
         self.update_fw_db_final_result(fw_dict.get('fw_id'), (
             fw_constants.RESULT_FW_DELETE_DONE))
@@ -272,12 +376,37 @@ class FwMgr(dev_mgr.DeviceMgr):
                 self.fwid_attr[tenant_id].fw_drvr_created(False)
                 self.delete_fw(fw_dict.get('fw_id'))
 
+    def _check_delete_fw(self, tenant_id, drvr_name):
+        '''
+            This function after modifying the DB with delete operation status,
+            calls the routine to remove the fabric cfg from DB and unconfigure
+            the device
+        '''
+        fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
+        try:
+            with self.fwid_attr[tenant_id].mutex_lock:
+                self.update_fw_db_final_result(fw_dict.get('fw_id'), (
+                    fw_constants.RESULT_FW_DELETE_INIT))
+                self._delete_fw_fab_dev(tenant_id, drvr_name, fw_dict)
+        except Exception as exc:
+            LOG.error("Exception raised in delete fw %s", str(exc))
+
     def _check_update_fw(self, tenant_id, drvr_name):
+        ''' This function calls the device manager routine to update the device
+            with modified FW cfg.
+        '''
         if self.fwid_attr[tenant_id].is_fw_complete():
             fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
             self.modify_fw_device(tenant_id, fw_dict)
 
     def _fw_create(self, drvr_name, data, cache):
+        '''
+            This function updates its local cache with FW parameters.
+            It checks if local cache has information about the Policy
+            associated with the FW. If not, it means a restart has happened.
+            It retrieves the policy associated with the FW by calling
+            Openstack API's and calls t he policy create internal routine.
+        '''
         fw = data.get('firewall')
         tenant_id = fw.get('tenant_id')
         fw_name = fw.get('name')
@@ -299,21 +428,27 @@ class FwMgr(dev_mgr.DeviceMgr):
         if fw_pol_id is not None and not (
                 tenant_obj.is_policy_present(fw_pol_id)):
             pol_data = self.os_helper.get_fw_policy(fw_pol_id)
-            self.fw_policy_create(pol_data, cache=cache)
+            if pol_data is not None:
+                self.fw_policy_create(pol_data, cache=cache)
 
     def fw_create(self, data, fw_name=None, cache=False):
-        LOG.debug("FW Debug")
+        ''' Top level FW create function'''
+        LOG.debug("FW create %s", data)
         try:
             self._fw_create(fw_name, data, cache)
-        except Exception as e:
-            LOG.error("Exception in fw_create %s" % str(e))
+        except Exception as exc:
+            LOG.error("Exception in fw_create %s", str(exc))
 
     def _fw_delete(self, drvr_name, data):
+        '''
+            This function calls routines to remove FW from fabric and device.
+            It also updates its local cache.
+        '''
         fw_id = data.get('firewall_id')
         tenant_id = self.temp_db.get_fw_tenant(fw_id)
 
         if tenant_id not in self.fwid_attr:
-            LOG.error("Invalid tenant id for FW delete %s" % tenant_id)
+            LOG.error("Invalid tenant id for FW delete %s", tenant_id)
             return
         tenant_obj = self.fwid_attr[tenant_id]
         self._check_delete_fw(tenant_id, drvr_name)
@@ -321,14 +456,15 @@ class FwMgr(dev_mgr.DeviceMgr):
         self.temp_db.del_fw_tenant(fw_id)
 
     def fw_delete(self, data, fw_name=None):
-        LOG.debug("FW Debug")
+        ''' Top level FW delete function '''
+        LOG.debug("FW delete %s", data)
         try:
             self._fw_delete(fw_name, data)
-        except Exception as e:
-            LOG.error("Exception in fw_delete %s" % str(e))
+        except Exception as exc:
+            LOG.error("Exception in fw_delete %s", str(exc))
 
-    def _fw_rule_create(self, drvr_name, data, cache):
-        tenant_id = data.get('firewall_rule').get('tenant_id')
+    def _fw_rule_decode_store(self, data):
+        ''' Misc function to decode the firewall rule from Openstack'''
         rule = {}
         fw_rule = data.get('firewall_rule')
         rule['protocol'] = fw_rule.get('protocol')
@@ -339,6 +475,19 @@ class FwMgr(dev_mgr.DeviceMgr):
         rule['action'] = fw_rule.get('action')
         rule['enabled'] = fw_rule.get('enabled')
         rule['name'] = fw_rule.get('name')
+        return rule
+
+    def _fw_rule_create(self, drvr_name, data, cache):
+        '''
+            This function updates its local cache with rule parameters.
+            It checks if local cache has information about the Policy
+            associated with the rule. If not, it means a restart has happened.
+            It retrieves the policy associated with the FW by calling
+            Openstack API's and calls t he policy create internal routine.
+        '''
+        tenant_id = data.get('firewall_rule').get('tenant_id')
+        fw_rule = data.get('firewall_rule')
+        rule = self._fw_rule_decode_store(data)
         fw_pol_id = fw_rule.get('firewall_policy_id')
         rule_id = fw_rule.get('id')
         if tenant_id not in self.fwid_attr:
@@ -350,21 +499,24 @@ class FwMgr(dev_mgr.DeviceMgr):
         if fw_pol_id is not None and not (
                 self.fwid_attr[tenant_id].is_policy_present(fw_pol_id)):
             pol_data = self.os_helper.get_fw_policy(fw_pol_id)
-            self.fw_policy_create(pol_data, cache=cache)
+            if pol_data is not None:
+                self.fw_policy_create(pol_data, cache=cache)
 
     def fw_rule_create(self, data, fw_name=None, cache=False):
-        LOG.debug("FW Rule Debug")
+        ''' Top level rule creation routine'''
+        LOG.debug("FW Rule create %s", data)
         try:
             self._fw_rule_create(fw_name, data, cache)
-        except Exception as e:
-            LOG.error("Exception in fw_rule_create %s" % str(e))
+        except Exception as exc:
+            LOG.error("Exception in fw_rule_create %s", str(exc))
 
     def _fw_rule_delete(self, drvr_name, data):
+        ''' Function that updates its local cache after a rule is deleted'''
         rule_id = data.get('firewall_rule_id')
         tenant_id = self.temp_db.get_rule_tenant(rule_id)
 
         if tenant_id not in self.fwid_attr:
-            LOG.error("Invalid tenant id for FW delete %s" % tenant_id)
+            LOG.error("Invalid tenant id for FW delete %s", tenant_id)
             return
         tenant_obj = self.fwid_attr[tenant_id]
         # Guess actual FW/policy need not be deleted if this is the active
@@ -373,14 +525,19 @@ class FwMgr(dev_mgr.DeviceMgr):
         self.temp_db.del_rule_tenant(rule_id)
 
     def fw_rule_delete(self, data, fw_name=None):
-        LOG.debug("FW Rule delete")
+        ''' Top level rule delete function'''
+        LOG.debug("FW Rule delete %s", data)
         try:
             self._fw_rule_delete(fw_name, data)
-        except Exception as e:
-            LOG.error("Exception in fw_rule_delete %s" % str(e))
+        except Exception as exc:
+            LOG.error("Exception in fw_rule_delete %s", str(exc))
 
     def _fw_rule_update(self, drvr_name, data):
-        LOG.debug("FW Update %s" % data)
+        '''
+            Function to decode the updated rules and call routines that
+            in turn calls the device routines to update rules.
+        '''
+        LOG.debug("FW Update %s", data)
         tenant_id = data.get('firewall_rule').get('tenant_id')
         rule = {}
         fw_rule = data.get('firewall_rule')
@@ -395,24 +552,26 @@ class FwMgr(dev_mgr.DeviceMgr):
         rule_id = fw_rule.get('id')
         if tenant_id not in self.fwid_attr or not (
            self.fwid_attr[tenant_id].is_rule_present(rule_id)):
-            LOG.error("Incorrect update info for tenant %s" % tenant_id)
+            LOG.error("Incorrect update info for tenant %s", tenant_id)
             return
         self.fwid_attr[tenant_id].rule_update(rule_id, rule)
         self._check_update_fw(tenant_id, drvr_name)
 
     def fw_rule_update(self, data, fw_name=None):
+        ''' Top level rule update routine'''
         LOG.debug("FW Update Debug")
         try:
             self._fw_rule_update(fw_name, data)
-        except Exception as e:
-            LOG.error("Exception in fw_rule_update %s" % str(e))
+        except Exception as exc:
+            LOG.error("Exception in fw_rule_update %s", str(exc))
 
     def _fw_policy_delete(self, drvr_name, data):
+        '''Routine to delete the policy from local cache'''
         policy_id = data.get('firewall_policy_id')
         tenant_id = self.temp_db.get_policy_tenant(policy_id)
 
         if tenant_id not in self.fwid_attr:
-            LOG.error("Invalid tenant id for FW delete %s" % tenant_id)
+            LOG.error("Invalid tenant id for FW delete %s", tenant_id)
             return
         tenant_obj = self.fwid_attr[tenant_id]
         # Guess actual FW need not be deleted since if this is the active
@@ -421,16 +580,25 @@ class FwMgr(dev_mgr.DeviceMgr):
         self.temp_db.del_policy_tenant(policy_id)
 
     def fw_policy_delete(self, data, fw_name=None):
+        ''' Top level policy delete routine'''
         LOG.debug("FW Policy Debug")
         try:
             self._fw_policy_delete(fw_name, data)
-        except Exception as e:
-            LOG.error("Exception in fw_policy_delete %s" % str(e))
+        except Exception as exc:
+            LOG.error("Exception in fw_policy_delete %s", str(exc))
 
     def _fw_policy_create(self, drvr_name, data, cache):
+        '''
+            This function updates its local cache with policy parameters.
+            It checks if local cache has information about the rules
+            associated with the policy. If not, it means a restart has
+            happened. It retrieves the rules associated with the policy by
+            calling Openstack API's and calls the rule create internal routine.
+        '''
         policy = {}
         fw_policy = data.get('firewall_policy')
         tenant_id = fw_policy.get('tenant_id')
+        LOG.info("Creating policy for tenant %s", tenant_id)
         policy_id = fw_policy.get('id')
         policy_name = fw_policy.get('name')
         pol_rule_dict = fw_policy.get('firewall_rules')
@@ -446,16 +614,24 @@ class FwMgr(dev_mgr.DeviceMgr):
             rule_id = rule
             if not self.fwid_attr[tenant_id].is_rule_present(rule_id):
                 rule_data = self.os_helper.get_fw_rule(rule_id)
-                self.fw_rule_create(rule_data, cache=cache)
+                if rule_data is not None:
+                    self.fw_rule_create(rule_data, cache=cache)
 
     def fw_policy_create(self, data, fw_name=None, cache=False):
+        ''' Top level policy create routine'''
         LOG.debug("FW Policy Debug")
         try:
             self._fw_policy_create(fw_name, data, cache)
-        except Exception as e:
-            LOG.error("Exception in fw_policy_create %s" % str(e))
+        except Exception as exc:
+            LOG.error("Exception in fw_policy_create %s", str(exc))
 
     def convert_fwdb_event_msg(self, rule, tenant_id, rule_id, policy_id):
+        '''
+            From inputs from DB, this will create a FW rule dictionary that
+            resembles the actual data from Openstack when a rule is created.
+            This is usually called after restart, in order to populate local
+            cache.
+        '''
         fw_rule_data = {}
         rule['tenant_id'] = tenant_id
         rule['id'] = rule_id
@@ -464,7 +640,14 @@ class FwMgr(dev_mgr.DeviceMgr):
         return fw_rule_data
 
     def pop_local_cache(self):
+        '''
+        This populates the local cache after reading the Database.
+        It calls the appropriate rule create, fw create routines.
+        It doesn't actually call the routine to prepare the fabric or cfg the
+        device since it will be handled by retry module.
+        '''
         fw_dict = self.get_all_fw_db()
+        LOG.info("Populating FW Mgr Local Cache")
         for fw_id in fw_dict:
             fw_data = fw_dict.get(fw_id)
             tenant_id = fw_data.get('tenant_id')
@@ -474,7 +657,125 @@ class FwMgr(dev_mgr.DeviceMgr):
                 fw_evt_data = self.convert_fwdb_event_msg(rule_dict.get(rule),
                                                           tenant_id, rule,
                                                           policy_id)
+                LOG.info("Populating Rules for tenant %s", tenant_id)
                 self.fw_rule_create(fw_evt_data, cache=True)
-            fw_data = self.os_helper.get_fw(fw_id)
-            self.fw_create(fw_data, cache=True)
+            fw_os_data = self.os_helper.get_fw(fw_id)
+            if fw_os_data is not None:
+                LOG.info("Populating FW for tenant %s", tenant_id)
+                self.fw_create(fw_os_data, cache=True)
+            if fw_data.get('device_status') == 'SUCCESS':
+                self.fwid_attr[tenant_id].fw_drvr_created(True)
+            else:
+                self.fwid_attr[tenant_id].fw_drvr_created(False)
         return fw_dict
+
+    def retry_failure_fab_dev(self, tenant_id, fw_data, fw_dict):
+        '''
+        This module calls routine in fabric to retry the failure cases.
+        If device is not successfully cfg/uncfg, it calls the device manager
+        routine to cfg/uncfg the device.
+        '''
+        result = fw_data.get('result')
+        is_fw_virt = self.is_device_virtual()
+        flag = False
+        if result == fw_constants.RESULT_FW_CREATE_INIT:
+            flag = True
+            final_res = fw_constants.RESULT_FW_CREATE_DONE
+        else:
+            if result == fw_constants.RESULT_FW_DELETE_INIT:
+                flag = True
+                final_res = fw_constants.RESULT_FW_DELETE_DONE
+        if flag:
+            name = dfa_dbm.DfaDBMixin.get_project_name(self, tenant_id)
+            ret = self.fabric.retry_failure(tenant_id, name, fw_dict,
+                                            is_fw_virt, result)
+            if not ret:
+                LOG.error("Retry failure returned fail for tenant %s",
+                          tenant_id)
+                return
+            else:
+                self.update_fw_db_final_result(fw_dict.get('fw_id'), final_res)
+        if result == fw_constants.RESULT_FW_CREATE_INIT:
+            if fw_data.get('device_provision_status') != 'SUCCESS':
+                ret = self.create_fw_device(tenant_id, fw_dict.get('fw_id'),
+                                            fw_dict)
+                if ret:
+                    self.fwid_attr[tenant_id].fw_drvr_created(True)
+                    self.update_fw_db_dev_status(fw_dict.get('fw_id'),
+                                                 'SUCCESS')
+                    LOG.info("Retry failue return success for create"
+                             " tenant %s", tenant_id)
+        else:
+            if self.fwid_attr[tenant_id].is_fw_drvr_created():
+                ret = self.delete_fw_device(tenant_id, fw_dict.get('fw_id'),
+                                            fw_dict)
+                if ret:
+                    self.fwid_attr[tenant_id].fw_drvr_created(False)
+                    self.delete_fw(fw_dict.get('fw_id'))
+                    self.fwid_attr[tenant_id].delete_fw(fw_dict.get('fw_id'))
+                    self.temp_db.del_fw_tenant(fw_dict.get('fw_id'))
+                    LOG.info("Retry failue return success for delete"
+                             " tenant %s", tenant_id)
+
+    def fw_retry_failures_create(self):
+        '''This module is called for retrying the create cases'''
+        for tenant_id in self.fwid_attr:
+            try:
+                with self.fwid_attr[tenant_id].mutex_lock:
+                    if self.fwid_attr[tenant_id].is_fw_drvr_create_needed():
+                        fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
+                        if len(fw_dict) > 0:
+                            fw_obj, fw_data = self.get_fw(fw_dict.get('fw_id'))
+                            self.retry_failure_fab_dev(tenant_id, fw_data,
+                                                       fw_dict)
+                        else:
+                            LOG.error("FW data not found for tenant %s",
+                                      tenant_id)
+            except Exception as exc:
+                LOG.error("Exception in retry failure create %s", str(exc))
+
+    def fill_fw_dict_from_db(self, fw_data):
+        ''' This routine is called to create a local fw_dict with data from DB.
+        '''
+        rule_dict = fw_data.get('rules').get('rules')
+        fw_dict = {}
+        fw_dict['fw_id'] = fw_data.get('fw_id')
+        fw_dict['fw_name'] = fw_data.get('name')
+        fw_dict['firewall_policy_id'] = fw_data.get('firewall_policy_id')
+        fw_dict['rules'] = {}
+        for rule in rule_dict:
+            fw_dict['rules'][rule] = rule_dict.get(rule)
+        return fw_dict
+
+    def fw_retry_failures_delete(self):
+        '''This routine is called for retrying the delete cases'''
+        for tenant_id in self.fwid_attr:
+            try:
+                with self.fwid_attr[tenant_id].mutex_lock:
+                    # For both create and delete case
+                    fw_data = self.get_fw_by_tenant_id(tenant_id)
+                    if fw_data is None:
+                        LOG.info("No FW for tenant %s", tenant_id)
+                        return
+                    result = fw_data.get('result')
+                    if result == fw_constants.RESULT_FW_DELETE_INIT:
+                        fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
+                        # This means a restart has happened before the FW is
+                        # completely deleted
+                        if len(fw_dict) <= 0:
+                            # Need to fill fw_dict from fw_data
+                            fw_dict = self.fill_fw_dict_from_db(fw_data)
+                        self.retry_failure_fab_dev(tenant_id, fw_data,
+                                                   fw_dict)
+            except Exception as exc:
+                LOG.error("Exception in retry failure %s", str(exc))
+
+    def fw_retry_failures(self):
+        ''' Top level retry routine called '''
+        if not self.fw_init:
+            return
+        try:
+            self.fw_retry_failures_create()
+            self.fw_retry_failures_delete()
+        except Exception as exc:
+            LOG.error("Exception in retry failures %s", str(exc))

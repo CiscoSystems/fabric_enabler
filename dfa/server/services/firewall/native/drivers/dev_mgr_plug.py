@@ -26,11 +26,13 @@ class DeviceMgr(stevedore.named.NamedExtensionManager):
     '''Device Manager'''
 
     def __init__(self, cfg, dev_name):
+        ''' Initialization '''
         super(DeviceMgr, self).__init__('services.firewall.native.drivers',
                                         # cfg.firewall.device,
                                         dev_name, invoke_on_load=True)
 
     def get_drvr_obj(self):
-        # Is there a cleaner way other than this Loop TODO
+        ''' Return the dynamically loaded object '''
+        # Is there a cleaner way other than this Loop fixme
         for ext in self:
             return ext.obj

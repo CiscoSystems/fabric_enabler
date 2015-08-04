@@ -15,7 +15,6 @@
 #
 # @author: Padmanabhan Krishnan, Cisco Systems, Inc.
 
-import stevedore
 from dfa.common import dfa_logger as logging
 from dfa.server.services.firewall.native import fw_constants as fw_const
 from dfa.server.services.firewall.native.drivers import dev_mgr_plug
@@ -27,9 +26,13 @@ LOG = logging.getLogger(__name__)
 # goto first device until it exhausts
 class MaxSched(object):
 
-    '''Max Sched'''
+    '''
+    Max Sched. This scheduler will return the first firewall until it reaches
+    its quota
+    '''
 
     def __init__(self, obj_dict):
+        ''' Initialization '''
         self.num_res = len(obj_dict)
         self.obj_dict = obj_dict
         self.res = dict()
@@ -46,6 +49,9 @@ class MaxSched(object):
             cnt = cnt + 1
 
     def allocate_fw_dev(self, fw_id):
+        '''
+        Allocate the first Firewall device which has resources available
+        '''
         for cnt in self.res:
             used = self.res.get(cnt).get('used')
             if used < self.res.get(cnt).get('quota'):
@@ -56,6 +62,7 @@ class MaxSched(object):
         return None
 
     def get_fw_dev_map(self, fw_id):
+        ''' Return the object dict and mgmt ip for a firewall '''
         for cnt in self.res:
             if self.res.get(cnt).get('fw_id') == fw_id:
                 return self.res[cnt].get('obj_dict'), (
@@ -63,16 +70,18 @@ class MaxSched(object):
         return None, None
 
     def deallocate_fw_dev(self, fw_id):
+        ''' Release the firewall resource '''
         for cnt in self.res:
             if self.res.get(cnt).get('fw_id') == fw_id:
                 self.res[cnt]['used'] = self.res[cnt]['used'] - 1
 
 
-class DeviceMgr(stevedore.named.NamedExtensionManager):
+class DeviceMgr(object):
 
     '''Device Manager'''
 
     def __init__(self, cfg):
+        ''' Initialization '''
         self.drvr_obj = {}
         self.mgmt_ip_list = cfg.firewall.fw_mgmt_ip
         self.mgmt_ip_list = self.mgmt_ip_list.strip('[').rstrip(']').split(',')
@@ -92,19 +101,24 @@ class DeviceMgr(stevedore.named.NamedExtensionManager):
             self.sched_obj = MaxSched(self.obj_dict)
 
     def pop_local_sch_cache(self, fw_dict):
+        ''' P#opulate the local cache from FW DB after restart '''
         for fw_id in fw_dict:
             fw_data = fw_dict.get(fw_id)
             mgmt_ip = fw_data.get('fw_mgmt_ip')
             if mgmt_ip is not None:
-                drvr_obj = self.sched_obj.allocate_fw_dev(fw_id)
+                drvr_dict, mgmt_ip = self.sched_obj.allocate_fw_dev(fw_id)
+                if drvr_dict is None or mgmt_ip is None:
+                    LOG.info("Pop cache for FW sch: drvr_dict or mgmt_ip is "
+                             "None")
 
     def drvr_initialize(self, cfg):
-        cnt = 0
+        ''' Initialize the driver routines '''
         for ip in self.obj_dict:
             drvr_obj = self.obj_dict.get(ip).get('drvr_obj')
             drvr_obj.initialize(ip)
 
     def is_device_virtual(self):
+        ''' Returns if the device is physical or virtual '''
         for ip in self.obj_dict:
             drvr_obj = self.obj_dict.get(ip).get('drvr_obj')
             ret = drvr_obj.is_device_virtual()
@@ -112,6 +126,7 @@ class DeviceMgr(stevedore.named.NamedExtensionManager):
             return ret
 
     def create_fw_device(self, tenant_id, fw_id, data):
+        ''' Creates the Firewall '''
         drvr_dict, mgmt_ip = self.sched_obj.allocate_fw_dev(fw_id)
         if drvr_dict is not None and mgmt_ip is not None:
             self.update_fw_db_mgmt_ip(fw_id, mgmt_ip)
@@ -120,6 +135,7 @@ class DeviceMgr(stevedore.named.NamedExtensionManager):
             return False
 
     def delete_fw_device(self, tenant_id, fw_id, data):
+        ''' Deletes the Firewall '''
         drvr_dict, mgmt_ip = self.sched_obj.get_fw_dev_map(fw_id)
         ret = drvr_dict.get('drvr_obj').delete_fw(tenant_id, data)
         # FW DB gets deleted, so no need to remove the MGMT IP
@@ -128,5 +144,6 @@ class DeviceMgr(stevedore.named.NamedExtensionManager):
         return ret
 
     def modify_fw_device(self, tenant_id, fw_id, data):
+        ''' Modifies the firewall cfg '''
         drvr_dict, mgmt_ip = self.sched_obj.get_fw_dev_map(fw_id)
         return drvr_dict.get('drvr_obj').modify_fw(tenant_id, data)

@@ -687,6 +687,28 @@ class DfaDBMixin(object):
             session.query(DfaFwInfo).filter_by(fw_id=fw_id).update(
                 {'fw_mgmt_ip': mgmt_ip})
 
+    def conv_db_dict(self, alloc):
+        fw_dict = dict()
+        fw_dict['tenant_id'] = alloc.tenant_id
+        fw_dict['in_network_id'] = alloc.in_network_id
+        fw_dict['in_service_node_ip'] = alloc.in_service_node_ip
+        fw_dict['out_network_id'] = alloc.out_network_id
+        fw_dict['out_service_node_ip'] = alloc.out_service_node_ip
+        fw_dict['router_id'] = alloc.router_id
+        fw_dict['router_net_id'] = alloc.router_net_id
+        fw_dict['router_subnet_id'] = alloc.router_subnet_id
+        fw_dict['os_status'] = alloc.openstack_provision_status
+        fw_dict['dcnm_status'] = alloc.dcnm_provision_status
+        fw_dict['device_status'] = alloc.device_provision_status
+        fw_dict['name'] = alloc.name
+        fw_dict['fw_mgmt_ip'] = alloc.fw_mgmt_ip
+        fw_dict['result'] = alloc.result
+        fw_dict['fw_id'] = alloc.fw_id
+        rule_str = alloc.rules
+        rule_dict = json.loads(rule_str)
+        fw_dict['rules'] = rule_dict
+        return fw_dict
+
     # Tested with 1 FW
     def get_all_fw_db(self):
         session = db.get_session()
@@ -694,23 +716,7 @@ class DfaDBMixin(object):
         fw_ret_dict = dict()
         for alloc in allocs:
             fw_id = alloc.fw_id
-            fw_dict = dict()
-            fw_dict['tenant_id'] = alloc.tenant_id
-            fw_dict['in_network_id'] = alloc.in_network_id
-            fw_dict['in_service_node_ip'] = alloc.in_service_node_ip
-            fw_dict['out_network_id'] = alloc.out_network_id
-            fw_dict['out_service_node_ip'] = alloc.out_service_node_ip
-            fw_dict['router_id'] = alloc.router_id
-            fw_dict['router_net_id'] = alloc.router_net_id
-            fw_dict['router_subnet_id'] = alloc.router_subnet_id
-            fw_dict['os_status'] = alloc.openstack_provision_status
-            fw_dict['dcnm_status'] = alloc.dcnm_provision_status
-            fw_dict['device_status'] = alloc.device_provision_status
-            fw_dict['name'] = alloc.name
-            fw_dict['fw_mgmt_ip'] = alloc.fw_mgmt_ip
-            rule_str = alloc.rules
-            rule_dict = json.loads(rule_str)
-            fw_dict['rules'] = rule_dict
+            fw_dict = self.conv_db_dict(alloc)
             fw_ret_dict[fw_id] = fw_dict
         return fw_ret_dict
 
@@ -718,15 +724,29 @@ class DfaDBMixin(object):
         session = db.get_session()
         try:
             with session.begin(subtransactions=True):
-                net = session.query(DfaFwInfo).filter(
+                fw = session.query(DfaFwInfo).filter(
                     (DfaFwInfo.in_network_id == netid) |
                     (DfaFwInfo.out_network_id == netid)).one()
-            return net
+            return fw
         except orm_exc.NoResultFound:
-            LOG.info('Network %(segid)s does not exist' % ({'netid': netid}))
+            LOG.info('FW %(segid)s does not exist' % ({'netid': netid}))
         except orm_exc.MultipleResultsFound:
             LOG.error('More than one enty found for netid-id %(id)s.' % (
                 {'id': netid}))
+
+    def get_fw_by_tenant_id(self, tenant_id):
+        session = db.get_session()
+        try:
+            with session.begin(subtransactions=True):
+                fw = session.query(DfaFwInfo).filter(
+                    (DfaFwInfo.tenant_id == tenant_id)).one()
+                fw_dict = self.conv_db_dict(fw)
+            return fw_dict
+        except orm_exc.NoResultFound:
+            LOG.info('FW %s does not exist' % tenant_id)
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for tenant-id %(id)s.' % (
+                {'id': tenant_id}))
 
     def get_fw_by_rtr_netid(self, netid):
         session = db.get_session()
@@ -766,12 +786,13 @@ class DfaDBMixin(object):
         try:
             with session.begin(subtransactions=True):
                 fw = session.query(DfaFwInfo).filter_by(fw_id=fw_id).first()
+                fw_dict = self.conv_db_dict(fw)
         except orm_exc.NoResultFound:
             LOG.info('fw %(fwid)s does not exist' % ({'fw_id': fw_id}))
         except orm_exc.MultipleResultsFound:
             LOG.error('More than one enty found for fwid-id %(id)s.' % (
                 {'id': fw_id}))
-        return fw
+        return fw, fw_dict
 
     def clear_fw_entry_by_netid(self, net_id):
         session = db.get_session()
