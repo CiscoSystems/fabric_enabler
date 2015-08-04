@@ -32,7 +32,7 @@ import re
 from six import moves
 import sys
 import time
-
+import importlib
 
 from dfa.common import config
 from dfa.common import constants
@@ -276,6 +276,26 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         # RPC setup
         self.ser_q = constants.DFA_SERVER_QUEUE
         self._setup_rpc()
+        self._lbMgr = None
+        if (cfg.loadbalance.lb_enabled.lower() == 'true'):
+            LOG.debug("LBaaS is enabled")
+            lbaas_module = importlib.import_module(
+                           'dfa.server.services.loadbalance.lb_mgr')
+            self._lbMgr = lbaas_module.LbMgr(cfg, self)
+            self.events.update({
+                'pool.create.end': self._lbMgr.pool_create_event,
+                'pool.update.end': self._lbMgr.pool_update_event,
+                'pool.delete.end': self._lbMgr.pool_delete_event,
+                'member.create.end': self._lbMgr.member_create_event,
+                'member.update.end': self._lbMgr.member_update_event,
+                'member.delete.end': self._lbMgr.member_delete_event,
+                'vip.create.end': self._lbMgr.vip_create_event,
+                'vip.update.end': self._lbMgr.vip_update_event,
+                'vip.delete.end': self._lbMgr.vip_delete_event,
+                'health_monitor.create.end': self._lbMgr.hm_create_event,
+                'health_monitor.update.end': self._lbMgr.hm_update_event,
+                'health_monitor.delete.end': self._lbMgr.hm_delete_event,
+            })
 
     @property
     def cfg(self):
@@ -367,8 +387,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
 
         proj_fields = proj_name[dci_index+1:].split(':')
         if len(proj_fields) == 2:
-            if (proj_fields[1].isdigit()
-                    and proj_fields[0] == dciid_key[1:-1]):
+            if (proj_fields[1].isdigit() and
+                    proj_fields[0] == dciid_key[1:-1]):
                 LOG.debug('project name %(proj)s DCI_ID %(dci_id)s.', (
                     {'proj': proj_name[0:dci_index],
                      'dci_id': proj_fields[1]}))
@@ -550,9 +570,14 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             return
 
         try:
-            part = net['partition']
-            self.dcnm_client.create_network(tenant_name, dcnm_net, subnet,
-                                            part)
+            if self._lbMgr and self._lbMgr.lb_is_internal_nwk(query_net.name):
+                self._lbMgr.lb_create_net_dcnm(tenant_name, query_net.name,
+                                               net,
+                                               snet)
+            else:
+                part = net['partition']
+                self.dcnm_client.create_network(tenant_name, dcnm_net, subnet,
+                                                part)
         except dexc.DfaClientRequestFailed:
             emsg = 'Failed to create network %(net)s.'
             LOG.exception(emsg, {'net': dcnm_net.name})
@@ -701,6 +726,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             emsg = ('Failed to create network %(net)s.')
             LOG.error(emsg, {'net': net.name})
             self.update_network_db(net_id, constants.DELETE_FAIL)
+        if self._lbMgr and self._lbMgr.lb_is_internal_nwk(net.name):
+            self._lbMgr.lb_delete_net(net.name)
 
     def dcnm_network_create_event(self, network_info):
         """Process network create event from DCNM."""
@@ -1304,8 +1331,10 @@ def dfa_server():
                 except Queue.Empty:
                     pass
                 else:
+                    trd_name = eval(exc).get('name')
+                    exc_tb = eval(exc).get('tb')
                     emsg = 'Exception occured in %s thread. %s' % (
-                        trd.name, exc)
+                        trd_name, exc_tb)
                     LOG.error(emsg)
                     raise Exception(emsg)
             # Check on dfa agents
