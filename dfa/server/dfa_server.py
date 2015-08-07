@@ -727,7 +727,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             LOG.error(emsg, {'net': net.name})
             self.update_network_db(net_id, constants.DELETE_FAIL)
         if self._lbMgr and self._lbMgr.lb_is_internal_nwk(net.name):
-            self._lbMgr.lb_delete_net(net.name)
+            self._lbMgr.lb_delete_net(net.name, tenant_id)
 
     def dcnm_network_create_event(self, network_info):
         """Process network create event from DCNM."""

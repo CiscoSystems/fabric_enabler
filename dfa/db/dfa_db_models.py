@@ -357,6 +357,14 @@ class DfaFwInfo(db.Base):
     result = sa.Column(sa.String(16))
 
 
+class DfaLbaaSMapping(db.Base):
+    """Represnets tenant to LBaaS box mapping for multiple LBaaS support"""
+
+    __tablename__ = 'lbaas_tenant_box_mapping'
+    tenant_id = sa.Column(sa.String(36), primary_key=True)
+    ip_address = sa.Column(sa.String(64))
+
+
 class DfaDBMixin(object):
 
     """Database API."""
@@ -959,3 +967,29 @@ class DfasubnetDriver(object):
             LOG.error('More than one enty found for netid-id %(id)s.' % (
                 {'id': netid}))
         return None
+
+
+class DfaLBaaSMappingDriver(object):
+    def __init__(self, cfg):
+        self.model = DfaLbaaSMapping
+        db.configure_db(cfg)
+
+    def get_all_lbaas_mapping(self):
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            allocs = (session.query(self.model).all())
+        return allocs
+
+    def add_lbaas_mapping(self, tid, ip):
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            lbaas_mapping = self.model(tenant_id=tid,
+                                       ip_address=ip)
+            session.add(lbaas_mapping)
+
+    def delete_lbaas_mapping(self, tid):
+        session = db.get_session()
+        with session.begin(subtransactions=True):
+            row = session.query(self.model).filter_by(
+                tenant_id=tid).first()
+            session.delete(row)

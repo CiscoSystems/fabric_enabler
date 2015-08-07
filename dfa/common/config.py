@@ -110,12 +110,11 @@ default_notify_opts = {
 default_loadbalance_opts = {
     'loadbalance': {
         'lb_enabled': 'false',
-        'lb_service_vlan_id_min': '600',
-        'lb_service_vlan_id_max': '650',
         'lb_vrf_profile': 'vrf-common-universal-dynamic-LB-ES',
         'lb_svc_net_profile': 'serviceNetworkUniversalDynamicRoutingLBProfile',
         'lb_svc_net': '199.199.1.0/24',
         'lb_svc_net_name_prefix': 'lbaasinternal',
+        'lb_driver': 'dfa.server.services.loadbalance.drivers.f5.F5Device.F5Device',
     },
 }
 
