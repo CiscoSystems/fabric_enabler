@@ -116,8 +116,8 @@ class DfaFailureRecovery(object):
         # 2. Try failure recovery for create network.
         nets = self.get_all_networks()
         for net in nets:
-            if (net.result == constants.CREATE_FAIL
-                    and net.source.lower() == 'openstack'):
+            if (net.result == constants.CREATE_FAIL and
+                    net.source.lower() == 'openstack'):
                 net_id = net.network_id
                 subnets = self.neutron_event.nclient.list_subnets(
                     network_id=net_id).get('subnets')
@@ -128,11 +128,20 @@ class DfaFailureRecovery(object):
                         # Check if config_profile is not NULL.
                         if not net.config_profile:
                             cfgp, fwd_mod = (
-                                self.dcnm_client.get_config_profile_for_network(
-                                    net.name))
+                                self.dcnm_client.
+                                get_config_profile_for_network(net.name))
                             net.config_profile = cfgp
                             net.fwd_mod = fwd_mod
-                        self.dcnm_client.create_network(tenant_name, net, snet)
+                        if (self._lbMgr and
+                                self._lbMgr.lb_is_internal_nwk(net.name)):
+                            net_in_dict = self.network.get(net_id)
+                            self._lbMgr.lb_create_net_dcnm(tenant_name,
+                                                           net.name,
+                                                           net_in_dict,
+                                                           subnet)
+                        else:
+                            self.dcnm_client.create_network(tenant_name,
+                                                            net, snet)
                     except dexc.DfaClientRequestFailed:
                         # Still is failure, only log the error.
                         emsg = 'Failed to create network %(net)s.'
@@ -191,8 +200,8 @@ class DfaFailureRecovery(object):
 
         # 4. Try failure recovery for delete network.
         for net in nets:
-            if (net.result == constants.DELETE_FAIL
-                    and net.source.lower() == 'openstack'):
+            if (net.result == constants.DELETE_FAIL and
+                    net.source.lower() == 'openstack'):
                 net_id = net.network_id
                 segid = net.segmentation_id
                 tenant_name = self.get_project_name(net.tenant_id)

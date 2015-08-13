@@ -361,7 +361,8 @@ class DfaLbaaSMapping(db.Base):
     """Represnets tenant to LBaaS box mapping for multiple LBaaS support"""
 
     __tablename__ = 'lbaas_tenant_box_mapping'
-    tenant_id = sa.Column(sa.String(36), primary_key=True)
+    tenant_id = sa.Column(sa.String(36), sa.ForeignKey("tenants.id"),
+                          primary_key=True)
     ip_address = sa.Column(sa.String(64))
 
 

@@ -70,7 +70,7 @@ class LbMgr(object):
         all_mappings = self._mapping_db.get_all_lbaas_mapping()
         self.mapping_dict = {}
         for alloc in all_mappings:
-            self.mapping_dict = [alloc.tenant_id] = alloc.ip_address
+            self.mapping_dict[alloc.tenant_id] = alloc.ip_address
         LOG.info("mapping_dic = %s " % self.mapping_dict)
 
     def add_mapping(self, tenant_id, box_ip):
@@ -148,6 +148,12 @@ class LbMgr(object):
     def change_lbaas_vrf_profile(self, tenant_id):
         profile_name = self._lb_vrf_profile
         tenant_name = self.dfa_server.get_project_name(tenant_id)
+        f = self.dfa_server.dcnm_client.get_partition_vrfProf
+        current_prof = f(tenant_name)
+
+        if current_prof == profile_name:
+            LOG.info("vrf profile for %s is the right one" % tenant_name)
+            return
         try:
             self.dfa_server.dcnm_client.update_project(
                     org_name=tenant_name,

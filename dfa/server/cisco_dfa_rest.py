@@ -87,7 +87,7 @@ class DFARESTClient(object):
 
         # Update the default network profile based on version of DCNM.
         self._set_default_cfg_profile()
-        self._default_md=None
+        self._default_md = None
 
     @property
     def is_iplus(self):
@@ -156,16 +156,14 @@ class DFARESTClient(object):
 
     def _set_default_mobility_domain(self):
         settings = self._get_settings()
-        LOG.info("settings is %s" % settings) 
-        
-        if ('globalMobilityDomain' in settings.keys()): 
+        LOG.info("settings is %s" % settings)
+
+        if ('globalMobilityDomain' in settings.keys()):
             global_md = settings.get('globalMobilityDomain')
             self._default_md = global_md.get('name')
-            LOG.info("setting default mobility domain to be %s" % self._default_md)
+            LOG.info("setting default md to be %s" % self._default_md)
         else:
             self._default_md = "md0"
-            
-           
 
     def _create_org(self, name, desc):
         """Create organization on the DCNM.
@@ -207,14 +205,27 @@ class DFARESTClient(object):
         # extra payload for the new version when creating/updating a partition.
         if self.is_iplus:
             # Need to add extra payload for the new version.
+            enable_dci = "true" if dci_id and int(dci_id) != 0 else "false"
             extra_payload = {
                 "vrfProfileName": vrf_prof,
                 "vrfName": ':'.join((org_name, part_name)),
                 "dciId": dci_id,
-                "enableDCIExtension": "true" if dci_id and int(dci_id) != 0 else "false"}
+                "enableDCIExtension": enable_dci}
             payload.update(extra_payload)
 
         return self._send_request(operation, url, payload, 'partition')
+
+    def _get_partition(self, org_name, part_name=None):
+        """send get partition request to the DCNM.
+        :param org_name: name of organization
+        :param part_name: name of partition
+        """
+        if part_name is None:
+            part_name = self._part_name
+        url = self._update_part_url % (org_name, part_name)
+        res = self._send_request("GET", url, '', 'partition')
+        if res and res.status_code in self._resp_ok:
+            return res.json()
 
     def _delete_org(self, org_name):
         """Send organization delete request to DCNM.
@@ -409,7 +420,8 @@ class DFARESTClient(object):
             LOG.error("Failed to create %s network in DCNM.", network_info)
             raise dexc.DfaClientRequestFailed(reason=res)
 
-    def create_service_network(self, tenant_name, network, subnet,dhcp_range=True):
+    def create_service_network(self, tenant_name, network, subnet,
+                               dhcp_range=True):
         """Create network on the DCNM.
 
         :param tenant_name: name of tenant the network belongs to
@@ -427,12 +439,12 @@ class DFARESTClient(object):
             part_name = self._part_name
         if network.mob_domain:
             mob_domain_name = network.mob_domain_name
-        else: 
+        else:
             mob_domain_name = self._default_md
-           
+
         if network.vlan_id:
             vlan_id = str(network.vlan_id)
-        
+
         seg_id = str(network.segmentation_id)
         seg_str = "$segmentId=" + seg_id
         cfg_args = [
@@ -635,6 +647,19 @@ class DFARESTClient(object):
             LOG.error("Failed to create %(part)s partition in DCNM."
                       "Response: %(res)s", ({'part': part_name, 'res': res}))
             raise dexc.DfaClientRequestFailed(reason=res)
+
+    def get_partition_vrfProf(self, org_name, part_name=None):
+        """get partition on the DCNM.
+
+        :param org_name: name of organization
+        :param part_name: name of partition
+        """
+        vrf_profile = None
+        part_info = self._get_partition(org_name, part_name)
+        LOG.info("query result from dcnm for partition info is %s", part_info)
+        if ("vrfProfileName" in part_info):
+            vrf_profile = part_info.get("vrfProfileName")
+        return vrf_profile
 
     def list_networks(self, org, part):
         """Return list of networks from DCNM."""
