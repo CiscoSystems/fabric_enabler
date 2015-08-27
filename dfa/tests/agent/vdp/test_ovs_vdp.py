@@ -15,7 +15,6 @@
 #  @author: Padmanabhan Krishnan, Cisco Systems, Inc.
 
 import collections
-import contextlib
 
 import mock
 
@@ -34,7 +33,7 @@ class OvsVdpTest(base.BaseTestCase):
     """A test suite to exercise the OvsVdp Class.  """
 
     def setUp(self):
-        ''' Setup routine '''
+        '''Setup routine '''
         super(OvsVdpTest, self).setUp()
         self.root_helper = 'sudo'
         self.uplink = "eth2"
@@ -47,18 +46,18 @@ class OvsVdpTest(base.BaseTestCase):
         self._test_ovs_vdp_init()
 
     def _test_ovs_vdp_init(self):
-        ''' Test the init routine '''
+        '''Test the init routine '''
         lldp_ovs_portnum = 14
         phy_port_num = 14
-        with contextlib.nested(
-            mock.patch('dfa.common.dfa_sys_lib.OVSBridge.delete_flows'),
-            mock.patch('dfa.common.dfa_sys_lib.OVSBridge.add_flow'),
+        with mock.patch('dfa.common.dfa_sys_lib.OVSBridge.delete_flows') as (
+            ovs_br_del), \
+            mock.patch('dfa.common.dfa_sys_lib.OVSBridge.add_flow') as (
+            ovs_br_add), \
             mock.patch('dfa.common.dfa_sys_lib.OVSBridge.add_port',
-                       return_value=str(lldp_ovs_portnum)),
+                       return_value=str(lldp_ovs_portnum)), \
             mock.patch('dfa.common.dfa_sys_lib.OVSBridge.get_port_ofport',
-                       return_value=str(phy_port_num)),
-            mock.patch('dfa.agent.vdp.lldpad.LldpadDriver'),
-        ) as (ovs_br_del, ovs_br_add, ovs_add_port, ovs_add_ofport, lldpad):
+                       return_value=str(phy_port_num)), \
+                mock.patch('dfa.agent.vdp.lldpad.LldpadDriver') as lldpad:
             lldp_inst = lldpad.return_value
 
             parent = mock.MagicMock()
@@ -103,26 +102,25 @@ class OvsVdpTest(base.BaseTestCase):
         lldpad.assert_called_with(veth_str, self.uplink, self.root_helper)
 
     def test_process_init(self):
-        ''' Wrapper for the init routine test '''
+        '''Wrapper for the init routine test '''
         pass
 
     def _test_vdp_port_event_new(self):
-        ''' Test the case for a new vnic port for a network '''
+        '''Test the case for a new vnic port for a network '''
         port_uuid = '0000-1111-2222-3333'
         mac = '00:00:fa:11:22:33'
         net_uuid = '0000-aaaa-bbbb-cccc'
         segmentation_id = 10001
         status = 'up'
         oui = None
-        with contextlib.nested(
-            mock.patch('dfa.common.dfa_sys_lib.OVSBridge.add_flow'),
+        with mock.patch('dfa.common.dfa_sys_lib.OVSBridge.add_flow') as (
+            ovs_br_add), \
             mock.patch('dfa.common.dfa_sys_lib.OVSBridge.get_ofport_name',
-                       return_value='test_port'),
+                       return_value='test_port'), \
             mock.patch('dfa.common.dfa_sys_lib.OVSBridge.get_port_vlan_tag',
-                       return_value=10),
+                       return_value=10), \
             mock.patch.object(self.ovs_vdp.lldpad_info, 'send_vdp_vnic_up',
-                              return_value=500),
-        ) as (ovs_br_add, get_ofport, get_vlan_tag, vnic_up):
+                              return_value=500):
             parent = mock.MagicMock()
             parent.attach_mock(ovs_br_add, 'add_flow')
             phy_port_num = 5
@@ -141,7 +139,7 @@ class OvsVdpTest(base.BaseTestCase):
         parent.assert_has_calls(expected_calls, any_order=False)
 
     def _test_vdp_port_event_exist(self):
-        ''' Test the case for a exist vnic port for a network '''
+        '''Test the case for a exist vnic port for a network '''
         port_uuid = '0000-1111-2222-3334'
         mac = '00:00:fa:11:22:34'
         net_uuid = '0000-aaaa-bbbb-cccc'
@@ -150,11 +148,10 @@ class OvsVdpTest(base.BaseTestCase):
         oui = None
         ovs_cb_data = {'obj': self.ovs_vdp, 'mac': mac,
                        'port_uuid': port_uuid, 'net_uuid': net_uuid}
-        with contextlib.nested(
-            mock.patch('dfa.common.dfa_sys_lib.OVSBridge.get_ofport_name',
-                       return_value='test_port'),
-            mock.patch.object(self.ovs_vdp.lldpad_info, 'send_vdp_vnic_up'),
-        ) as (get_ofport, vnic_up):
+        with mock.patch('dfa.common.dfa_sys_lib.OVSBridge.get_ofport_name',
+                        return_value='test_port'), \
+                mock.patch.object(self.ovs_vdp.lldpad_info,
+                                  'send_vdp_vnic_up') as vnic_up:
             parent = mock.MagicMock()
             parent.attach_mock(vnic_up, 'send_vdp_vnic_up')
             self.ovs_vdp.send_vdp_port_event(port_uuid, mac, net_uuid,
@@ -170,19 +167,19 @@ class OvsVdpTest(base.BaseTestCase):
         parent.assert_has_calls(expected_calls, any_order=False)
 
     def _test_vdp_port_event_down(self):
-        ''' Test the case for a vnic port down for a network '''
+        '''Test the case for a vnic port down for a network '''
         port_uuid = '0000-1111-2222-3334'
         mac = '00:00:fa:11:22:34'
         net_uuid = '0000-aaaa-bbbb-cccc'
         segmentation_id = 10001
         status = 'down'
         oui = None
-        with contextlib.nested(
-            mock.patch('dfa.common.dfa_sys_lib.OVSBridge.delete_flows'),
+        with mock.patch('dfa.common.dfa_sys_lib.OVSBridge.delete_flows') as (
+            del_flow), \
             mock.patch('dfa.common.dfa_sys_lib.OVSBridge.get_ofport_name',
-                       return_value='test_port'),
-            mock.patch.object(self.ovs_vdp.lldpad_info, 'send_vdp_vnic_down'),
-        ) as (del_flow, get_ofport, vnic_down):
+                       return_value='test_port'), \
+            mock.patch.object(self.ovs_vdp.lldpad_info,
+                              'send_vdp_vnic_down') as vnic_down:
             self.ovs_vdp.local_vlan_map[net_uuid] = ovs_vdp.LocalVlan(10, (
                 segmentation_id))
             self.ovs_vdp.local_vlan_map[net_uuid].lvid = 10
@@ -215,5 +212,5 @@ class OvsVdpTest(base.BaseTestCase):
         self._test_vdp_port_event_exist()
 
     def test_vdp_port_event_down(self):
-        ''' Routine the calls the port down test '''
+        '''Routine the calls the port down test '''
         self._test_vdp_port_event_down()
