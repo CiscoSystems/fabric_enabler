@@ -285,16 +285,16 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             self.events.update({
                 'pool.create.end': self._lbMgr.pool_create_event,
                 'pool.update.end': self._lbMgr.pool_update_event,
-                'pool.delete.end': self._lbMgr.pool_delete_event,
+                'enabler_pool_delete': self._lbMgr.pool_delete_event,
                 'member.create.end': self._lbMgr.member_create_event,
                 'member.update.end': self._lbMgr.member_update_event,
-                'member.delete.end': self._lbMgr.member_delete_event,
+                'enabler_member_delete': self._lbMgr.member_delete_event,
                 'vip.create.end': self._lbMgr.vip_create_event,
                 'vip.update.end': self._lbMgr.vip_update_event,
-                'vip.delete.end': self._lbMgr.vip_delete_event,
-                'health_monitor.create.end': self._lbMgr.hm_create_event,
-                'health_monitor.update.end': self._lbMgr.hm_update_event,
-                'health_monitor.delete.end': self._lbMgr.hm_delete_event,
+                'enabler_vip_delete': self._lbMgr.vip_delete_event,
+                'enabler_pool_hm_create': self._lbMgr.pool_hm_create_event,
+                'enabler_pool_hm_update': self._lbMgr.pool_hm_update_event,
+                'enabler_pool_hm_delete': self._lbMgr.pool_hm_delete_event,
             })
 
     @property
