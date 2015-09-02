@@ -51,7 +51,7 @@ DEFAULT_LOG_LEVELS = (
 
 default_log_opts = {
     'dfa_log': {
-        'use_syslog': False,
+        'use_syslog': 'False',
         'syslog_lgo_facility': 'LOG_USER',
         'log_dir': '.',
         'log_file': 'fabric_enabler.log',

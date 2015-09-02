@@ -87,7 +87,7 @@ def setup_logger(project, cfg):
     else:
         handler = logging.StreamHandler(sys.stdout)
 
-    if cfg.dfa_log.use_syslog:
+    if cfg.dfa_log.use_syslog.lower() == 'true':
         log_fac = cfg.dfa_log.syslog_log_facility
         facility = getattr(log_hdlr.SysLogHandler, log_fac, None)
         handler = log_hdlr.SysLogHandler(address='/dev/log',
