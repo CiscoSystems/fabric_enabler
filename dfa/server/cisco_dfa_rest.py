@@ -61,7 +61,8 @@ class DFARESTClient(object):
                                     '/%s/partitions/%s/networks')
         self._cfg_profile_list_url = ('http://%s/rest/auto-config/profiles' %
                                       self._ip)
-        self._cfg_profile_get_url = self._cfg_profile_list_url + '/%s'
+        self._cfg_profile_get_url = (self._cfg_profile_list_url +
+                                     '/%s/type/ipbd')
         self._create_part_url = ('http://%s/rest/auto-config/' % self._ip +
                                  'organizations/%s/partitions')
         self._update_part_url = ('http://%s/rest/auto-config/' % self._ip +
