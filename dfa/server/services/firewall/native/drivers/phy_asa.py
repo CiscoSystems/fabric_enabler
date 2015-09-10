@@ -30,9 +30,13 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
         LOG.debug("Initializing physical ASA")
         super(PhyAsa, self).__init__()
 
-    def initialize(self, mgmt_ip_addr):
+    def initialize(self, cfg_dict):
         LOG.debug("Initialize for PhyAsa")
-        self.mgmt_ip_addr = mgmt_ip_addr
+        self.mgmt_ip_addr = cfg_dict.get('mgmt_ip_addr')
+
+    def pop_evnt_que(self, que_obj):
+        LOG.debug("Pop Event for PhyAsa")
+        pass
 
     def is_device_virtual(self):
         return False

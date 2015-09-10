@@ -37,6 +37,16 @@ class BaseDrvr(object):
         pass
 
     @abc.abstractmethod
+    def pop_evnt_que(self):
+        '''Pop Event Queue'''
+        pass
+
+    @abc.abstractmethod
+    def pop_dcnm_obj(self):
+        '''Pop DCNM Obj'''
+        pass
+
+    @abc.abstractmethod
     def is_device_virtual(self):
         '''Return False if device is physical, True otherwise'''
         pass

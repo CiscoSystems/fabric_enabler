@@ -451,7 +451,8 @@ class DfaDBMixin(object):
         with session.begin(subtransactions=True):
             net = session.query(DfaNetwork).filter_by(
                 network_id=net_id).first()
-            session.delete(net)
+            if net is not None:
+                session.delete(net)
 
     def get_all_networks(self):
         session = db.get_session()
@@ -984,10 +985,25 @@ class DfasubnetDriver(object):
                     one()
             return net.subnet_address
         except orm_exc.NoResultFound:
-            LOG.info('Network %(segid)s does not exist' % ({'netid': netid}))
+            LOG.info('Network %(segid)s does not exist', ({'netid': netid}))
         except orm_exc.MultipleResultsFound:
-            LOG.error('More than one enty found for netid-id %(id)s.' % (
+            LOG.error('More than one enty found for netid-id %(id)s.', (
                 {'id': netid}))
+        return None
+
+    def get_subnet(self, sub):
+        session = db.get_session()
+        try:
+            with session.begin(subtransactions=True):
+                net = session.query(self.model).filter_by(allocated=True,
+                                                          subnet_address=sub).\
+                    one()
+            return net
+        except orm_exc.NoResultFound:
+            LOG.info('subnet %(sub)s does not exist', ({'sub': sub}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for sub %(sub)s.', (
+                {'sub': sub}))
         return None
 
 

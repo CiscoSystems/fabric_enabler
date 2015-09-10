@@ -220,6 +220,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             'agent.request.uplink': self.request_uplink_info,
             'cli.static_ip.set': self.set_static_ip_address,
             'agent.vm_result.update': self.vm_result_update,
+            'service.vnic.create': self.service_vnic_create,
+            'service.vnic.delete': self.service_vnic_delete,
         })
         self.project_info_cache = {}
         self.network = {}
@@ -255,6 +257,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         dcnm_password = cfg.dcnm.dcnm_password
         self.dcnm_client = cdr.DFARESTClient(cfg)
         self.populate_cfg_dcnm(cfg, self.dcnm_client)
+        self.populate_event_queue(cfg, self.pqueue)
 
         self.keystone_event = deh.EventsHandler('keystone', self.pqueue,
                                                 self.PRI_HIGH_START,
@@ -1062,6 +1065,59 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         else:
             self.delete_vm_db(vm.instance_id)
             LOG.info('Deleted VM %(vm)s from DB.', {'vm': vm.instance_id})
+
+    def service_vnic_create(self, vnic_info_arg):
+        LOG.info("Service vnic create %s", vnic_info_arg)
+        vnic_info = vnic_info_arg.get('service')
+        vm_info = dict(status=vnic_info.get('status'),
+                       vm_mac=vnic_info.get('mac'),
+                       segmentation_id=vnic_info.get('segid'),
+                       host=vnic_info.get('host'),
+                       port_uuid=vnic_info.get('port_id'),
+                       net_uuid=vnic_info.get('network_id'),
+                       oui=dict(ip_addr=vnic_info.get('vm_ip'),
+                                vm_name=vnic_info.get('vm_name'),
+                                vm_uuid=vnic_info.get('vm_uuid'),
+                                gw_mac=vnic_info.get('gw_mac'),
+                                fwd_mod=vnic_info.get('fwd_mod'),
+                                oui_id='cisco'))
+        try:
+            self.neutron_event.send_vm_info(str(vm_info.get('host')),
+                                            str(vm_info))
+        except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
+            # Failed to send info to the agent. Keep the data in the
+            # database as failure to send it later.
+            self.add_vms_db(vm_info, constants.CREATE_FAIL)
+            LOG.error('Failed to send VM info to agent.')
+        else:
+            self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
+
+    def service_vnic_delete(self, vnic_info_arg):
+        LOG.info("Service vnic delete %s", vnic_info_arg)
+        vnic_info = vnic_info_arg.get('service')
+        vm_info = dict(status=vnic_info.get('status'),
+                       vm_mac=vnic_info.get('mac'),
+                       segmentation_id=vnic_info.get('segid'),
+                       host=vnic_info.get('host'),
+                       port_uuid=vnic_info.get('port_id'),
+                       net_uuid=vnic_info.get('network_id'),
+                       oui=dict(ip_addr=vnic_info.get('vm_ip'),
+                                vm_name=vnic_info.get('vm_name'),
+                                vm_uuid=vnic_info.get('vm_uuid'),
+                                gw_mac=vnic_info.get('gw_mac'),
+                                fwd_mod=vnic_info.get('fwd_mod'),
+                                oui_id='cisco'))
+        try:
+            self.neutron_event.send_vm_info(str(vm_info.get('host')),
+                                            str(vm_info))
+        except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
+            # Failed to send info to the agent. Keep the data in the
+            # database as failure to send it later.
+            params = dict(columns=dict(result=constants.DELETE_FAIL))
+            self.update_vm_db(vnic_info.get('vm_uuid'), **params)
+            LOG.error('Failed to send VM info to agent')
+        else:
+            self.delete_vm_db(vnic_info.get('vm_uuid'))
 
     def process_data(self, data):
         LOG.debug('process_data: event: %s, payload: %s' % (data[0], data[1]))

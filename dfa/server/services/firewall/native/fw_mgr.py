@@ -210,7 +210,8 @@ class FwMapAttr(object):
                   'active_policy_id': self.active_pol_id,
                   'is_fw_drvr_created': self.is_fw_drvr_created(),
                   'pol_present': self.active_pol_id in self.policies})
-        if self.active_pol_id is not None:
+        if self.active_pol_id is not None and (
+           self.active_pol_id in self.policies):
             LOG.info("In Drvr create needed %(len_policy)s %(one_rule)s",
                      {'len_policy':
                       len(self.policies[self.active_pol_id]['rule_dict']),
@@ -302,6 +303,14 @@ class FwMgr(dev_mgr.DeviceMgr):
             return
         self.dcnm_obj = dcnm_obj
         self.fabric.store_dcnm(dcnm_obj)
+        self.pop_dcnm_obj(dcnm_obj)
+
+    def populate_event_queue(self, cfg, que_obj):
+        ''' This routine is for storing the Event Queue obj '''
+        if not self.fw_init:
+            return
+        self.que_obj = que_obj
+        self.pop_evnt_que(que_obj)
 
     def _create_fw_fab_dev(self, tenant_id, drvr_name, fw_dict):
         '''
@@ -359,6 +368,16 @@ class FwMgr(dev_mgr.DeviceMgr):
             result.
         '''
         is_fw_virt = self.is_device_virtual()
+        if self.fwid_attr[tenant_id].is_fw_drvr_created():
+            ret = self.delete_fw_device(tenant_id, fw_dict.get('fw_id'),
+                                        fw_dict)
+            if not ret:
+                LOG.error("Error in delete_fabric_fw device")
+                return False
+            else:
+                self.fwid_attr[tenant_id].fw_drvr_created(False)
+                self.update_fw_db_dev_status(fw_dict.get('fw_id'),
+                                             '')
         ret = self.fabric.delete_fabric_fw(tenant_id,
                                            fw_dict.get('tenant_name'),
                                            fw_dict.get('fw_id'),
@@ -366,15 +385,11 @@ class FwMgr(dev_mgr.DeviceMgr):
                                            is_fw_virt)
         if not ret:
             LOG.error("Error in delete_fabric_fw")
-            return
+            return False
         self.update_fw_db_final_result(fw_dict.get('fw_id'), (
             fw_constants.RESULT_FW_DELETE_DONE))
-        if self.fwid_attr[tenant_id].is_fw_drvr_created():
-            ret = self.delete_fw_device(tenant_id, fw_dict.get('fw_id'),
-                                        fw_dict)
-            if ret:
-                self.fwid_attr[tenant_id].fw_drvr_created(False)
-                self.delete_fw(fw_dict.get('fw_id'))
+        self.delete_fw(fw_dict.get('fw_id'))
+        return True
 
     def _check_delete_fw(self, tenant_id, drvr_name):
         '''
@@ -383,13 +398,15 @@ class FwMgr(dev_mgr.DeviceMgr):
             the device
         '''
         fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
+        ret = False
         try:
             with self.fwid_attr[tenant_id].mutex_lock:
                 self.update_fw_db_final_result(fw_dict.get('fw_id'), (
                     fw_constants.RESULT_FW_DELETE_INIT))
-                self._delete_fw_fab_dev(tenant_id, drvr_name, fw_dict)
+                ret = self._delete_fw_fab_dev(tenant_id, drvr_name, fw_dict)
         except Exception as exc:
             LOG.error("Exception raised in delete fw %s", str(exc))
+        return ret
 
     def _check_update_fw(self, tenant_id, drvr_name):
         ''' This function calls the device manager routine to update the device
@@ -451,9 +468,10 @@ class FwMgr(dev_mgr.DeviceMgr):
             LOG.error("Invalid tenant id for FW delete %s", tenant_id)
             return
         tenant_obj = self.fwid_attr[tenant_id]
-        self._check_delete_fw(tenant_id, drvr_name)
-        tenant_obj.delete_fw(fw_id)
-        self.temp_db.del_fw_tenant(fw_id)
+        ret = self._check_delete_fw(tenant_id, drvr_name)
+        if ret:
+            tenant_obj.delete_fw(fw_id)
+            self.temp_db.del_fw_tenant(fw_id)
 
     def fw_delete(self, data, fw_name=None):
         ''' Top level FW delete function '''
@@ -669,7 +687,7 @@ class FwMgr(dev_mgr.DeviceMgr):
                 self.fwid_attr[tenant_id].fw_drvr_created(False)
         return fw_dict
 
-    def retry_failure_fab_dev(self, tenant_id, fw_data, fw_dict):
+    def retry_failure_fab_dev_create(self, tenant_id, fw_data, fw_dict):
         '''
         This module calls routine in fabric to retry the failure cases.
         If device is not successfully cfg/uncfg, it calls the device manager
@@ -677,15 +695,8 @@ class FwMgr(dev_mgr.DeviceMgr):
         '''
         result = fw_data.get('result')
         is_fw_virt = self.is_device_virtual()
-        flag = False
+        # Fabric portion
         if result == fw_constants.RESULT_FW_CREATE_INIT:
-            flag = True
-            final_res = fw_constants.RESULT_FW_CREATE_DONE
-        else:
-            if result == fw_constants.RESULT_FW_DELETE_INIT:
-                flag = True
-                final_res = fw_constants.RESULT_FW_DELETE_DONE
-        if flag:
             name = dfa_dbm.DfaDBMixin.get_project_name(self, tenant_id)
             ret = self.fabric.retry_failure(tenant_id, name, fw_dict,
                                             is_fw_virt, result)
@@ -694,8 +705,10 @@ class FwMgr(dev_mgr.DeviceMgr):
                           tenant_id)
                 return
             else:
-                self.update_fw_db_final_result(fw_dict.get('fw_id'), final_res)
-        if result == fw_constants.RESULT_FW_CREATE_INIT:
+                result = fw_constants.RESULT_FW_CREATE_DONE
+                self.update_fw_db_final_result(fw_dict.get('fw_id'), result)
+        # Device portion
+        if result == fw_constants.RESULT_FW_CREATE_DONE:
             if fw_data.get('device_provision_status') != 'SUCCESS':
                 ret = self.create_fw_device(tenant_id, fw_dict.get('fw_id'),
                                             fw_dict)
@@ -705,17 +718,46 @@ class FwMgr(dev_mgr.DeviceMgr):
                                                  'SUCCESS')
                     LOG.info("Retry failue return success for create"
                              " tenant %s", tenant_id)
-        else:
+
+    def retry_failure_fab_dev_delete(self, tenant_id, fw_data, fw_dict):
+        '''
+        This module calls routine in fabric to retry the failure cases for
+        delete.
+        If device is not successfully cfg/uncfg, it calls the device manager
+        routine to cfg/uncfg the device.
+        '''
+        result = fw_data.get('result')
+        name = dfa_dbm.DfaDBMixin.get_project_name(self, tenant_id)
+        fw_dict['tenant_name'] = name
+        is_fw_virt = self.is_device_virtual()
+        if result == fw_constants.RESULT_FW_DELETE_INIT:
             if self.fwid_attr[tenant_id].is_fw_drvr_created():
                 ret = self.delete_fw_device(tenant_id, fw_dict.get('fw_id'),
                                             fw_dict)
                 if ret:
+                    # Device portion
+                    self.update_fw_db_dev_status(fw_dict.get('fw_id'),
+                                                 '')
                     self.fwid_attr[tenant_id].fw_drvr_created(False)
-                    self.delete_fw(fw_dict.get('fw_id'))
-                    self.fwid_attr[tenant_id].delete_fw(fw_dict.get('fw_id'))
-                    self.temp_db.del_fw_tenant(fw_dict.get('fw_id'))
-                    LOG.info("Retry failue return success for delete"
+                    LOG.info("Retry failue dev return success for delete"
                              " tenant %s", tenant_id)
+                else:
+                    return
+                    # Fabric portion
+            name = dfa_dbm.DfaDBMixin.get_project_name(self, tenant_id)
+            ret = self.fabric.retry_failure(tenant_id, name, fw_dict,
+                                            is_fw_virt, result)
+            if not ret:
+                LOG.error("Retry failure returned fail for tenant %s",
+                          tenant_id)
+                return
+            else:
+                result = fw_constants.RESULT_FW_DELETE_DONE
+                self.update_fw_db_final_result(fw_dict.get('fw_id'),
+                                               result)
+                self.delete_fw(fw_dict.get('fw_id'))
+                self.fwid_attr[tenant_id].delete_fw(fw_dict.get('fw_id'))
+                self.temp_db.del_fw_tenant(fw_dict.get('fw_id'))
 
     def fw_retry_failures_create(self):
         '''This module is called for retrying the create cases'''
@@ -726,8 +768,9 @@ class FwMgr(dev_mgr.DeviceMgr):
                         fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
                         if len(fw_dict) > 0:
                             fw_obj, fw_data = self.get_fw(fw_dict.get('fw_id'))
-                            self.retry_failure_fab_dev(tenant_id, fw_data,
-                                                       fw_dict)
+                            self.retry_failure_fab_dev_create(tenant_id,
+                                                              fw_data,
+                                                              fw_dict)
                         else:
                             LOG.error("FW data not found for tenant %s",
                                       tenant_id)
@@ -756,7 +799,7 @@ class FwMgr(dev_mgr.DeviceMgr):
                     fw_data = self.get_fw_by_tenant_id(tenant_id)
                     if fw_data is None:
                         LOG.info("No FW for tenant %s", tenant_id)
-                        return
+                        continue
                     result = fw_data.get('result')
                     if result == fw_constants.RESULT_FW_DELETE_INIT:
                         fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
@@ -765,8 +808,8 @@ class FwMgr(dev_mgr.DeviceMgr):
                         if len(fw_dict) <= 0:
                             # Need to fill fw_dict from fw_data
                             fw_dict = self.fill_fw_dict_from_db(fw_data)
-                        self.retry_failure_fab_dev(tenant_id, fw_data,
-                                                   fw_dict)
+                        self.retry_failure_fab_dev_delete(tenant_id, fw_data,
+                                                          fw_dict)
             except Exception as exc:
                 LOG.error("Exception in retry failure %s", str(exc))
 
