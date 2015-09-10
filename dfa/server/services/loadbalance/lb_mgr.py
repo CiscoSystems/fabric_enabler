@@ -201,7 +201,8 @@ class LbMgr(object):
     def pool_create_event(self, pool_info):
         function_name = "pool_create_event"
         LOG.info("entering %s, data is %s" % (function_name, pool_info))
-        tenant_id = pool_info.get('tenant_id')
+        pool = pool_info.get("pool")
+        tenant_id = pool.get('tenant_id')
         box_ip = self.service_network_exists(tenant_id)
         if box_ip is None:
             self.change_lbaas_vrf_profile(tenant_id)
@@ -226,8 +227,8 @@ class LbMgr(object):
         LOG.info("entering %s, data is %s" % (function_name, vip_info))
         self.call_driver(function_name, vip_info)
 
-    def hm_create_event(self, health_info):
-        function_name = "hm_create_event"
+    def pool_hm_create_event(self, health_info):
+        function_name = "pool_hm_create_event"
         LOG.info("entering %s, data is %s" % (function_name, health_info))
         self.call_driver(function_name, health_info)
 
@@ -242,12 +243,12 @@ class LbMgr(object):
         self.call_driver(function_name, member_info)
 
     def vip_update_event(self, vip_info):
-        function_name = "vip_updateevent"
+        function_name = "vip_update_event"
         LOG.info("entering %s, data is %s" % (function_name, vip_info))
         self.call_driver(function_name, vip_info)
 
-    def hm_update_event(self, health_info):
-        function_name = "hm_update_event"
+    def pool_hm_update_event(self, health_info):
+        function_name = "pool_hm_update_event"
         LOG.info("entering %s, data is %s" % (function_name, health_info))
         self.call_driver(function_name, health_info)
 
@@ -266,7 +267,7 @@ class LbMgr(object):
         LOG.info("entering %s, data is %s" % (function_name, vip_info))
         self.call_driver(function_name, vip_info)
 
-    def hm_delete_event(self, health_info):
-        function_name = "hm_delete_event"
+    def pool_hm_delete_event(self, health_info):
+        function_name = "pool_hm_delete_event"
         LOG.info("entering %s, data is %s" % (function_name, health_info))
         self.call_driver(function_name, health_info)
