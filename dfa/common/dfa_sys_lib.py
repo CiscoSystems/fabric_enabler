@@ -339,3 +339,44 @@ def _build_flow_expr_str(flow_dict, cmd):
         flow_expr_arr.append(actions)
 
     return ','.join(flow_expr_arr)
+
+
+def get_all_run_phy_intf():
+    intf_list = []
+    base_dir = '/sys/class/net'
+    dir_exist = os.path.exists(base_dir)
+    if not dir_exist:
+        LOG.error("Unable to get interface list :Base dir %s does not exist",
+                  base_dir)
+        return intf_list
+    dir_cont = os.listdir(base_dir)
+    for subdir in dir_cont:
+        dev_dir = base_dir + '/' + subdir + '/' + 'device'
+        dev_exist = os.path.exists(dev_dir)
+        if dev_exist:
+            try:
+                oper_file = base_dir + '/' + subdir + '/' + 'operstate'
+                fd = open(oper_file, 'r')
+                oper_state = fd.read().strip('\n')
+                if oper_state == 'up':
+                    intf_list.append(subdir)
+            except Exception as e:
+                LOG.error("Exception in reading %s", str(e))
+                break
+        else:
+            LOG.info("Dev dir %s does not exist, not physical intf", dev_dir)
+    return intf_list
+
+
+def is_phy_intf_ipv4_cfgd(intf):
+    cmd = ["ip", "address", "show", "dev", intf]
+    try:
+        output = execute(cmd)
+    except Exception as e:
+        LOG.error("Unable to get IP address for %s", intf)
+        return False
+    inet_len = output.split('inet ')
+    if inet_len < 2:
+        return False
+    else:
+        return True

@@ -136,6 +136,56 @@ class RpcCallBacks(object):
             else:
                 return False
 
+    def is_mand_arg_present(self, intf_dict):
+        ''' Just checking for 2 parameters '''
+        if intf_dict.get('remote_port_id_mac') is None and (
+           intf_dict.get('remote_system_name') is None):
+            return False
+        else:
+            return True
+
+    def save_topo_disc_params(self, context, msg):
+        args = json.loads(msg)
+        agent = args.get('agent')
+        intf = args.get('intf')
+        intf_dict = {}
+        intf_dict['remote_evb_cfgd'] = args.get('remote_evb_cfgd')
+        intf_dict['remote_evb_mode'] = args.get('remote_evb_mode')
+        intf_dict['remote_mgmt_addr'] = args.get('remote_mgmt_addr')
+        intf_dict['remote_system_desc'] = args.get('remote_system_desc')
+        intf_dict['remote_system_name'] = args.get('remote_system_name')
+        intf_dict['remote_port'] = args.get('remote_port')
+        intf_dict['remote_chassis_id_mac'] = args.get('remote_chassis_id_mac')
+        intf_dict['remote_port_id_mac'] = args.get('remote_port_id_mac')
+        mand_arg = self.is_mand_arg_present(intf_dict)
+        configs = self.obj.get_agent_configurations(agent)
+        if configs:
+            # Update the agents database.
+            new_config = json.loads(configs)
+            topo_dict = new_config.get('topo')
+            if topo_dict is None:
+                new_config['topo'] = {}
+                new_config['topo'][intf] = {}
+                topo_dict = new_config.get('topo')
+            intf_dict_upd = topo_dict.get(intf)
+            if intf_dict_upd is None:
+                new_config['topo'][intf] = {}
+                intf_dict_upd = {}
+            intf_dict_upd.update(intf_dict)
+            if mand_arg:
+                new_config['topo'][intf].update(intf_dict_upd)
+            else:
+                del new_config['topo'][intf]
+            if self.obj.update_agent_configurations(agent,
+                                                    json.dumps(new_config)):
+                LOG.debug('Saved topo discovery %s in DB.', new_config)
+                return True
+            else:
+                return False
+        # Config not yet created
+        else:
+            return False
+
     def set_static_ip_address(self, context, msg):
         """Process request for setting rules in iptables.
 

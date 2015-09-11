@@ -20,6 +20,7 @@ import Queue
 import time
 from dfa.common import utils
 from dfa.agent.vdp import ovs_vdp
+from dfa.agent.topo_disc import topo_disc
 from dfa.common import constants
 from dfa.common import dfa_logger as logging
 from dfa.common import rpc
@@ -141,6 +142,10 @@ class VdpMgr(object):
         self.uplink_down_cnt = 0
         self.is_os_run = False
         self.start()
+        self.topo_disc = topo_disc.TopoDisc(self.topo_disc_cb, root_helper)
+
+    def topo_disc_cb(self, intf, topo_disc_obj):
+        return self.save_topo_disc_params(intf, topo_disc_obj)
 
     def update_vm_result(self, port_uuid, result):
         context = {'agent': self.host}
@@ -200,6 +205,8 @@ class VdpMgr(object):
                 LOG.info("UP Event Processing Complete Saving uplink %s and "
                          "veth %s" % (self.phy_uplink, veth_intf))
                 self.save_uplink(uplink=self.phy_uplink, veth_intf=veth_intf)
+                self.topo_disc.uncfg_intf(self.phy_uplink)
+                self.topo_disc.cfg_intf(veth_intf)
         elif msg.get_status() == 'down':
             # Free the object fixme(padkrish)
             if phy_uplink in self.ovs_vdp_obj_dict:
@@ -208,6 +215,8 @@ class VdpMgr(object):
                 ovs_vdp.delete_uplink_and_flows(self.root_helper, self.br_ex,
                                                 phy_uplink)
             self.save_uplink()
+            self.topo_disc.uncfg_intf(self.veth_intf)
+            self.topo_disc.cfg_intf(phy_uplink)
 
     def process_queue(self):
         LOG.info("Entered process_q")
@@ -285,6 +294,28 @@ class VdpMgr(object):
             return resp
         except rpc.MessagingTimeout:
             LOG.error("RPC timeout: Failed to save link name on the server")
+
+    def save_topo_disc_params(self, intf, topo_disc_obj):
+        context = {}
+        args = json.dumps(
+            dict(
+                agent=self.host,
+                intf=intf,
+                remote_evb_cfgd=topo_disc_obj.remote_evb_cfgd,
+                remote_evb_mode=topo_disc_obj.remote_evb_mode,
+                remote_mgmt_addr=topo_disc_obj.remote_mgmt_addr,
+                remote_system_desc=topo_disc_obj.remote_system_desc,
+                remote_system_name=topo_disc_obj.remote_system_name,
+                remote_port=topo_disc_obj.remote_port,
+                remote_chassis_id_mac=topo_disc_obj.remote_chassis_id_mac,
+                remote_port_id_mac=topo_disc_obj.remote_port_id_mac))
+        msg = self.rpc_clnt.make_msg('save_topo_disc_params', context,
+                                     msg=args)
+        try:
+            resp = self.rpc_clnt.call(msg)
+            return resp
+        except rpc.MessagingTimeout:
+            LOG.error("RPC timeout: Failed to send topo disc on the server")
 
     def vdp_uplink_proc(self):
         '''
