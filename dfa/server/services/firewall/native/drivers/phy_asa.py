@@ -30,9 +30,13 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
         LOG.debug("Initializing physical ASA")
         super(PhyAsa, self).__init__()
 
-    def initialize(self, mgmt_ip_addr):
+    def initialize(self, cfg_dict):
         LOG.debug("Initialize for PhyAsa")
-        self.mgmt_ip_addr = mgmt_ip_addr
+        self.mgmt_ip_addr = cfg_dict.get('mgmt_ip_addr')
+
+    def pop_evnt_que(self, que_obj):
+        LOG.debug("Pop Event for PhyAsa")
+        pass
 
     def is_device_virtual(self):
         return False
@@ -52,10 +56,8 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
             self.get_in_ip_addr(tenant_id))
         out_subnet, out_ip_start, out_ip_end, out_ip_gw = (
             self.get_out_ip_addr(tenant_id))
-        in_seg, in_vlan, in_mob_dom = \
-            self.get_in_seg_vlan_mob_dom(tenant_id)
-        out_seg, out_vlan, out_mob_dom = \
-            self.get_out_seg_vlan_mob_dom(tenant_id)
+        in_seg, in_vlan = self.get_in_seg_vlan(tenant_id)
+        out_seg, out_vlan = self.get_out_seg_vlan(tenant_id)
         # Setup the physical ASA appliance
         # self.get_mgmt_ip_addr(tenant_id)
         # self.get_vlan_in_out(tenant_id)

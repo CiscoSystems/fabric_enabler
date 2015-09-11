@@ -87,6 +87,7 @@ class LldpadDriver(object):
         vdp_periodic_task.run()
 
     def clear_uplink(self):
+        ''' Clear the uplink related attributes '''
         self.phy_uplink = None
         self.port_name = None
         self.vdp_periodic_task.stop()
@@ -94,6 +95,7 @@ class LldpadDriver(object):
         del self.oui_vif_map
 
     def read_vdp_cfg(self):
+        ''' Read VDP related configs '''
         self._cfg = config.CiscoDFAConfig().cfg
         self.vdp_opts = dict()
         self.vdp_opts['mgrid'] = self._cfg.vdp.mgrid2
@@ -519,7 +521,7 @@ class LldpadDriver(object):
             vlan_val = reply.partition("filter = ")[2].split('-')[0]
             vlan = int(vlan_val)
         except ValueError:
-            LOG.error("Reply not formatted correctly:", reply)
+            LOG.error("Reply not formatted correctly: %s", reply)
             return constants.INVALID_VLAN
         return vlan
 
@@ -644,6 +646,7 @@ class LldpadDriver(object):
         :return reply: VLAN reply from vdptool
         '''
         oui_id = None
+        oui_data = None
         if 'oui_id' in oui:
             oui_id = oui['oui_id']
             oui_data = oui

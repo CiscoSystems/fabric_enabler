@@ -40,8 +40,9 @@ def is_uplink_already_added(root_helper, br_ex, port_name):
         if br == br_ex:
             return True
         else:
-            LOG.error("Port %s added to wrong bridge %s Given %s" %
-                      (port_name, br, br_ex))
+            LOG.error("Port %(port)s added to wrong bridge %(br)s "
+                      "Given %(br_ex)s",
+                      {'port': port_name, 'br': br, 'br_ex': br_ex})
             return False
 
 
@@ -190,10 +191,6 @@ class OVSNeutronVdp(object):
         br.delete_flows(dl_dst=constants.NCB_DMAC,
                         dl_type=constants.LLDP_ETYPE)
         br.delete_flows(dl_dst=constants.NCB_DMAC,
-                        dl_type=constants.LLDP_ETYPE)
-        br.delete_flows(dl_dst=constants.NCB_DMAC,
-                        dl_type=constants.VDP22_ETYPE)
-        br.delete_flows(dl_dst=constants.NCB_DMAC,
                         dl_type=constants.VDP22_ETYPE)
 
     def clear_obj_params(self):
@@ -292,7 +289,8 @@ class OVSNeutronVdp(object):
             # at the Leaf. Deleting the assoc and creating the assoc for new
             # veth is not optimal. fixme(padkrish)
             # ip_lib.IPDevice(lldp_ovs_veth_str,self.root_helper).link.delete()
-            ovs_lib.execute(['/sbin/udevadm', 'settle', '--timeout=10'])
+            # This is commented below, sometimes doesn't work TODO
+            # ovs_lib.execute(['/sbin/udevadm', 'settle', '--timeout=10'])
             lldp_loc_veth = ip_wrapper.device(lldp_loc_veth_str)
             lldp_ovs_veth = ip_wrapper.device(lldp_ovs_veth_str)
         else:
@@ -489,12 +487,14 @@ class OVSNeutronVdp(object):
                 if port_name is None:
                     LOG.error("Unknown portname for uuid %s" % port_uuid)
                     return False
-                LOG.info('portname for uuid %s is ' % port_name)
+                LOG.info("Status up forportname for uuid %(uuid)s is %(port)s",
+                         {'uuid': port_uuid, 'port': port_name})
                 ret = self.port_up_segment_mode(lldpad_port, port_name,
                                                 port_uuid, mac, net_uuid,
                                                 segmentation_id, oui)
         else:
             if self.vdp_mode == constants.VDP_SEGMENT_MODE:
+                LOG.info("Status down for portname for uuid %s is ", port_uuid)
                 ret = self.port_down_segment_mode(lldpad_port, port_uuid,
                                                   mac, net_uuid,
                                                   segmentation_id, oui)
@@ -511,10 +511,14 @@ class OVSNeutronVdp(object):
         '''
         try:
             with self.ovs_vdp_lock:
-                self.send_vdp_port_event_internal(port_uuid, mac, net_uuid,
-                                                  segmentation_id, status, oui)
+                ret = self.send_vdp_port_event_internal(port_uuid, mac,
+                                                        net_uuid,
+                                                        segmentation_id,
+                                                        status, oui)
+                return ret
         except Exception as e:
             LOG.error("Exception in send_vdp_port_event %s" % str(e))
+            return False
 
     def unprovision_vdp_overlay_networks(self, net_uuid, lvid, vdp_vlan, oui):
         '''Provisions a overlay type network configured using VDP.
