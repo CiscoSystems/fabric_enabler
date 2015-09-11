@@ -471,7 +471,9 @@ class DFARESTClient(object):
                         "configArg": cfg_args,
                         "organizationName": tenant_name,
                         "partitionName": part_name,
-                        "description": network.name}
+                        "description": network.name,
+                        "netmaskLength":  subnet_ip_mask[1],
+                        "gateway": gw_ip}
         if seg_id:
             network_info["segmentId"] = seg_id
         if dhcp_range:
