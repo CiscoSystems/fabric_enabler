@@ -511,10 +511,14 @@ class OVSNeutronVdp(object):
         '''
         try:
             with self.ovs_vdp_lock:
-                self.send_vdp_port_event_internal(port_uuid, mac, net_uuid,
-                                                  segmentation_id, status, oui)
+                ret = self.send_vdp_port_event_internal(port_uuid, mac,
+                                                        net_uuid,
+                                                        segmentation_id,
+                                                        status, oui)
+                return ret
         except Exception as e:
             LOG.error("Exception in send_vdp_port_event %s" % str(e))
+            return False
 
     def unprovision_vdp_overlay_networks(self, net_uuid, lvid, vdp_vlan, oui):
         '''Provisions a overlay type network configured using VDP.
