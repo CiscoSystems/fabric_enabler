@@ -199,10 +199,8 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
         ''' Internal routine that gets called when a FW is created '''
         LOG.debug("In creating phy ASA FW data is %s", data)
         tenant_name = data.get('tenant_name')
-        in_seg, in_vlan, in_mob_dom = \
-            self.get_in_seg_vlan_mob_dom(tenant_id)
-        out_seg, out_vlan, out_mob_dom = \
-            self.get_out_seg_vlan_mob_dom(tenant_id)
+        in_seg, in_vlan = self.get_in_seg_vlan(tenant_id)
+        out_seg, out_vlan = self.get_out_seg_vlan(tenant_id)
         # self.get_mgmt_ip_addr(tenant_id)
         # self.get_vlan_in_out(tenant_id)
         # Check if router is already added and only then add, needed for
@@ -310,10 +308,8 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
         LOG.debug("In Delete fw data is %s", data)
         # Do the necessary stuffs in ASA
         tenant_name = data.get('tenant_name')
-        in_seg, in_vlan, in_mob_dom = \
-            self.get_in_seg_vlan_mob_dom(tenant_id)
-        out_seg, out_vlan, out_mob_dom = \
-            self.get_out_seg_vlan_mob_dom(tenant_id)
+        in_seg, in_vlan = self.get_in_seg_vlan(tenant_id)
+        out_seg, out_vlan = self.get_out_seg_vlan(tenant_id)
         in_net = self.get_in_net_id(tenant_id)
         out_net = self.get_out_net_id(tenant_id)
         in_sub = self.get_in_subnet_id(tenant_id)

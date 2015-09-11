@@ -56,10 +56,8 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
             self.get_in_ip_addr(tenant_id))
         out_subnet, out_ip_start, out_ip_end, out_ip_gw = (
             self.get_out_ip_addr(tenant_id))
-        in_seg, in_vlan, in_mob_dom = \
-            self.get_in_seg_vlan_mob_dom(tenant_id)
-        out_seg, out_vlan, out_mob_dom = \
-            self.get_out_seg_vlan_mob_dom(tenant_id)
+        in_seg, in_vlan = self.get_in_seg_vlan(tenant_id)
+        out_seg, out_vlan = self.get_out_seg_vlan(tenant_id)
         # Setup the physical ASA appliance
         # self.get_mgmt_ip_addr(tenant_id)
         # self.get_vlan_in_out(tenant_id)

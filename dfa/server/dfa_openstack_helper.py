@@ -106,7 +106,7 @@ class DfaNeutronHelper(object):
                     subnet_id = subnet.get('id')
                     subnet_ret = self.neutronclient.delete_subnet(subnet_id)
         except Exception as exc:
-            LOG.error("Failed to create subnet for net %(net)s Exc %(exc)s",
+            LOG.error("Failed to delete subnet for net %(net)s Exc %(exc)s",
                       {'net': net_id, 'exc': str(exc)})
             return False
         try:

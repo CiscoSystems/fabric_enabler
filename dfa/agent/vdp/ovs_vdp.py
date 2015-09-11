@@ -41,7 +41,7 @@ def is_uplink_already_added(root_helper, br_ex, port_name):
             return True
         else:
             LOG.error("Port %(port)s added to wrong bridge %(br)s "
-                      "Given %(br_ex)s" %
+                      "Given %(br_ex)s",
                       {'port': port_name, 'br': br, 'br_ex': br_ex})
             return False
 

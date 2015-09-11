@@ -106,17 +106,15 @@ class ServiceIpSegTenantMap(dfa_dbm.DfaDBMixin):
             self.out_subnet, self.out_start_ip, self.out_end_ip,\
                 self.out_gateway = self.parse_subnet(subnet_dict)
 
-    def get_in_seg_vlan_mob_dom(self):
+    def get_in_seg_vlan(self):
         ''' Retrieve the seg, vlan, mod domain for IN network '''
         return self.in_dcnm_net_dict.get('segmentation_id'), \
-            self.in_dcnm_net_dict.get('vlan_id'), \
-            self.in_dcnm_net_dict.get('mob_domain_name')
+            self.in_dcnm_net_dict.get('vlan_id')
 
-    def get_out_seg_vlan_mob_dom(self):
+    def get_out_seg_vlan(self):
         ''' Retrieve the seg, vlan, mod domain for OUT network '''
         return self.out_dcnm_net_dict.get('segmentation_id'), \
-            self.out_dcnm_net_dict.get('vlan_id'), \
-            self.out_dcnm_net_dict.get('mob_domain_name')
+            self.out_dcnm_net_dict.get('vlan_id')
 
     def get_in_ip_addr(self):
         ''' Retrieve the subnet, start, end and gw IP address for IN Nwk '''
@@ -308,22 +306,22 @@ class FabricApi(object):
         return tenant_obj.get_dummy_router_net()
 
     @classmethod
-    def get_in_seg_vlan_mob_dom(cls, tenant_id):
+    def get_in_seg_vlan(cls, tenant_id):
         ''' Retrieves the IN Seg, VLAN, mob domain '''
         if tenant_id not in cls.serv_obj_dict:
             LOG.error("Fabric not prepared for tenant %s", tenant_id)
             return None, None, None
         tenant_obj = cls.serv_obj_dict.get(tenant_id)
-        return tenant_obj.get_in_seg_vlan_mob_dom()
+        return tenant_obj.get_in_seg_vlan()
 
     @classmethod
-    def get_out_seg_vlan_mob_dom(cls, tenant_id):
+    def get_out_seg_vlan(cls, tenant_id):
         ''' Retrieves the OUT Seg, VLAN, mob domain '''
         if tenant_id not in cls.serv_obj_dict:
             LOG.error("Fabric not prepared for tenant %s", tenant_id)
             return None, None, None
         tenant_obj = cls.serv_obj_dict.get(tenant_id)
-        return tenant_obj.get_out_seg_vlan_mob_dom()
+        return tenant_obj.get_out_seg_vlan()
 
     @classmethod
     def get_in_subnet_id(cls, tenant_id):
@@ -432,11 +430,10 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         # super(FabricBase, self).__init__()
         cfg = config.CiscoDFAConfig().cfg
         self.auto_nwk_create = cfg.firewall.fw_auto_serv_nwk_create
-        self.serv_vlan_min = int(cfg.firewall.fw_service_vlan_id_min)
-        self.serv_vlan_max = int(cfg.firewall.fw_service_vlan_id_max)
+        self.serv_vlan_min = int(cfg.dcnm.vlan_id_min)
+        self.serv_vlan_max = int(cfg.dcnm.vlan_id_max)
         self.serv_seg_min = int(cfg.dcnm.segmentation_id_min)
         self.serv_seg_max = int(cfg.dcnm.segmentation_id_max)
-        self.mob_domain_name = cfg.firewall.mob_domain_name
         self.serv_host_prof = cfg.firewall.fw_service_host_profile
         self.serv_host_mode = cfg.firewall.fw_service_host_fwd_mode
         self.serv_ext_prof = cfg.firewall.fw_service_ext_profile
@@ -588,7 +585,6 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         network_dict['tenant_id'] = tenant_id
         network_dict['fwd_mode'] = net_dict.get('fwd_mode')
         network_dict['vlan'] = net_dict.get('vlan_id')
-        network_dict['mob_domain_name'] = net_dict.get('mob_domain_name')
         self.add_network_db(net, network_dict, fw_const.FW_CONST, result)
 
     def store_fw_db(self, tenant_id, net, subnet_dict, direc):
@@ -781,7 +777,6 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         net_dict['vlan_id'] = vlan_id
         if vlan_id != 0:
             net_dict['mob_domain'] = True
-            net_dict['mob_domain_name'] = self.mob_domain_name
         net_dict['segmentation_id'] = segmentation_id
         return net_dict
 
@@ -806,7 +801,6 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             net_dict['mob_domain_name'] = None
         else:
             net_dict['mob_domain'] = True
-            net_dict['mob_domain_name'] = self.mob_domain_name
         # NWK ID are not filled fixme(padkrish)
         if direc == 'in':
             name = fw_id[0:4] + fw_const.IN_SERVICE_NWK + (
@@ -840,13 +834,15 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
     def alloc_seg(self, net_id):
         ''' Allocates the segmentation ID '''
         # Does allocation happen here or at ServiceIpSegTenantMap class? fixme
-        segmentation_id = self.service_segs.allocate_segmentation_id(net_id)
+        segmentation_id = self.service_segs.allocate_segmentation_id(
+            net_id, source=fw_const.FW_CONST)
         return segmentation_id
 
     def alloc_vlan(self, net_id):
         ''' Allocates the vlan ID '''
         # Does allocation happen here or at ServiceIpSegTenantMap class? fixme
-        vlan_id = self.service_vlans.allocate_segmentation_id(net_id)
+        vlan_id = self.service_vlans.allocate_segmentation_id(
+            net_id, source=fw_const.FW_CONST)
         return vlan_id
 
     def update_subnet_db_info(self, tenant_id, direc, net_id, subnet_id):
@@ -891,14 +887,13 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
 
         net_dict = {}
         if direc == 'in':
-            seg, vlan, mob_dom = self.get_in_seg_vlan_mob_dom(tenant_id)
+            seg, vlan = self.get_in_seg_vlan(tenant_id)
             net_dict['part_name'] = None
         else:
-            seg, vlan, mob_dom = self.get_out_seg_vlan_mob_dom(tenant_id)
+            seg, vlan = self.get_out_seg_vlan(tenant_id)
             net_dict['part_name'] = fw_const.SERV_PART_NAME
         net_dict['segmentation_id'] = seg
         net_dict['vlan_id'] = vlan
-        net_dict['mob_domain_name'] = mob_dom
         net = utils.dict_to_obj(net_dict)
         ret = True
         try:
@@ -1121,11 +1116,11 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             return False
         if direc == 'in':
             net_id = fw_data.in_network_id
-            seg, vlan, mob_dom = self.get_in_seg_vlan_mob_dom(tenant_id)
+            seg, vlan = self.get_in_seg_vlan(tenant_id)
             sub, ip, ip_end, gw = self.get_in_ip_addr(tenant_id)
         else:
             net_id = fw_data.out_network_id
-            seg, vlan, mob_dom = self.get_out_seg_vlan_mob_dom(tenant_id)
+            seg, vlan = self.get_out_seg_vlan(tenant_id)
             sub, ip, ip_end, gw = self.get_out_ip_addr(tenant_id)
         # Delete the Openstack Network
         try:
@@ -1600,8 +1595,10 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         Delete the entry from Firewall DB, given the net ID.
         Release the IN/OUT sug=bnets associated with the net.
         '''
-        self.service_segs.release_segmentation_id(seg)
-        self.service_vlans.release_segmentation_id(vlan)
+        if seg is not None:
+            self.service_segs.release_segmentation_id(seg)
+        if vlan is not None:
+            self.service_vlans.release_segmentation_id(vlan)
         self.os_helper.delete_network_all_subnets(net_id)
         # There's a chance that OS network got created but it's ID
         # was not put in DB
@@ -1619,14 +1616,18 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
 
         LOG.info("Checking consistency of DB")
         # Any Segments allocated that's not in Network or FW DB, release it
-        seg_netid_dict = self.service_segs.get_all_seg_netid()
-        vlan_netid_dict = self.service_vlans.get_all_seg_netid()
+        seg_netid_dict = self.service_segs.get_seg_netid_src(fw_const.FW_CONST)
+        vlan_netid_dict = self.service_vlans.get_seg_netid_src(
+            fw_const.FW_CONST)
         for netid in seg_netid_dict:
             net = self.get_network(netid)
             fw_net = self.get_fw_by_netid(netid)
             if not net or not fw_net:
-                self.delete_os_nwk_db(netid, seg_netid_dict[netid],
-                                      vlan_netid_dict[netid])
+                if netid in vlan_netid_dict:
+                    vlan_net = vlan_netid_dict[netid]
+                else:
+                    vlan_net = None
+                self.delete_os_nwk_db(netid, seg_netid_dict[netid], vlan_net)
                 LOG.info("Allocated segment for net %s not in DB returning",
                          net)
                 return
@@ -1636,8 +1637,11 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             net = self.get_network(netid)
             fw_net = self.get_fw_by_netid(netid)
             if not net or not fw_net:
-                self.delete_os_nwk_db(netid, seg_netid_dict[netid],
-                                      vlan_netid_dict[netid])
+                if netid in seg_netid_dict:
+                    vlan_net = seg_netid_dict[netid]
+                else:
+                    vlan_net = None
+                self.delete_os_nwk_db(netid, vlan_net, vlan_netid_dict[netid])
                 LOG.info("Allocated vlan for net %s not in DB returning", net)
                 return
         # Release all IP's from DB that has no NetID or SubnetID
