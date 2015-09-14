@@ -133,7 +133,7 @@ class IptablesDriver(object):
                                   ' to %s.' % (rule.ip, event.get('ip')))
                         # Only update the IP address if it is different.
                         rule.ip = event.get('ip')
-                return
+                        return
 
         self._iptq.put(event)
 

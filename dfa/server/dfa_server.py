@@ -1101,6 +1101,25 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                             params = dict(columns=dict(ip=ip_addr))
                             self.update_vm_db(vm.port_id, **params)
 
+                            # Send update to the agent.
+                            vm_info = dict(status=vm.status, vm_mac=vm.mac,
+                                           segmentation_id=vm.segmentation_id,
+                                           host=vm.host, port_uuid=vm.port_id,
+                                           net_uuid=vm.network_id,
+                                           oui=dict(ip_addr=ip_addr,
+                                                    vm_name=vm.name,
+                                                    vm_uuid=vm.instance_id,
+                                                    gw_mac=vm.gw_mac,
+                                                    fwd_mod=vm.fwd_mod,
+                                                    oui_id='cisco'))
+                            try:
+                                self.neutron_event.send_vm_info(vm.host,
+                                                                str(vm_info))
+                            except (rpc.MessagingTimeout, rpc.RPCException,
+                                    rpc.RemoteError):
+                                LOG.error(_LE('Failed to send VM info to '
+                                              'agent.'))
+
     def request_vms_info(self, payload):
         """Get the VMs from the database and send the info to the agent."""
 
@@ -1174,6 +1193,24 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                 # Update the database.
                 params = dict(columns=dict(ip=ipaddr))
                 self.update_vm_db(vm.port_id, **params)
+
+                # Send update to the agent.
+                vm_info = dict(status=vm.status, vm_mac=vm.mac,
+                               segmentation_id=vm.segmentation_id,
+                               host=vm.host, port_uuid=vm.port_id,
+                               net_uuid=vm.network_id,
+                               oui=dict(ip_addr=ipaddr,
+                                        vm_name=vm.name,
+                                        vm_uuid=vm.instance_id,
+                                        gw_mac=vm.gw_mac,
+                                        fwd_mod=vm.fwd_mod,
+                                        oui_id='cisco'))
+                try:
+                    self.neutron_event.send_vm_info(vm.host,
+                                                    str(vm_info))
+                except (rpc.MessagingTimeout, rpc.RPCException,
+                        rpc.RemoteError):
+                    LOG.error(_LE('Failed to send VM info to agent.'))
 
     def vm_result_update(self, payload):
         """Update the result field in VM database.
