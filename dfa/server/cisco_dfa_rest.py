@@ -569,20 +569,22 @@ class DFARESTClient(object):
         part_name = network.part_name
         if not part_name:
             part_name = self._part_name
+        seg_id = str(network.segmentation_id)
         if network.mob_domain_name:
             mob_domain_name = network.mob_domain_name
             vlan_id = str(network.vlan_id)
+            network_info = {
+                'organizationName': tenant_name,
+                'partitionName': part_name,
+                'mobDomainName': mob_domain_name,
+                'vlanId': vlan_id,
+            }
         else:
-            vlan_id = '0'
-            mob_domain_name = None
-        seg_id = str(network.segmentation_id)
-        network_info = {
-            'organizationName': tenant_name,
-            'partitionName': part_name,
-            'mobDomainName': mob_domain_name,
-            'vlanId': vlan_id,
-            'segmentId': seg_id,
-        }
+            network_info = {
+                'organizationName': tenant_name,
+                'partitionName': part_name,
+                'segmentId': seg_id,
+            }
         LOG.debug("Deleting %s network in DCNM.", network_info)
 
         res = self._delete_network(network_info)

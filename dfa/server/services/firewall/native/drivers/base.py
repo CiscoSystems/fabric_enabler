@@ -47,6 +47,11 @@ class BaseDrvr(object):
         pass
 
     @abc.abstractmethod
+    def nwk_create_notif(self, tenant_id, tenant_name, cidr):
+        '''Nwk Create Notification'''
+        pass
+
+    @abc.abstractmethod
     def is_device_virtual(self):
         '''Return False if device is physical, True otherwise'''
         pass

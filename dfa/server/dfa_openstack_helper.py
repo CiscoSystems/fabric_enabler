@@ -334,7 +334,7 @@ class DfaNeutronHelper(object):
             return False
         return True
 
-    def get_subnet_nwk_excl(self, tenant_id, excl_list):
+    def get_subnet_nwk_excl(self, tenant_id, excl_list, excl_part=False):
         '''
         Get the subnets inside a network after applying the exclusion
         list
@@ -342,6 +342,11 @@ class DfaNeutronHelper(object):
         net_list = self.get_network_by_tenant(tenant_id)
         ret_subnet_list = []
         for net in net_list:
+            if excl_part:
+                name = net.get('name')
+                part = name.partition('::')[2]
+                if part:
+                    continue
             subnet_lst = self.get_subnets_for_net(net.get('id'))
             for subnet_elem in subnet_lst:
                 subnet = subnet_elem.get('cidr').split('/')[0]
@@ -372,6 +377,20 @@ class DfaNeutronHelper(object):
                         LOG.error("Program router returned error for %s",
                                   rout_id)
                         return False
+        return True
+
+    def program_rtr_nwk_next_hop(self, rout_id, next_hop, cidr):
+        ''' Program the next hop for all networks of a tenant '''
+        namespace = self.find_rtr_namespace(rout_id)
+        if namespace is None:
+            LOG.error("Unable to find namespace for router %s", rout_id)
+            return False
+
+        args = ['route', 'add', '-net', cidr, 'gw', next_hop]
+        ret = self.program_rtr(args, rout_id, namespace=namespace)
+        if not ret:
+            LOG.error("Program router returned error for %s", rout_id)
+            return False
         return True
 
     def get_fw(self, fw_id):

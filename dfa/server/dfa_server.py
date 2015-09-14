@@ -636,6 +636,15 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             LOG.exception(emsg, {'net': dcnm_net.name})
             # Update network database with failure result.
             self.update_network_db(dcnm_net.id, constants.CREATE_FAIL)
+        # Notification to services like FW about creation of Subnet Event
+        # Currently, doesn't work for network created in DCNM, place the below
+        # lines before the above DCNM check. fixme
+        part = net.get('name').partition('::')[2]
+        if part:
+            # Network in another partition, skip
+            return
+        self.nwk_sub_create_notif(snet.get('tenant_id'), tenant_name,
+                                  snet.get('cidr'))
 
     def _get_segmentation_id(self, segid):
         """Allocate segmentation id."""

@@ -30,7 +30,7 @@ import dfa_db_api as db
 LOG = logging.getLogger(__name__)
 
 DB_MAX_RETRIES = 10
-RULE_LEN = 400
+RULE_LEN = 4096
 
 
 class DfaSegmentationId(db.Base):

@@ -38,6 +38,11 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
         LOG.debug("Pop Event for PhyAsa")
         pass
 
+    def nwk_create_notif(self, tenant_id, tenant_name, cidr):
+        ''' Network Create Notification '''
+        LOG.debug("Nwk Create Notif PhyAsa")
+        pass
+
     def is_device_virtual(self):
         return False
 

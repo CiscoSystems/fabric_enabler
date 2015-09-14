@@ -312,6 +312,12 @@ class FwMgr(dev_mgr.DeviceMgr):
         self.que_obj = que_obj
         self.pop_evnt_que(que_obj)
 
+    def nwk_sub_create_notif(self, tenant_id, tenant_name, cidr):
+        ''' Network create notification '''
+        if not self.fw_init:
+            return
+        self.nwk_create_notif(tenant_id, tenant_name, cidr)
+
     def _create_fw_fab_dev(self, tenant_id, drvr_name, fw_dict):
         '''
             This routine calls the fabric class to prepare the fabric when
@@ -414,7 +420,7 @@ class FwMgr(dev_mgr.DeviceMgr):
         '''
         if self.fwid_attr[tenant_id].is_fw_complete():
             fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
-            self.modify_fw_device(tenant_id, fw_dict)
+            self.modify_fw_device(tenant_id, fw_dict.get('fw_id'), fw_dict)
 
     def _fw_create(self, drvr_name, data, cache):
         '''

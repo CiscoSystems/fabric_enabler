@@ -176,3 +176,16 @@ class DeviceMgr(object):
         ''' Modifies the firewall cfg '''
         drvr_dict, mgmt_ip = self.sched_obj.get_fw_dev_map(fw_id)
         return drvr_dict.get('drvr_obj').modify_fw(tenant_id, data)
+
+    def nwk_create_notif(self, tenant_id, tenant_name, cidr):
+        '''
+        Notification for Network create.
+        Since FW ID not present, it's not possible to know which FW instance
+        to call. So, calling everyone, each instance will figure out if it
+        applies to them
+        '''
+        for ip in self.obj_dict:
+            drvr_obj = self.obj_dict.get(ip).get('drvr_obj')
+            ret = drvr_obj.nwk_create_notif(tenant_id, tenant_name, cidr)
+            LOG.info("Drvr with IP %(ip)s return %(ret)s",
+                     {'ip': ip, 'ret': ret})
