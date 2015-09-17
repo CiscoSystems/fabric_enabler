@@ -1707,7 +1707,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         # fixme go through the algo for delete SM as well.
 
     def prepare_fabric_fw_int(self, tenant_id, tenant_name, fw_id, fw_name,
-                              is_fw_virt):
+                              is_fw_virt, result):
         '''
         Internal routine to prepare the fabric. This creates an entry in FW
         DB and runs the SM.
@@ -1718,11 +1718,11 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         try:
             # More than 1 FW per tenant not supported fixme(padkrish)
             if tenant_id in self.service_attr and (
-               self.service_attr[tenant_id].is_fabric_create()):
+               result == fw_constants.RESULT_FW_CREATE_DONE):
                 LOG.error("Fabric already prepared for tenant %(tenant)s,"
                           " %(name)s",
                           {'tenant': tenant_id, 'name': tenant_name})
-                return False
+                return True
             if tenant_id not in self.service_attr:
                 self.create_serv_obj(tenant_id)
             self.service_attr[tenant_id].create_fw_db(fw_id, fw_name,
@@ -1742,19 +1742,20 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         return ret
 
     def prepare_fabric_fw(self, tenant_id, tenant_name, fw_id, fw_name,
-                          is_fw_virt):
+                          is_fw_virt, result):
         ''' Top level routine to prepare the fabric '''
         try:
             with self.mutex_lock:
                 ret = self.prepare_fabric_fw_int(tenant_id, tenant_name,
-                                                 fw_id, fw_name, is_fw_virt)
+                                                 fw_id, fw_name, is_fw_virt,
+                                                 result)
         except Exception as exc:
             LOG.error("Exception raised in create fabric %s", str(exc))
             return False
         return ret
 
     def delete_fabric_fw_int(self, tenant_id, tenant_name, fw_id, fw_name,
-                             is_fw_virt):
+                             is_fw_virt, result):
         '''
         Internal routine to delete the fabric cfg. This runs the SM and deletes
         the entries from DB and local cache
@@ -1766,8 +1767,14 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             if tenant_id not in self.service_attr:
                 LOG.error("Service obj not created for tenant %s", tenant_name)
                 return False
-            if not self.service_attr[tenant_id].is_fabric_create():
-                LOG.error("Fabric for tenant %s already deleted", tenant_name)
+            # A check for is_fabric_create is not needed since a delete
+            # may be issued even when create is not completely done.
+            # For example, some state such as create stuff in DCNM failed and
+            # SM for create is in the process of retrying. A delete can be
+            # issue at that time. If we have a check for is_fabric_create
+            # then delete operation will not go through.
+            if result == fw_const.RESULT_FW_DELETE_DONE:
+                LOG.error("Fabric for tenant %s already deleted", tenant_id)
                 return True
             ret = self.run_delete_sm(fw_id, fw_name, tenant_id, tenant_name,
                                      is_fw_virt)
@@ -1789,12 +1796,13 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         return ret
 
     def delete_fabric_fw(self, tenant_id, tenant_name, fw_id, fw_name,
-                         is_fw_virt):
+                         is_fw_virt, result):
         ''' Top level routine to unconfigure the fabric '''
         try:
             with self.mutex_lock:
                 ret = self.delete_fabric_fw_int(tenant_id, tenant_name,
-                                                fw_id, fw_name, is_fw_virt)
+                                                fw_id, fw_name, is_fw_virt,
+                                                result)
         except Exception as exc:
             LOG.error("Exception raised in delete fabric %s", str(exc))
             return False
@@ -1812,30 +1820,23 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
                 LOG.error("Tenant Obj not created")
                 return False
             if result == fw_const.RESULT_FW_CREATE_INIT:
-                if not self.service_attr[tenant_id].is_fabric_create():
-                    ret = self.run_create_sm(fw_data.get('fw_id'),
-                                             fw_data.get('fw_name'), tenant_id,
-                                             tenant_name, is_fw_virt)
-                else:
-                    LOG.debug("Fabric already prepared for tenant %s",
-                              tenant_id)
-                    return True
+                # A check for is_fabric_create is not done here.
+                ret = self.run_create_sm(fw_data.get('fw_id'),
+                                         fw_data.get('fw_name'), tenant_id,
+                                         tenant_name, is_fw_virt)
             else:
                 if result == fw_const.RESULT_FW_DELETE_INIT:
-                    if self.service_attr[tenant_id].is_fabric_create():
-                        ret = self.run_delete_sm(fw_data.get('fw_id'),
-                                                 fw_data.get('fw_name'),
-                                                 tenant_id, tenant_name,
-                                                 is_fw_virt)
-                    else:
-                        LOG.debug("Fabric already removed for tenant %s",
-                                  tenant_id)
-                        return True
+                    # A check for is_fabric_create is not done here.
+                    # Pls check the comment given in function
+                    # delete_fabric_fw_int
+                    ret = self.run_delete_sm(fw_data.get('fw_id'),
+                                             fw_data.get('fw_name'),
+                                             tenant_id, tenant_name,
+                                             is_fw_virt)
                 else:
                     LOG.error("Unknown state in retry")
                     return False
-            if ret:
-                self.service_attr[tenant_id].set_fabric_create(True)
+            self.service_attr[tenant_id].set_fabric_create(ret)
         except Exception as exc:
             LOG.error("Exception raised in create fabric int %s", str(exc))
             return False

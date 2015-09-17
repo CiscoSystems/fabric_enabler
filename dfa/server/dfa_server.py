@@ -768,6 +768,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         tenant_id = self.network[net_id].get('tenant_id')
         tenant_name = self.get_project_name(tenant_id)
         net = utils.dict_to_obj(self.network[net_id])
+        name = self.network[net_id].get('name')
         if not tenant_name:
             LOG.error('Project %(tenant_id)s does not exist.', (
                       {'tenant_id': tenant_id}))
@@ -790,6 +791,15 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             self.update_network_db(net_id, constants.DELETE_FAIL)
         if self._lbMgr and self._lbMgr.lb_is_internal_nwk(net.name):
             self._lbMgr.lb_delete_net(net.name, tenant_id)
+        # Notification to services like FW about deletion of Nwk Event,
+        # Since deletion of subnet event is not processed currently.
+        # Currently, doesn't work for network created in DCNM, place the below
+        # lines before the above DCNM check. fixme
+        part = name.partition('::')[2]
+        if part:
+            # Network in another partition, skip
+            return
+        self.nwk_del_notif(tenant_id, tenant_name, net_id)
 
     def dcnm_network_create_event(self, network_info):
         """Process network create event from DCNM."""

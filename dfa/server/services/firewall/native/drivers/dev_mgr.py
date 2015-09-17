@@ -189,3 +189,16 @@ class DeviceMgr(object):
             ret = drvr_obj.nwk_create_notif(tenant_id, tenant_name, cidr)
             LOG.info("Drvr with IP %(ip)s return %(ret)s",
                      {'ip': ip, 'ret': ret})
+
+    def nwk_delete_notif(self, tenant_id, tenant_name, net_id):
+        '''
+        Notification for Network delete.
+        Since FW ID not present, it's not possible to know which FW instance
+        to call. So, calling everyone, each instance will figure out if it
+        applies to them
+        '''
+        for ip in self.obj_dict:
+            drvr_obj = self.obj_dict.get(ip).get('drvr_obj')
+            ret = drvr_obj.nwk_delete_notif(tenant_id, tenant_name, net_id)
+            LOG.info("Drvr with IP %(ip)s return %(ret)s for nwk delete notif",
+                     {'ip': ip, 'ret': ret})

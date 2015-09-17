@@ -362,15 +362,8 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
         '''
         LOG.debug("In Modify fw data is %s", data)
 
-    def nwk_create_notif(self, tenant_id, tenant_name, cidr):
-        '''
-        Tenant Network create Notification
-        Restart is not supported currently for this.
-        '''
-        rout_id = self.get_rtr_id(tenant_id, tenant_name)
-        if rout_id is None:
-            LOG.error("Rout ID not present for tenant")
-            return False
+    def _program_dcnm_static_route(self, tenant_id, tenant_name):
+        ''' Program DCNM Static Route '''
         in_ip, in_start, in_end, in_gw = self.get_in_ip_addr(tenant_id)
         if in_gw is None:
             LOG.error("No FW service GW present")
@@ -381,8 +374,6 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
         dummy_cidr = self.os_helper.get_subnet_cidr(dummy_subnet)
 
         # Program DCNM to update profile's static IP address on OUT part
-        ip_list = []
-        ip_list.append(cidr)
         excl_list = []
         excl_list.append(in_ip)
         excl_list.append(out_ip)
@@ -398,13 +389,73 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
             vrf_prof=self.cfg.firewall.fw_service_part_vrf_profile,
             service_node_ip=srvc_node_ip)
         if not ret:
-            LOG.error("Unable to update DCNM ext profile with static route %s",
+            LOG.error("Unable to update DCNM ext profile with static route")
+            return False
+        return True
+
+    def nwk_create_notif(self, tenant_id, tenant_name, cidr):
+        '''
+        Tenant Network create Notification
+        Restart is not supported currently for this.
+        '''
+        rout_id = self.get_rtr_id(tenant_id, tenant_name)
+        if rout_id is None:
+            LOG.error("Rout ID not present for tenant")
+            return False
+        ret = self._program_dcnm_static_route(tenant_id, tenant_name)
+        if not ret:
+            LOG.error("Program DCNM with static routes failed for rout %s",
                       rout_id)
             return False
 
         # Program router namespace to have this network to be routed
         # to IN service network
+        in_ip, in_start, in_end, in_gw = self.get_in_ip_addr(tenant_id)
+        if in_gw is None:
+            LOG.error("No FW service GW present")
+            return False
         ret = self.os_helper.program_rtr_nwk_next_hop(rout_id, in_gw, cidr)
+        if not ret:
+            LOG.error("Unable to program default router next hop %s",
+                      rout_id)
+            return False
+        return True
+
+    def nwk_delete_notif(self, tenant_id, tenant_name, nwk_id):
+        '''
+        Tenant Network create Notification
+        Restart is not supported currently for this.
+        '''
+        rout_id = self.get_rtr_id(tenant_id, tenant_name)
+        if rout_id is None:
+            LOG.error("Rout ID not present for tenant")
+            return False
+        ret = self._program_dcnm_static_route(tenant_id, tenant_name)
+        if not ret:
+            LOG.error("Program DCNM with static routes failed for rout %s",
+                      rout_id)
+            return False
+
+        # Program router namespace to have this network to be routed
+        # to IN service network
+        in_ip, in_start, in_end, in_gw = self.get_in_ip_addr(tenant_id)
+        if in_gw is None:
+            LOG.error("No FW service GW present")
+            return False
+        out_ip, out_start, out_end, out_gw = self.get_out_ip_addr(tenant_id)
+        dummy_net, dummy_subnet, dummy_rtr = (
+            self.get_dummy_router_net(tenant_id))
+        dummy_cidr = self.os_helper.get_subnet_cidr(dummy_subnet)
+        excl_list = []
+        excl_list.append(in_ip)
+        excl_list.append(out_ip)
+        excl_list.append(dummy_cidr.split('/')[0])
+        subnet_lst = self.os_helper.get_subnet_nwk_excl(tenant_id, excl_list,
+                                                        excl_part=True)
+        # The dummy route anyway would not have got added, so no need to add
+        # it to excl_list
+        ret = self.os_helper.remove_rtr_nwk_next_hop(rout_id, in_gw,
+                                                     subnet_lst, excl_list)
         if not ret:
             LOG.error("Unable to program default router next hop %s",
                       rout_id)

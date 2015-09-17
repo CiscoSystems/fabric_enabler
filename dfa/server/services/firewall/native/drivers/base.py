@@ -52,6 +52,11 @@ class BaseDrvr(object):
         pass
 
     @abc.abstractmethod
+    def nwk_delete_notif(self, tenant_id, tenant_name, net_id):
+        '''Nwk Delete Notification'''
+        pass
+
+    @abc.abstractmethod
     def is_device_virtual(self):
         '''Return False if device is physical, True otherwise'''
         pass

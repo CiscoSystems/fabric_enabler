@@ -325,6 +325,22 @@ class DfaNeutronHelper(object):
             return False
         return True
 
+    def program_rtr_return(self, args, rout_id, namespace=None):
+        ''' Execute the command against the namespace and return the result'''
+        if namespace is None:
+            namespace = self.find_rtr_namespace(rout_id)
+        if namespace is None:
+            LOG.error("Unable to find namespace for router %s", rout_id)
+            return False
+        final_args = ['ip', 'netns', 'exec', namespace] + args
+        try:
+            return utils.execute(final_args, root_helper=self.root_helper)
+        except Exception as e:
+            LOG.error("Unable to execute %(cmd)s. "
+                      "Exception: %(exception)s",
+                      {'cmd': final_args, 'exception': e})
+            return None
+
     def program_rtr_default_gw(self, tenant_id, rout_id, gw):
         ''' Program the default gateway of a router '''
         args = ['route', 'add', 'default', 'gw', gw]
@@ -391,6 +407,36 @@ class DfaNeutronHelper(object):
         if not ret:
             LOG.error("Program router returned error for %s", rout_id)
             return False
+        return True
+
+    def remove_rtr_nwk_next_hop(self, rout_id, next_hop, subnet_lst,
+                                excl_list):
+        ''' Remove the next hop for all networks of a tenant '''
+        namespace = self.find_rtr_namespace(rout_id)
+        if namespace is None:
+            LOG.error("Unable to find namespace for router %s", rout_id)
+            return False
+
+        args = ['ip', 'route']
+        ret = self.program_rtr_return(args, rout_id, namespace=namespace)
+        if ret is None:
+            LOG.error("Get routes return None %s", rout_id)
+            return False
+        routes = ret.split('\n')
+        concat_lst = subnet_lst + excl_list
+        for rout in routes:
+            if len(rout) == 0:
+                continue
+            nwk = rout.split()[0]
+            if nwk == 'default':
+                continue
+            nwk_no_mask = nwk.split('/')[0]
+            if nwk_no_mask not in concat_lst and nwk not in concat_lst:
+                args = ['route', 'del', '-net', nwk, 'gw', next_hop]
+                ret = self.program_rtr(args, rout_id, namespace=namespace)
+                if not ret:
+                    LOG.error("Program router returned error for %s", rout_id)
+                    return False
         return True
 
     def get_fw(self, fw_id):

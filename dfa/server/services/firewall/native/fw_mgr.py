@@ -318,6 +318,12 @@ class FwMgr(dev_mgr.DeviceMgr):
             return
         self.nwk_create_notif(tenant_id, tenant_name, cidr)
 
+    def nwk_del_notif(self, tenant_id, tenant_name, net_id):
+        ''' Network delete notification '''
+        if not self.fw_init:
+            return
+        self.nwk_delete_notif(tenant_id, tenant_name, net_id)
+
     def _create_fw_fab_dev(self, tenant_id, drvr_name, fw_dict):
         '''
             This routine calls the fabric class to prepare the fabric when
@@ -330,7 +336,8 @@ class FwMgr(dev_mgr.DeviceMgr):
                                             fw_dict.get('tenant_name'),
                                             fw_dict.get('fw_id'),
                                             fw_dict.get('fw_name'),
-                                            is_fw_virt)
+                                            is_fw_virt,
+                                            fw_constants.RESULT_FW_CREATE_INIT)
         if not ret:
             LOG.error("Prepare Fabric failed")
             return
@@ -388,7 +395,8 @@ class FwMgr(dev_mgr.DeviceMgr):
                                            fw_dict.get('tenant_name'),
                                            fw_dict.get('fw_id'),
                                            fw_dict.get('fw_name'),
-                                           is_fw_virt)
+                                           is_fw_virt,
+                                           fw_constants.RESULT_FW_DELETE_INIT)
         if not ret:
             LOG.error("Error in delete_fabric_fw")
             return False
