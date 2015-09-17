@@ -397,7 +397,7 @@ class FwMgr(dev_mgr.DeviceMgr):
         '''
         if self.fwid_attr[tenant_id].is_fw_complete():
             fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
-            self.modify_fw_device(tenant_id, fw_dict)
+            self.modify_fw_device(tenant_id, fw_dict.get('fw_id'), fw_dict)
 
     def _fw_create(self, drvr_name, data, cache):
         '''
