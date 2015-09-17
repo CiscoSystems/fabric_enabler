@@ -20,9 +20,9 @@ from oslo.config import cfg
 import sys
 
 from dfa.agent.vdp import lldpad_constants as vdp_const
+import dfa.server.services.constants as const
 import dfa.server.services.firewall.native.fw_constants as fw_const
 from dfa.common import utils
-
 
 default_neutron_opts = {
     'DEFAULT': {
@@ -48,9 +48,6 @@ default_firewall_opts = {
         'device': fw_const.DEVICE,
         'sched_policy': fw_const.SCHED_POLICY,
         'fw_auto_serv_nwk_create': fw_const.AUTO_NWK_CREATE,
-        'fw_service_vlan_id_min': fw_const.VLAN_ID_MIN,
-        'fw_service_vlan_id_max': fw_const.VLAN_ID_MAX,
-        'mob_domain_name': fw_const.MOB_DOMAIN_NAME,
         'fw_service_host_profile': fw_const.HOST_PROF,
         'fw_service_host_fwd_mode': fw_const.HOST_FWD_MODE,
         'fw_service_part_vrf_profile': fw_const.PART_PROF,
@@ -98,6 +95,8 @@ default_dcnm_opts = {
         'dcnm_net_ext': '(DCNM)',
         'gateway_mac': '20:20:00:00:00:AA',
         'dcnm_dhcp_leases': '/var/lib/dhcpd/dhcpd.leases',
+        'vlan_id_min': const.VLAN_ID_MIN,
+        'vlan_id_max': const.VLAN_ID_MAX,
     },
 }
 

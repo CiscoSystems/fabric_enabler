@@ -30,7 +30,7 @@ import dfa_db_api as db
 LOG = logging.getLogger(__name__)
 
 DB_MAX_RETRIES = 10
-RULE_LEN = 400
+RULE_LEN = 4096
 
 
 class DfaSegmentationId(db.Base):
@@ -42,6 +42,7 @@ class DfaSegmentationId(db.Base):
                                 autoincrement=False)
     network_id = sa.Column(sa.String(36))
     allocated = sa.Column(sa.Boolean, nullable=False, default=False)
+    source = sa.Column(sa.String(16))
 
 
 class DfaVlanId(db.Base):
@@ -53,6 +54,7 @@ class DfaVlanId(db.Base):
                                 autoincrement=False)
     network_id = sa.Column(sa.String(36))
     allocated = sa.Column(sa.Boolean, nullable=False, default=False)
+    source = sa.Column(sa.String(16))
 
 
 class DfaInServiceSubnet(db.Base):
@@ -133,7 +135,7 @@ class DfaSegmentTypeDriver(object):
             self._seg_id_allocations()
             self.model_obj.init_done()
 
-    def _allocate_specified_segment(self, session, seg_id):
+    def _allocate_specified_segment(self, session, seg_id, source):
         """Allocate specified segment.
 
         If segment exists, then try to allocate it and return db object
@@ -159,7 +161,7 @@ class DfaSegmentTypeDriver(object):
 
                 # Segment to create or already allocated
                 alloc = self.model(segmentation_id=seg_id,
-                                   allocated=True)
+                                   allocated=True, source=source)
                 session.add(alloc)
 
         except db_exc.DBDuplicateEntry:
@@ -168,7 +170,7 @@ class DfaSegmentTypeDriver(object):
 
         return alloc
 
-    def _allocate_segment(self, session, net_id):
+    def _allocate_segment(self, session, net_id, source):
         """Allocate segment from pool.
 
         Return allocated db object or None.
@@ -189,22 +191,24 @@ class DfaSegmentTypeDriver(object):
                 count = (session.query(self.model).
                          filter_by(segmentation_id=alloc.segmentation_id,
                          allocated=False).update({"allocated": True,
-                                                  "network_id": net_id}))
+                                                  "network_id": net_id,
+                                                  "source": source}))
                 if count:
                     return alloc
 
         LOG.error('ERROR: Failed to allocate segment.')
 
-    def _reserve_provider_segment(self, session, net_id=None, seg_id=None):
+    def _reserve_provider_segment(self, session, net_id=None, seg_id=None,
+                                  source=None):
 
         if seg_id is None:
-            alloc = self._allocate_segment(session, net_id)
+            alloc = self._allocate_segment(session, net_id, source)
             if not alloc:
                 LOG.error('ERROR: No segment is available')
                 return
         else:
             # TODO net_id not passed here
-            alloc = self._allocate_specified_segment(session, seg_id)
+            alloc = self._allocate_specified_segment(session, seg_id, source)
             if not alloc:
                 LOG.error('ERROR: Segmentation_id %s is in use.' % seg_id)
                 return
@@ -219,7 +223,8 @@ class DfaSegmentTypeDriver(object):
             query = session.query(self.model).filter_by(
                 segmentation_id=seg_id)
             if inside:
-                count = query.update({"allocated": False, "network_id": None})
+                count = query.update({"allocated": False, "network_id": None,
+                                      "source": None})
                 if count:
                     LOG.debug("Releasing segmentation id %s to pool" % seg_id)
             else:
@@ -261,15 +266,25 @@ class DfaSegmentTypeDriver(object):
         return (session.query(self.model).filter_by(
             segmentation_id=seg_id).first())
 
-    def allocate_segmentation_id(self, net_id, seg_id=None):
+    def allocate_segmentation_id(self, net_id, seg_id=None, source=None):
         session = db.get_session()
-        return self._reserve_provider_segment(session, net_id, seg_id=seg_id)
+        return self._reserve_provider_segment(session, net_id, seg_id=seg_id,
+                                              source=source)
 
     # Tested for clean case
     def get_all_seg_netid(self):
         session = db.get_session()
         netid_dict = {}
         allocs = (session.query(self.model).all())
+        for alloc in allocs:
+            if alloc.network_id is not None:
+                netid_dict[alloc.network_id] = alloc.segmentation_id
+        return netid_dict
+
+    def get_seg_netid_src(self, source):
+        session = db.get_session()
+        netid_dict = {}
+        allocs = (session.query(self.model).filter_by(source=source).all())
         for alloc in allocs:
             if alloc.network_id is not None:
                 netid_dict[alloc.network_id] = alloc.segmentation_id
@@ -451,7 +466,8 @@ class DfaDBMixin(object):
         with session.begin(subtransactions=True):
             net = session.query(DfaNetwork).filter_by(
                 network_id=net_id).first()
-            session.delete(net)
+            if net is not None:
+                session.delete(net)
 
     def get_all_networks(self):
         session = db.get_session()
@@ -738,10 +754,11 @@ class DfaDBMixin(object):
                     (DfaFwInfo.out_network_id == netid)).one()
             return fw
         except orm_exc.NoResultFound:
-            LOG.info('FW %(segid)s does not exist' % ({'netid': netid}))
+            LOG.info('FW %(netid)s does not exist', ({'netid': netid}))
         except orm_exc.MultipleResultsFound:
-            LOG.error('More than one enty found for netid-id %(id)s.' % (
+            LOG.error('More than one enty found for netid-id %(id)s.', (
                 {'id': netid}))
+        return None
 
     def get_fw_by_tenant_id(self, tenant_id):
         session = db.get_session()
@@ -958,21 +975,24 @@ class DfasubnetDriver(object):
     def release_subnet_by_netid(self, netid):
 
         session = db.get_session()
-        with session.begin(subtransactions=True):
-            allocs = (session.query(self.model).filter_by({"allocated":
-                                                           True,
-                                                           "network_id":
-                                                           netid}).
-                      update({"allocated": False}))
+        try:
+            with session.begin(subtransactions=True):
+                allocs = (session.query(self.model).filter_by(allocated=True,
+                          network_id=netid).update({"allocated": False}))
+        except orm_exc.NoResultFound:
+            LOG.info('Network %(netid)s does not exist' % ({'netid': netid}))
 
     def release_subnet_no_netid(self):
 
         net = ''
         session = db.get_session()
-        with session.begin(subtransactions=True):
-            allocs = (session.query(self.model).filter_by(allocated=True,
-                                                          network_id=net).
-                      update({"allocated": False}))
+        try:
+            with session.begin(subtransactions=True):
+                allocs = (session.query(self.model).filter_by(allocated=True,
+                                                              network_id=net).
+                          update({"allocated": False}))
+        except orm_exc.NoResultFound:
+            LOG.info('Query failed in release subnet no netid')
 
     # Tested
     def get_subnet_by_netid(self, netid):
@@ -984,10 +1004,25 @@ class DfasubnetDriver(object):
                     one()
             return net.subnet_address
         except orm_exc.NoResultFound:
-            LOG.info('Network %(segid)s does not exist' % ({'netid': netid}))
+            LOG.info('Network %(netid)s does not exist', ({'netid': netid}))
         except orm_exc.MultipleResultsFound:
-            LOG.error('More than one enty found for netid-id %(id)s.' % (
+            LOG.error('More than one enty found for netid-id %(id)s.', (
                 {'id': netid}))
+        return None
+
+    def get_subnet(self, sub):
+        session = db.get_session()
+        try:
+            with session.begin(subtransactions=True):
+                net = session.query(self.model).filter_by(allocated=True,
+                                                          subnet_address=sub).\
+                    one()
+            return net
+        except orm_exc.NoResultFound:
+            LOG.info('subnet %(sub)s does not exist', ({'sub': sub}))
+        except orm_exc.MultipleResultsFound:
+            LOG.error('More than one enty found for sub %(sub)s.', (
+                {'sub': sub}))
         return None
 
 

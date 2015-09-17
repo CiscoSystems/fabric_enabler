@@ -48,18 +48,19 @@ class MaxSched(object):
             self.res[cnt]['fw_id'] = None
             cnt = cnt + 1
 
-    def allocate_fw_dev(self, fw_id):
+    def allocate_fw_dev(self, fw_id, new):
         '''
         Allocate the first Firewall device which has resources available
         '''
         for cnt in self.res:
             used = self.res.get(cnt).get('used')
             if used < self.res.get(cnt).get('quota'):
-                self.res[cnt]['used'] = used + 1
+                if new:
+                    self.res[cnt]['used'] = used + 1
                 self.res[cnt]['fw_id'] = fw_id
                 return self.res[cnt].get('obj_dict'), (
                     self.res[cnt].get('mgmt_ip'))
-        return None
+        return None, None
 
     def get_fw_dev_map(self, fw_id):
         ''' Return the object dict and mgmt ip for a firewall '''
@@ -101,12 +102,18 @@ class DeviceMgr(object):
             self.sched_obj = MaxSched(self.obj_dict)
 
     def pop_local_sch_cache(self, fw_dict):
-        ''' P#opulate the local cache from FW DB after restart '''
+        ''' Populate the local cache from FW DB after restart '''
         for fw_id in fw_dict:
             fw_data = fw_dict.get(fw_id)
             mgmt_ip = fw_data.get('fw_mgmt_ip')
+            dev_status = fw_data.get('device_provision_status')
+            if dev_status is 'SUCCESS':
+                new = True
+            else:
+                new = False
             if mgmt_ip is not None:
-                drvr_dict, mgmt_ip = self.sched_obj.allocate_fw_dev(fw_id)
+                drvr_dict, mgmt_ip = self.sched_obj.allocate_fw_dev(fw_id,
+                                                                    new)
                 if drvr_dict is None or mgmt_ip is None:
                     LOG.info("Pop cache for FW sch: drvr_dict or mgmt_ip is "
                              "None")
@@ -114,8 +121,27 @@ class DeviceMgr(object):
     def drvr_initialize(self, cfg):
         ''' Initialize the driver routines '''
         for ip in self.obj_dict:
+            cfg_dict = {}
             drvr_obj = self.obj_dict.get(ip).get('drvr_obj')
-            drvr_obj.initialize(ip)
+            cfg_dict['mgmt_ip_addr'] = ip
+            drvr_obj.initialize(cfg_dict)
+
+    def pop_evnt_que(self, que_obj):
+        '''
+        Populates the event queue object for sending router events to
+        event handler
+        '''
+        for ip in self.obj_dict:
+            drvr_obj = self.obj_dict.get(ip).get('drvr_obj')
+            drvr_obj.pop_evnt_que(que_obj)
+
+    def pop_dcnm_obj(self, dcnm_obj):
+        '''
+        Populates the DCNM object
+        '''
+        for ip in self.obj_dict:
+            drvr_obj = self.obj_dict.get(ip).get('drvr_obj')
+            drvr_obj.pop_dcnm_obj(dcnm_obj)
 
     def is_device_virtual(self):
         ''' Returns if the device is physical or virtual '''
@@ -127,10 +153,13 @@ class DeviceMgr(object):
 
     def create_fw_device(self, tenant_id, fw_id, data):
         ''' Creates the Firewall '''
-        drvr_dict, mgmt_ip = self.sched_obj.allocate_fw_dev(fw_id)
+        drvr_dict, mgmt_ip = self.sched_obj.allocate_fw_dev(fw_id, True)
         if drvr_dict is not None and mgmt_ip is not None:
             self.update_fw_db_mgmt_ip(fw_id, mgmt_ip)
-            return drvr_dict.get('drvr_obj').create_fw(tenant_id, data)
+            ret = drvr_dict.get('drvr_obj').create_fw(tenant_id, data)
+            if not ret:
+                self.sched_obj.deallocate_fw_dev(fw_id)
+            return ret
         else:
             return False
 
@@ -147,3 +176,29 @@ class DeviceMgr(object):
         ''' Modifies the firewall cfg '''
         drvr_dict, mgmt_ip = self.sched_obj.get_fw_dev_map(fw_id)
         return drvr_dict.get('drvr_obj').modify_fw(tenant_id, data)
+
+    def nwk_create_notif(self, tenant_id, tenant_name, cidr):
+        '''
+        Notification for Network create.
+        Since FW ID not present, it's not possible to know which FW instance
+        to call. So, calling everyone, each instance will figure out if it
+        applies to them
+        '''
+        for ip in self.obj_dict:
+            drvr_obj = self.obj_dict.get(ip).get('drvr_obj')
+            ret = drvr_obj.nwk_create_notif(tenant_id, tenant_name, cidr)
+            LOG.info("Drvr with IP %(ip)s return %(ret)s",
+                     {'ip': ip, 'ret': ret})
+
+    def nwk_delete_notif(self, tenant_id, tenant_name, net_id):
+        '''
+        Notification for Network delete.
+        Since FW ID not present, it's not possible to know which FW instance
+        to call. So, calling everyone, each instance will figure out if it
+        applies to them
+        '''
+        for ip in self.obj_dict:
+            drvr_obj = self.obj_dict.get(ip).get('drvr_obj')
+            ret = drvr_obj.nwk_delete_notif(tenant_id, tenant_name, net_id)
+            LOG.info("Drvr with IP %(ip)s return %(ret)s for nwk delete notif",
+                     {'ip': ip, 'ret': ret})
