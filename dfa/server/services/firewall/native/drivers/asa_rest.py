@@ -44,7 +44,8 @@ class Asa5585():
 
         req = urllib2.Request(url, json.dumps(data), headers)
         base64string = base64.encodestring('%s:%s' %
-                                           (self.username, self.password)).replace('\n', '')
+                                           (self.username,
+                                            self.password)).replace('\n', '')
         req.add_header("Authorization", "Basic %s" % base64string)
         f = None
         try:
@@ -65,14 +66,12 @@ class Asa5585():
         finally:
             if f:
                 f.close()
-        return (status_code in range(200, 300))        
+        return (status_code in range(200, 300))
 
     def setup(self, tenant, inside_vlan_arg, outside_vlan_arg,
               inside_ip, inside_mask, inside_gw,
-              outside_ip, outside_mask, outside_gw):
-
-        #import pdb
-        #pdb.set_trace()
+              outside_ip, outside_mask, outside_gw,
+              interface_in, interface_out):
 
         """ setup ASA context for an edge tenant pair """
         LOG.debug("asa_setup: %s %d %d %s %s %s %s",
@@ -82,10 +81,10 @@ class Asa5585():
         outside_vlan = str(outside_vlan_arg)
         context = tenant
         cmds = ["conf t", "changeto system"]
-        inside_int = "gi0/0." + inside_vlan
+        inside_int = interface_in + '.' + inside_vlan
         cmds.append("int " + inside_int)
         cmds.append("vlan " + inside_vlan)
-        outside_int = "gi0/1." + outside_vlan
+        outside_int = interface_out + '.' + outside_vlan
         cmds.append("int " + outside_int)
         cmds.append("vlan " + outside_vlan)
         cmds.append("context " + context)
@@ -115,9 +114,6 @@ class Asa5585():
     def cleanup(self, tenant, inside_vlan_arg, outside_vlan_arg,
                 inside_ip, inside_mask,
                 outside_ip, outside_mask):
-        #import pdb
-        #pdb.set_trace()
-
         """ cleanup ASA context for an edge tenant pair """
         LOG.debug("asa_cleanup: %s %d %d %s %s %s %s",
                   tenant, inside_vlan_arg, outside_vlan_arg,
@@ -127,8 +123,8 @@ class Asa5585():
         context = tenant
         cmds = ["conf t", "changeto system"]
         cmds.append("no context " + context + " noconfirm")
-        inside_int = "gi0/0." + inside_vlan
-        outside_int = "gi0/1." + outside_vlan
+        inside_int = interface_in + '.' + inside_vlan
+        outside_int = interface_out + '.' + outside_vlan
         cmds.append("no interface " + inside_int)
         cmds.append("no interface " + outside_int)
         data = {"commands": cmds}
@@ -144,7 +140,8 @@ class Asa5585():
 
         req = urllib2.Request(url, json.dumps(data), headers)
         base64string = base64.encodestring('%s:%s' %
-                                           (self.username, self.password)).replace('\n', '')
+                                           (self.username,
+                                            self.password)).replace('\n', '')
         req.add_header("Authorization", "Basic %s" % base64string)
         f = None
         try:
@@ -217,11 +214,13 @@ class Asa5585():
                       src_ip.network, src_ip.netmask, action)
 
             acl = "access-list "
-            acl = acl + tenant_name + " extended " + action + " " + protocol + " "
+            acl = (acl + tenant_name + " extended " + action + " " +
+                   protocol + " ")
             if (rule['source_ip_address'] is None):
                 acl = acl + "any "
             else:
-                acl = acl + str(src_ip.network) + " " + str(src_ip.netmask) + " "
+                acl = (acl + str(src_ip.network) + " " +
+                       str(src_ip.netmask) + " ")
             if (src_port is not None):
                 if (':' in src_port):
                     range = src_port.replace(':', ' ')
@@ -230,8 +229,9 @@ class Asa5585():
                     acl = acl + "eq " + src_port + " "
             if (rule['destination_ip_address'] is None):
                 acl = acl + "any "
-            else:
-                acl = acl + str(dst_ip.network) + " " + str(dst_ip.netmask) + " "
+            else:vs
+                acl = (acl + str(dst_ip.network) + " " +
+                       str(dst_ip.netmask) + " ")
             if (dst_port is not None):
                 if (':' in dst_port):
                     range = dst_port.replace(':', ' ')
