@@ -173,9 +173,6 @@ class Asa5585():
 
     def apply_policy(self, policy):
         """ apply a firewall policy """
-        #import pdb
-        #pdb.set_trace()
-
         tenant_name = policy['tenant_name']
         fw_id = policy['fw_id']
         fw_name = policy['fw_name']
@@ -252,61 +249,3 @@ class Asa5585():
         LOG.debug(cmds)
         data = {"commands": cmds}
         return self.rest_send_cli(data)
-
-
-# POST OPERATION
-
-post_data = {
-    "commands": [
-        "sh version | i Serial",
-        "sh checksum",
-        "conf t",
-        "changeto context yaonan",
-        "show interface Inside ip brief",
-        "show interface Outside ip brief"
-        ]
-}
-
-policy_01 = {
-    'rules': {
-        u'5583d25d-fca2-41a0-9fd7-06c41d2b8066': {
-            'protocol': u'icmp',
-            'name': u'ICMPR',
-            'enabled': True,
-            'dst_port': None,
-            'action': u'deny',
-            'src_port': None,
-            'src_ip_addr': None,
-            'dst_ip_addr': None
-            },
-        u'913fa9a8-c483-4f1b-be5f-7a38893d3a5f': {
-            'protocol': u'tcp',
-            'name': u'RL1a',
-            'enabled': True,
-            'dst_port': u'40',
-            'action': u'allow',
-            'src_port': u'20',
-            'src_ip_addr': u'10.10.1.0/24',
-            'dst_ip_addr': u'20.1.1.0/24'
-            }
-    },
-    'tenant_name': u'ctx801',
-    'fw_id': u'647967e8-6139-48ea-83d5-b41031bc1040',
-    'fw_name': u'FW2c'
-}
-
-
-# ASA testing routines..
-def asa_test():
-    asa1 = Asa5585("172.28.11.90", "admin", "cisco123")
-    asa1.rest_send_cli(post_data)
-    asa1.setup("ctx801", "801", "802", "99.99.101.2", "255.255.255.0",
-               "40.0.2.2", "255.255.255.0")
-    asa1.apply_policy(policy_01)
-    asa1.cleanup("ctx801", "801", "802", "99.99.101.2", "255.255.255.0",
-                 "40.0.2.2", "255.255.255.0")
-#
-# ASA testing code...
-#
-# pdb.set_trace()
-#asa_test()
