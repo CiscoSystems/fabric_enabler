@@ -86,6 +86,16 @@ class DeviceMgr(object):
         self.drvr_obj = {}
         self.mgmt_ip_list = cfg.firewall.fw_mgmt_ip
         self.mgmt_ip_list = self.mgmt_ip_list.strip('[').rstrip(']').split(',')
+        self.user_list = cfg.firewall.username
+        self.user_list = self.user_list.strip('[').rstrip(']').split(',')
+        self.pwd_list = cfg.firewall.pwd
+        self.pwd_list = self.pwd_list.strip('[').rstrip(']').split(',')
+        self.interface_in_list = cfg.firewall.interface_in
+        self.interface_in_list = self.interface_in.strip('[').rstrip(']').\
+            split(',')
+        self.interface_out_list = cfg.firewall.interface_out
+        self.interface_out_list = self.interface_out.strip('[').rstrip(']').\
+            split(',')
         self.obj_dict = dict()
         cnt = 0
         dev = cfg.firewall.device
@@ -120,11 +130,17 @@ class DeviceMgr(object):
 
     def drvr_initialize(self, cfg):
         ''' Initialize the driver routines '''
+        cnt = 0
         for ip in self.obj_dict:
             cfg_dict = {}
             drvr_obj = self.obj_dict.get(ip).get('drvr_obj')
             cfg_dict['mgmt_ip_addr'] = ip
+            cfg_dict['user'] = self.user_list[cnt]
+            cfg_dict['pwd'] = self.pwd_list[cnt]
+            cfg_dict['interface_in'] = self.interface_in_list[cnt]
+            cfg_dict['interface_out'] = self.interface_out_list[cnt]
             drvr_obj.initialize(cfg_dict)
+            cnt = cnt + 1
 
     def pop_evnt_que(self, que_obj):
         '''

@@ -44,7 +44,8 @@ class Asa5585():
 
         req = urllib2.Request(url, json.dumps(data), headers)
         base64string = base64.encodestring('%s:%s' %
-                                           (self.username, self.password)).replace('\n', '')
+                                           (self.username,
+                                            self.password)).replace('\n', '')
         req.add_header("Authorization", "Basic %s" % base64string)
         f = None
         try:
@@ -65,14 +66,12 @@ class Asa5585():
         finally:
             if f:
                 f.close()
-        return (status_code in range(200, 300))        
+        return (status_code in range(200, 300))
 
     def setup(self, tenant, inside_vlan_arg, outside_vlan_arg,
               inside_ip, inside_mask, inside_gw,
-              outside_ip, outside_mask, outside_gw):
-
-        #import pdb
-        #pdb.set_trace()
+              outside_ip, outside_mask, outside_gw,
+              interface_in, interface_out):
 
         """ setup ASA context for an edge tenant pair """
         LOG.debug("asa_setup: %s %d %d %s %s %s %s",
@@ -82,10 +81,10 @@ class Asa5585():
         outside_vlan = str(outside_vlan_arg)
         context = tenant
         cmds = ["conf t", "changeto system"]
-        inside_int = "gi0/0." + inside_vlan
+        inside_int = interface_in + '.' + inside_vlan
         cmds.append("int " + inside_int)
         cmds.append("vlan " + inside_vlan)
-        outside_int = "gi0/1." + outside_vlan
+        outside_int = interface_out + '.' + outside_vlan
         cmds.append("int " + outside_int)
         cmds.append("vlan " + outside_vlan)
         cmds.append("context " + context)
@@ -115,9 +114,6 @@ class Asa5585():
     def cleanup(self, tenant, inside_vlan_arg, outside_vlan_arg,
                 inside_ip, inside_mask,
                 outside_ip, outside_mask):
-        #import pdb
-        #pdb.set_trace()
-
         """ cleanup ASA context for an edge tenant pair """
         LOG.debug("asa_cleanup: %s %d %d %s %s %s %s",
                   tenant, inside_vlan_arg, outside_vlan_arg,
@@ -127,8 +123,8 @@ class Asa5585():
         context = tenant
         cmds = ["conf t", "changeto system"]
         cmds.append("no context " + context + " noconfirm")
-        inside_int = "gi0/0." + inside_vlan
-        outside_int = "gi0/1." + outside_vlan
+        inside_int = interface_in + '.' + inside_vlan
+        outside_int = interface_out + '.' + outside_vlan
         cmds.append("no interface " + inside_int)
         cmds.append("no interface " + outside_int)
         data = {"commands": cmds}
@@ -144,7 +140,8 @@ class Asa5585():
 
         req = urllib2.Request(url, json.dumps(data), headers)
         base64string = base64.encodestring('%s:%s' %
-                                           (self.username, self.password)).replace('\n', '')
+                                           (self.username,
+                                            self.password)).replace('\n', '')
         req.add_header("Authorization", "Basic %s" % base64string)
         f = None
         try:
@@ -176,9 +173,6 @@ class Asa5585():
 
     def apply_policy(self, policy):
         """ apply a firewall policy """
-        #import pdb
-        #pdb.set_trace()
-
         tenant_name = policy['tenant_name']
         fw_id = policy['fw_id']
         fw_name = policy['fw_name']
@@ -217,11 +211,13 @@ class Asa5585():
                       src_ip.network, src_ip.netmask, action)
 
             acl = "access-list "
-            acl = acl + tenant_name + " extended " + action + " " + protocol + " "
+            acl = (acl + tenant_name + " extended " + action + " " +
+                   protocol + " ")
             if (rule['source_ip_address'] is None):
                 acl = acl + "any "
             else:
-                acl = acl + str(src_ip.network) + " " + str(src_ip.netmask) + " "
+                acl = (acl + str(src_ip.network) + " " +
+                       str(src_ip.netmask) + " ")
             if (src_port is not None):
                 if (':' in src_port):
                     range = src_port.replace(':', ' ')
@@ -230,8 +226,9 @@ class Asa5585():
                     acl = acl + "eq " + src_port + " "
             if (rule['destination_ip_address'] is None):
                 acl = acl + "any "
-            else:
-                acl = acl + str(dst_ip.network) + " " + str(dst_ip.netmask) + " "
+            else:vs
+                acl = (acl + str(dst_ip.network) + " " +
+                       str(dst_ip.netmask) + " ")
             if (dst_port is not None):
                 if (':' in dst_port):
                     range = dst_port.replace(':', ' ')
@@ -252,61 +249,3 @@ class Asa5585():
         LOG.debug(cmds)
         data = {"commands": cmds}
         return self.rest_send_cli(data)
-
-
-# POST OPERATION
-
-post_data = {
-    "commands": [
-        "sh version | i Serial",
-        "sh checksum",
-        "conf t",
-        "changeto context yaonan",
-        "show interface Inside ip brief",
-        "show interface Outside ip brief"
-        ]
-}
-
-policy_01 = {
-    'rules': {
-        u'5583d25d-fca2-41a0-9fd7-06c41d2b8066': {
-            'protocol': u'icmp',
-            'name': u'ICMPR',
-            'enabled': True,
-            'dst_port': None,
-            'action': u'deny',
-            'src_port': None,
-            'src_ip_addr': None,
-            'dst_ip_addr': None
-            },
-        u'913fa9a8-c483-4f1b-be5f-7a38893d3a5f': {
-            'protocol': u'tcp',
-            'name': u'RL1a',
-            'enabled': True,
-            'dst_port': u'40',
-            'action': u'allow',
-            'src_port': u'20',
-            'src_ip_addr': u'10.10.1.0/24',
-            'dst_ip_addr': u'20.1.1.0/24'
-            }
-    },
-    'tenant_name': u'ctx801',
-    'fw_id': u'647967e8-6139-48ea-83d5-b41031bc1040',
-    'fw_name': u'FW2c'
-}
-
-
-# ASA testing routines..
-def asa_test():
-    asa1 = Asa5585("172.28.11.90", "admin", "cisco123")
-    asa1.rest_send_cli(post_data)
-    asa1.setup("ctx801", "801", "802", "99.99.101.2", "255.255.255.0",
-               "40.0.2.2", "255.255.255.0")
-    asa1.apply_policy(policy_01)
-    asa1.cleanup("ctx801", "801", "802", "99.99.101.2", "255.255.255.0",
-                 "40.0.2.2", "255.255.255.0")
-#
-# ASA testing code...
-#
-# pdb.set_trace()
-#asa_test()
