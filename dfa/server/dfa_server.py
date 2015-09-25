@@ -136,6 +136,56 @@ class RpcCallBacks(object):
             else:
                 return False
 
+    def is_mand_arg_present(self, intf_dict):
+        ''' Just checking for 2 parameters '''
+        if intf_dict.get('remote_port_id_mac') is None and (
+           intf_dict.get('remote_system_name') is None):
+            return False
+        else:
+            return True
+
+    def save_topo_disc_params(self, context, msg):
+        args = json.loads(msg)
+        agent = args.get('agent')
+        intf = args.get('intf')
+        intf_dict = {}
+        intf_dict['remote_evb_cfgd'] = args.get('remote_evb_cfgd')
+        intf_dict['remote_evb_mode'] = args.get('remote_evb_mode')
+        intf_dict['remote_mgmt_addr'] = args.get('remote_mgmt_addr')
+        intf_dict['remote_system_desc'] = args.get('remote_system_desc')
+        intf_dict['remote_system_name'] = args.get('remote_system_name')
+        intf_dict['remote_port'] = args.get('remote_port')
+        intf_dict['remote_chassis_id_mac'] = args.get('remote_chassis_id_mac')
+        intf_dict['remote_port_id_mac'] = args.get('remote_port_id_mac')
+        mand_arg = self.is_mand_arg_present(intf_dict)
+        configs = self.obj.get_agent_configurations(agent)
+        if configs:
+            # Update the agents database.
+            new_config = json.loads(configs)
+            topo_dict = new_config.get('topo')
+            if topo_dict is None:
+                new_config['topo'] = {}
+                new_config['topo'][intf] = {}
+                topo_dict = new_config.get('topo')
+            intf_dict_upd = topo_dict.get(intf)
+            if intf_dict_upd is None:
+                new_config['topo'][intf] = {}
+                intf_dict_upd = {}
+            intf_dict_upd.update(intf_dict)
+            if mand_arg:
+                new_config['topo'][intf].update(intf_dict_upd)
+            else:
+                del new_config['topo'][intf]
+            if self.obj.update_agent_configurations(agent,
+                                                    json.dumps(new_config)):
+                LOG.debug('Saved topo discovery %s in DB.', new_config)
+                return True
+            else:
+                return False
+        # Config not yet created
+        else:
+            return False
+
     def set_static_ip_address(self, context, msg):
         """Process request for setting rules in iptables.
 
@@ -220,6 +270,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             'agent.request.uplink': self.request_uplink_info,
             'cli.static_ip.set': self.set_static_ip_address,
             'agent.vm_result.update': self.vm_result_update,
+            'service.vnic.create': self.service_vnic_create,
+            'service.vnic.delete': self.service_vnic_delete,
         })
         self.project_info_cache = {}
         self.network = {}
@@ -255,6 +307,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         dcnm_password = cfg.dcnm.dcnm_password
         self.dcnm_client = cdr.DFARESTClient(cfg)
         self.populate_cfg_dcnm(cfg, self.dcnm_client)
+        self.populate_event_queue(cfg, self.pqueue)
 
         self.keystone_event = deh.EventsHandler('keystone', self.pqueue,
                                                 self.PRI_HIGH_START,
@@ -583,6 +636,15 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             LOG.exception(emsg, {'net': dcnm_net.name})
             # Update network database with failure result.
             self.update_network_db(dcnm_net.id, constants.CREATE_FAIL)
+        # Notification to services like FW about creation of Subnet Event
+        # Currently, doesn't work for network created in DCNM, place the below
+        # lines before the above DCNM check. fixme
+        part = net.get('name').partition('::')[2]
+        if part:
+            # Network in another partition, skip
+            return
+        self.nwk_sub_create_notif(snet.get('tenant_id'), tenant_name,
+                                  snet.get('cidr'))
 
     def _get_segmentation_id(self, segid):
         """Allocate segmentation id."""
@@ -706,6 +768,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         tenant_id = self.network[net_id].get('tenant_id')
         tenant_name = self.get_project_name(tenant_id)
         net = utils.dict_to_obj(self.network[net_id])
+        name = self.network[net_id].get('name')
         if not tenant_name:
             LOG.error('Project %(tenant_id)s does not exist.', (
                       {'tenant_id': tenant_id}))
@@ -728,6 +791,15 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             self.update_network_db(net_id, constants.DELETE_FAIL)
         if self._lbMgr and self._lbMgr.lb_is_internal_nwk(net.name):
             self._lbMgr.lb_delete_net(net.name, tenant_id)
+        # Notification to services like FW about deletion of Nwk Event,
+        # Since deletion of subnet event is not processed currently.
+        # Currently, doesn't work for network created in DCNM, place the below
+        # lines before the above DCNM check. fixme
+        part = name.partition('::')[2]
+        if part:
+            # Network in another partition, skip
+            return
+        self.nwk_del_notif(tenant_id, tenant_name, net_id)
 
     def dcnm_network_create_event(self, network_info):
         """Process network create event from DCNM."""
@@ -1062,6 +1134,59 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         else:
             self.delete_vm_db(vm.instance_id)
             LOG.info('Deleted VM %(vm)s from DB.', {'vm': vm.instance_id})
+
+    def service_vnic_create(self, vnic_info_arg):
+        LOG.info("Service vnic create %s", vnic_info_arg)
+        vnic_info = vnic_info_arg.get('service')
+        vm_info = dict(status=vnic_info.get('status'),
+                       vm_mac=vnic_info.get('mac'),
+                       segmentation_id=vnic_info.get('segid'),
+                       host=vnic_info.get('host'),
+                       port_uuid=vnic_info.get('port_id'),
+                       net_uuid=vnic_info.get('network_id'),
+                       oui=dict(ip_addr=vnic_info.get('vm_ip'),
+                                vm_name=vnic_info.get('vm_name'),
+                                vm_uuid=vnic_info.get('vm_uuid'),
+                                gw_mac=vnic_info.get('gw_mac'),
+                                fwd_mod=vnic_info.get('fwd_mod'),
+                                oui_id='cisco'))
+        try:
+            self.neutron_event.send_vm_info(str(vm_info.get('host')),
+                                            str(vm_info))
+        except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
+            # Failed to send info to the agent. Keep the data in the
+            # database as failure to send it later.
+            self.add_vms_db(vm_info, constants.CREATE_FAIL)
+            LOG.error('Failed to send VM info to agent.')
+        else:
+            self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
+
+    def service_vnic_delete(self, vnic_info_arg):
+        LOG.info("Service vnic delete %s", vnic_info_arg)
+        vnic_info = vnic_info_arg.get('service')
+        vm_info = dict(status=vnic_info.get('status'),
+                       vm_mac=vnic_info.get('mac'),
+                       segmentation_id=vnic_info.get('segid'),
+                       host=vnic_info.get('host'),
+                       port_uuid=vnic_info.get('port_id'),
+                       net_uuid=vnic_info.get('network_id'),
+                       oui=dict(ip_addr=vnic_info.get('vm_ip'),
+                                vm_name=vnic_info.get('vm_name'),
+                                vm_uuid=vnic_info.get('vm_uuid'),
+                                gw_mac=vnic_info.get('gw_mac'),
+                                fwd_mod=vnic_info.get('fwd_mod'),
+                                oui_id='cisco'))
+        try:
+            self.neutron_event.send_vm_info(str(vm_info.get('host')),
+                                            str(vm_info))
+        except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
+            # Failed to send info to the agent. Keep the data in the
+            # database as failure to send it later.
+            params = dict(columns=dict(result=constants.DELETE_FAIL))
+            self.update_vm_db(vnic_info.get('vm_uuid'), **params)
+            LOG.error('Failed to send VM info to agent')
+        else:
+            self.delete_vm_db(vnic_info.get('vm_uuid'))
 
     def process_data(self, data):
         LOG.debug('process_data: event: %s, payload: %s' % (data[0], data[1]))

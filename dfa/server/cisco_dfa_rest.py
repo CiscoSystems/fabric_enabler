@@ -227,6 +227,45 @@ class DFARESTClient(object):
         if res and res.status_code in self._resp_ok:
             return res.json()
 
+    def update_partition_static_route(self, org_name, part_name,
+                                      static_ip_list, vrf_prof=None,
+                                      service_node_ip=None):
+        """
+        Send static route update requests to DCNM.
+        :param org_name: name of organization
+        :param part_name: name of partition
+        :static_ip_list: List of static IP addresses
+        :vrf_prof: VRF Profile
+        :service_node_ip: Service Node IP address
+        """
+        if part_name is None:
+            part_name = self._part_name
+        if vrf_prof is None:
+            vrf_prof = self.default_vrf_profile
+        operation = 'PUT'
+        url = (self._update_part_url % (org_name, part_name))
+        ip_str = ''
+        ip_cnt = 0
+        for ip in static_ip_list:
+            ip_sub = "$n0" + str(ip_cnt) + "=" + str(ip) + ";"
+            ip_str = ip_str + ip_sub
+            ip_cnt = ip_cnt + 1
+        cfg_args = {
+            "$vrfName=" + org_name + ':' + part_name + ";"
+            "$include_serviceNodeIpAddress=" + service_node_ip + ";"
+            + ip_str
+        }
+        cfg_args = ';'.join(cfg_args)
+        payload = {
+            "partitionName": part_name,
+            "organizationName": org_name,
+            "dciExtensionStatus": "Not configured",
+            "vrfProfileName": vrf_prof,
+            "vrfName": ':'.join((org_name, part_name)),
+            "configArg": cfg_args}
+
+        return self._send_request(operation, url, payload, 'partition')
+
     def _delete_org(self, org_name):
         """Send organization delete request to DCNM.
 
@@ -432,7 +471,7 @@ class DFARESTClient(object):
         subnet_ip_mask = subnet.cidr.split('/')
         if self._default_md is None:
             self._set_default_mobility_domain()
-        vlan_id = 0
+        vlan_id = '0'
         gw_ip = subnet.gateway_ip
         part_name = network.part_name
         if not part_name:
@@ -444,6 +483,8 @@ class DFARESTClient(object):
 
         if network.vlan_id:
             vlan_id = str(network.vlan_id)
+        else:
+            mob_domain_name = None
 
         seg_id = str(network.segmentation_id)
         seg_str = "$segmentId=" + seg_id
@@ -471,7 +512,9 @@ class DFARESTClient(object):
                         "configArg": cfg_args,
                         "organizationName": tenant_name,
                         "partitionName": part_name,
-                        "description": network.name}
+                        "description": network.name,
+                        "netmaskLength":  subnet_ip_mask[1],
+                        "gateway": gw_ip}
         if seg_id:
             network_info["segmentId"] = seg_id
         if dhcp_range:
@@ -528,20 +571,22 @@ class DFARESTClient(object):
         part_name = network.part_name
         if not part_name:
             part_name = self._part_name
+        seg_id = str(network.segmentation_id)
         if network.mob_domain_name:
             mob_domain_name = network.mob_domain_name
             vlan_id = str(network.vlan_id)
+            network_info = {
+                'organizationName': tenant_name,
+                'partitionName': part_name,
+                'mobDomainName': mob_domain_name,
+                'vlanId': vlan_id,
+            }
         else:
-            vlan_id = '0'
-            mob_domain_name = None
-        seg_id = str(network.segmentation_id)
-        network_info = {
-            'organizationName': tenant_name,
-            'partitionName': part_name,
-            'mobDomainName': mob_domain_name,
-            'vlanId': vlan_id,
-            'segmentId': seg_id,
-        }
+            network_info = {
+                'organizationName': tenant_name,
+                'partitionName': part_name,
+                'segmentId': seg_id,
+            }
         LOG.debug("Deleting %s network in DCNM.", network_info)
 
         res = self._delete_network(network_info)

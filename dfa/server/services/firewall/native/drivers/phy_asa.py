@@ -17,7 +17,7 @@
 from dfa.common import dfa_logger as logging
 from dfa.server.services.firewall.native import fabric_setup_base as FP
 from dfa.server.services.firewall.native.drivers import base
-
+from dfa.server.services.firewall.native.drivers import asa_rest as asa
 
 LOG = logging.getLogger(__name__)
 
@@ -30,9 +30,23 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
         LOG.debug("Initializing physical ASA")
         super(PhyAsa, self).__init__()
 
-    def initialize(self, mgmt_ip_addr):
+    def initialize(self, cfg_dict):
         LOG.debug("Initialize for PhyAsa")
-        self.mgmt_ip_addr = mgmt_ip_addr
+        self.mgmt_ip_addr = cfg_dict.get('mgmt_ip_addr')
+        self.user = cfg_dict.get('user')
+        self.pwd = cfg_dict.get('user')
+        self.interface_in = cfg_dict.get('interface_in')
+        self.interface_out = cfg_dict.get('interface_out')
+        self.asa5585 = asa.Asa5585(self.mgmt_ip_addr, self.user, self.pwd)
+
+    def pop_evnt_que(self, que_obj):
+        LOG.debug("Pop Event for PhyAsa")
+        pass
+
+    def nwk_create_notif(self, tenant_id, tenant_name, cidr):
+        ''' Network Create Notification '''
+        LOG.debug("Nwk Create Notif PhyAsa")
+        pass
 
     def is_device_virtual(self):
         return False
@@ -42,30 +56,49 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
         return 'phy_asa'
 
     def get_max_quota(self):
-        # Return the right value TODO
-        return 4
+        return self.asa5585.get_quota()
 
     def create_fw(self, tenant_id, data):
-        LOG.debug("In creating phy ASA FW data is %s" % data)
+        LOG.debug("In creating phy ASA FW data is %s", data)
         tenant_name = data.get('tenant_name')
         in_subnet, in_ip_start, in_ip_end, in_gw = (
             self.get_in_ip_addr(tenant_id))
         out_subnet, out_ip_start, out_ip_end, out_ip_gw = (
             self.get_out_ip_addr(tenant_id))
-        in_seg, in_vlan, in_mob_dom = \
-            self.get_in_seg_vlan_mob_dom(tenant_id)
-        out_seg, out_vlan, out_mob_dom = \
-            self.get_out_seg_vlan_mob_dom(tenant_id)
-        # Setup the physical ASA appliance
-        # self.get_mgmt_ip_addr(tenant_id)
-        # self.get_vlan_in_out(tenant_id)
-        return True
+        in_seg, in_vlan = self.get_in_seg_vlan(tenant_id)
+        out_seg, out_vlan = self.get_out_seg_vlan(tenant_id)
+
+        status = self.asa5585.setup(tenant_name, in_vlan, out_vlan,
+                                    in_ip_start, '255.255.255.0', in_gw,
+                                    out_ip_start, '255.255.255.0', out_ip_gw,
+                                    self.interface_in, self_interface_out)
+        if status is False:
+            LOG.error("Physical FW instance creation failure.")
+            return False
+
+        status = self.asa5585.apply_policy(data)
+        if status is False:
+            LOG.error("Applying FW policy failure.")
+
+        return status
 
     def delete_fw(self, tenant_id, data):
-        LOG.debug("In Delete fw data is %s" % data)
-        # Do the necessary stuffs in ASA
+        LOG.debug("In Delete fw data is %s", data)
         tenant_name = data.get('tenant_name')
-        return True
+        in_subnet, in_ip_start, in_ip_end, in_gw = (
+            self.get_in_ip_addr(tenant_id))
+        out_subnet, out_ip_start, out_ip_end, out_ip_gw = (
+            self.get_out_ip_addr(tenant_id))
+        in_seg, in_vlan = self.get_in_seg_vlan(tenant_id)
+        out_seg, out_vlan = self.get_out_seg_vlan(tenant_id)
+        
+        status = self.asa5585.cleanup(tenant_name, in_vlan, out_vlan,
+                                      in_ip_start, '255.255.255.0',
+                                      out_ip_start, '255.255.255.0',
+                                      self.interface_in, self.interface_out)
+        self.delete_fabric_fw(tenant_id, tenant_name)
+        return status
 
     def modify_fw(self, tenant_id, data):
-        LOG.debug("In Modify fw data is %s" % data)
+        LOG.debug("In Modify fw data is %s", data)
+        return self.asa5585.apply_policy(data)
