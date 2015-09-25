@@ -1,3 +1,4 @@
+import sys
 import netaddr
 from dfa.common import dfa_exceptions as dexc
 from dfa.common import dfa_logger as logging
@@ -22,7 +23,7 @@ def lb_import_class(import_str):
 
 def lb_import_object(import_str, *args, **kwargs):
     """Import a class and return an instance of it."""
-    return import_class(import_str)(*args, **kwargs)
+    return lb_import_class(import_str)(*args, **kwargs)
 
 
 class LbMgr(object):
@@ -36,8 +37,8 @@ class LbMgr(object):
         self._lb_net = cfg.loadbalance.lb_svc_net
         self._lb_vrf_profile = cfg.loadbalance.lb_vrf_profile
         self._lb_service_net_profile = cfg.loadbalance.lb_svc_net_profile
-        self.serv_vlan_min = int(cfg.firewall.fw_service_vlan_id_min)
-        self.serv_vlan_max = int(cfg.firewall.fw_service_vlan_id_max)
+        self.serv_vlan_min = int(cfg.dcnm.vlan_id_min)
+        self.serv_vlan_max = int(cfg.dcnm.vlan_id_max)
         self._lb_net_obj = netaddr.IPNetwork(self._lb_net)
         self._lb_net_gw = str(netaddr.IPAddress(self._lb_net_obj.first + 1))
         self._lb_net_mask = str(netaddr.IPAddress(self._lb_net_obj.netmask))
@@ -49,13 +50,14 @@ class LbMgr(object):
         self._driver_obj = {}
         # creating driving objects, one for each box
         self._box_ip_list = cfg.loadbalance.lb_mgmt_ip.strip().split(',')
+        lb_user_name = cfg.loadbalance.lb_user_name
+        lb_user_password = cfg.loadbalance.lb_user_password
         for box in self._box_ip_list:
             LOG.info("Creating driver obj for ip %s" % box)
-            """
             self._driver_obj[box] = lb_import_object(cfg.loadbalance.lb_driver,
-                                                     cfg.loadbalance.lb_user_name,
-                                                     cfg.loadbalance.lb_user_password)
-            """
+                                                     box,
+                                                     lb_user_name,
+                                                     lb_user_password)
 
     @property
     def dfa_server(self):
@@ -98,7 +100,7 @@ class LbMgr(object):
 
     def get_driver_obj_from_ip(self, ip_addr):
         if ip_addr in self._driver_obj.keys():
-            return self._driver_obj.get(ip)
+            return self._driver_obj.get(ip_addr)
         else:
             return None
 
@@ -178,8 +180,14 @@ class LbMgr(object):
         net_name_list = net_name.split(self._lb_net_prefix)
         vlan_id = int(net_name_list[1])
         self.release_vlan(vlan_id)
-        #self.lb_service.cleanupF5Network(vlan_id, tenant_id)
-        self.delete_mapping(tenant_id)
+        lb_service = self.get_driver_obj_from_tenant(tenant_id)
+        if lb_service:
+            LOG.info("calling cleanupF5Netwwork with vlan %d, tenant %d" %
+                     (vlan_id, tenant_id))
+            lb_service.cleanupF5Network(vlan_id, tenant_id)
+            self.delete_mapping(tenant_id)
+        else:
+            LOG.error("Can not find driver obj for tenant_id %s" % tenant_id)
 
     def lb_is_internal_nwk(self, net_name):
         if net_name.startswith(self._lb_net_prefix):
@@ -188,15 +196,16 @@ class LbMgr(object):
             return False
 
     def call_driver(self, function_name, info):
-        tenant_id = info.get("tenant_id")
-        """
+        tenant_id = self.get_tenant_id(info)
+        if tenant_id is None:
+            LOG.error("tenant_id for this event is None")
+            return
         lb_service = self.get_driver_obj_from_tenant(tenant_id)
         if lb_service:
-           lb_service.processLbMessage(function_name, info)
+            lb_service.processLbMessage(function_name, info)
         else:
-           LOG.error("Can not find driver obj for tenant_id %s, ignoring %s" %
-                     (tenant_id, function_name))
-        """
+            LOG.error("Can not find driver obj for tenant_id %s, ignoring %s" %
+                      (tenant_id, function_name))
 
     def pool_create_event(self, pool_info):
         function_name = "pool_create_event"
@@ -213,9 +222,22 @@ class LbMgr(object):
             lb_service = self.get_driver_obj_from_ip(box_ip)
             LOG.info("calling prepareF5network with vlan_id %d and ip is %s"
                      % (vlan_id, box_ip))
-#            self.lb_service.prepareF5ForNetwork(vlan_id,
-#                                            tenant_id, self._lb_net)
-#        self.call_driver(function_name, pool_info)
+            lb_service.prepareF5ForNetwork(vlan_id,
+                                           tenant_id,
+                                           self._lb_net_gw,
+                                           self._lb_net_mask)
+        self.call_driver(function_name, pool_info)
+
+    def get_tenant_id(self, event):
+        tenant_id = "tenant_id"
+        if tenant_id in event:
+            return event.get(tenant_id)
+        else:
+            for key, item in event.iteritems():
+                if isinstance(item, dict):
+                    if tenant_id in item:
+                        return item.get(tenant_id)
+        return None
 
     def member_create_event(self, member_info):
         function_name = "member_create_event"
@@ -254,16 +276,19 @@ class LbMgr(object):
 
     def pool_delete_event(self, pool_info):
         function_name = "pool_delete_event"
+        pool_info["pool_id"] = pool_info["id"]
         LOG.info("entering %s, data is %s" % (function_name, pool_info))
         self.call_driver(function_name, pool_info)
 
     def member_delete_event(self, member_info):
         function_name = "member_delete_event"
+        member_info["member_id"] = member_info["id"]
         LOG.info("entering %s, data is %s" % (function_name, member_info))
         self.call_driver(function_name, member_info)
 
     def vip_delete_event(self, vip_info):
         function_name = "vip_delete_event"
+        vip_info["vip_id"] = vip_info["id"]
         LOG.info("entering %s, data is %s" % (function_name, vip_info))
         self.call_driver(function_name, vip_info)
 
