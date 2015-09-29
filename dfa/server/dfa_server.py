@@ -647,7 +647,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
     def _get_segmentation_id(self, segid, netid):
         """Allocate segmentation id."""
 
-        self.seg_drvr.allocate_segmentation_id(netid, seg_id=segid)
+        return self.seg_drvr.allocate_segmentation_id(netid, seg_id=segid)
 
     def network_create_event(self, network_info):
         """Process network create event.
