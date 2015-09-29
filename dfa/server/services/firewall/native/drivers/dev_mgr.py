@@ -86,16 +86,16 @@ class DeviceMgr(object):
         self.drvr_obj = {}
         self.mgmt_ip_list = cfg.firewall.fw_mgmt_ip
         self.mgmt_ip_list = self.mgmt_ip_list.strip('[').rstrip(']').split(',')
-        self.user_list = cfg.firewall.username
+        self.user_list = cfg.firewall.fw_username
         self.user_list = self.user_list.strip('[').rstrip(']').split(',')
-        self.pwd_list = cfg.firewall.pwd
+        self.pwd_list = cfg.firewall.fw_password
         self.pwd_list = self.pwd_list.strip('[').rstrip(']').split(',')
-        self.interface_in_list = cfg.firewall.interface_in
-        self.interface_in_list = self.interface_in.strip('[').rstrip(']').\
-            split(',')
-        self.interface_out_list = cfg.firewall.interface_out
-        self.interface_out_list = self.interface_out.strip('[').rstrip(']').\
-            split(',')
+        self.interface_in_list = cfg.firewall.fw_interface_in
+        self.interface_in_list = self.interface_in_list.strip('[').\
+            rstrip(']').split(',')
+        self.interface_out_list = cfg.firewall.fw_interface_out
+        self.interface_out_list = self.interface_out_list.strip('[').\
+            rstrip(']').split(',')
         self.obj_dict = dict()
         cnt = 0
         dev = cfg.firewall.device

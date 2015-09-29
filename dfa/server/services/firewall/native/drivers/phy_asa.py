@@ -34,7 +34,7 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
         LOG.debug("Initialize for PhyAsa")
         self.mgmt_ip_addr = cfg_dict.get('mgmt_ip_addr')
         self.user = cfg_dict.get('user')
-        self.pwd = cfg_dict.get('user')
+        self.pwd = cfg_dict.get('pwd')
         self.interface_in = cfg_dict.get('interface_in')
         self.interface_out = cfg_dict.get('interface_out')
         self.asa5585 = asa.Asa5585(self.mgmt_ip_addr, self.user, self.pwd)
@@ -43,9 +43,18 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
         LOG.debug("Pop Event for PhyAsa")
         pass
 
+    def pop_dcnm_obj(self, dcnm_obj):
+        LOG.debug("Pop Event for DCNM obj")
+        pass
+
     def nwk_create_notif(self, tenant_id, tenant_name, cidr):
         ''' Network Create Notification '''
         LOG.debug("Nwk Create Notif PhyAsa")
+        pass
+
+    def nwk_delete_notif(self, tenant_id, tenant_name, nwk_id):
+        ''' Network Delete Notification '''
+        LOG.debug("Nwk Delete Notif PhyAsa")
         pass
 
     def is_device_virtual(self):
@@ -71,7 +80,7 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
         status = self.asa5585.setup(tenant_name, in_vlan, out_vlan,
                                     in_ip_start, '255.255.255.0', in_gw,
                                     out_ip_start, '255.255.255.0', out_ip_gw,
-                                    self.interface_in, self_interface_out)
+                                    self.interface_in, self.interface_out)
         if status is False:
             LOG.error("Physical FW instance creation failure.")
             return False
@@ -91,7 +100,7 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
             self.get_out_ip_addr(tenant_id))
         in_seg, in_vlan = self.get_in_seg_vlan(tenant_id)
         out_seg, out_vlan = self.get_out_seg_vlan(tenant_id)
-        
+
         status = self.asa5585.cleanup(tenant_name, in_vlan, out_vlan,
                                       in_ip_start, '255.255.255.0',
                                       out_ip_start, '255.255.255.0',

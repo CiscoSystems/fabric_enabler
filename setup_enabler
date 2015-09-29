@@ -188,7 +188,7 @@ def invoke_scripts(compute_host, compute_uplink, compute_user, compute_passwd):
       for line in ssh_stdout:
         print line
       for line in ssh_stderr:
-        print line 
+        print bytes(line.encode('utf-8')) 
     client.close()
 
 def generate_uplink_file(compute_uplink):

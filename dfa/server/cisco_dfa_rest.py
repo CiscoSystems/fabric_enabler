@@ -476,13 +476,13 @@ class DFARESTClient(object):
         part_name = network.part_name
         if not part_name:
             part_name = self._part_name
-        if network.mob_domain:
-            mob_domain_name = network.mob_domain_name
-        else:
-            mob_domain_name = self._default_md
 
         if network.vlan_id:
             vlan_id = str(network.vlan_id)
+            if network.mob_domain_name is not None:
+                mob_domain_name = network.mob_domain_name
+            else:
+                mob_domain_name = self._default_md
         else:
             mob_domain_name = None
 
@@ -561,7 +561,7 @@ class DFARESTClient(object):
             raise dexc.DfaClientRequestFailed(reason=res)
 
     def delete_service_network(self, tenant_name, network):
-	"""Delete network on the DCNM.
+        """Delete network on the DCNM.
 
         :param tenant_name: name of tenant the network belongs to
         :param network: object that contains network parameters
