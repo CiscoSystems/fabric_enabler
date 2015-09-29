@@ -113,7 +113,8 @@ class Asa5585():
 
     def cleanup(self, tenant, inside_vlan_arg, outside_vlan_arg,
                 inside_ip, inside_mask,
-                outside_ip, outside_mask):
+                outside_ip, outside_mask,
+                interface_in, interface_out):
         """ cleanup ASA context for an edge tenant pair """
         LOG.debug("asa_cleanup: %s %d %d %s %s %s %s",
                   tenant, inside_vlan_arg, outside_vlan_arg,
@@ -143,6 +144,7 @@ class Asa5585():
                                            (self.username,
                                             self.password)).replace('\n', '')
         req.add_header("Authorization", "Basic %s" % base64string)
+        max_ctx_count = 0
         f = None
         try:
             f = urllib2.urlopen(req)
@@ -216,8 +218,8 @@ class Asa5585():
             if (rule['source_ip_address'] is None):
                 acl = acl + "any "
             else:
-                acl = (acl + str(src_ip.network) + " " +
-                       str(src_ip.netmask) + " ")
+                acl = acl + str(src_ip.network) + " " + (
+                    str(src_ip.netmask) + " ")
             if (src_port is not None):
                 if (':' in src_port):
                     range = src_port.replace(':', ' ')
@@ -226,9 +228,9 @@ class Asa5585():
                     acl = acl + "eq " + src_port + " "
             if (rule['destination_ip_address'] is None):
                 acl = acl + "any "
-            else:vs
-                acl = (acl + str(dst_ip.network) + " " +
-                       str(dst_ip.netmask) + " ")
+            else:
+                acl = acl + str(dst_ip.network) + " " + \
+                    str(dst_ip.netmask) + " "
             if (dst_port is not None):
                 if (':' in dst_port):
                     range = dst_port.replace(':', ' ')
