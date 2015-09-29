@@ -216,7 +216,7 @@ class DfaFailureRecovery(object):
                     # from database and return the segmentation id to the
                     # pool.
                     self.delete_network_db(net_id)
-                    self.segmentation_pool.add(segid)
+                    self.seg_drvr.release_segmentation_id(segid)
                     LOG.debug("Success on failure recovery to deleted "
                               "%(net)s" % ({'net': net.name}))
 
