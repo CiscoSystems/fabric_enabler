@@ -72,14 +72,16 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
         tenant_name = data.get('tenant_name')
         in_subnet, in_ip_start, in_ip_end, in_gw = (
             self.get_in_ip_addr(tenant_id))
+        in_serv_node = self.get_in_srvc_node_ip_addr(tenant_id)
         out_subnet, out_ip_start, out_ip_end, out_ip_gw = (
             self.get_out_ip_addr(tenant_id))
+        out_serv_node = self.get_out_srvc_node_ip_addr(tenant_id)
         in_seg, in_vlan = self.get_in_seg_vlan(tenant_id)
         out_seg, out_vlan = self.get_out_seg_vlan(tenant_id)
 
         status = self.asa5585.setup(tenant_name, in_vlan, out_vlan,
-                                    in_ip_start, '255.255.255.0', in_gw,
-                                    out_ip_start, '255.255.255.0', out_ip_gw,
+                                    in_serv_node, '255.255.255.0', in_gw,
+                                    out_serv_node, '255.255.255.0', out_ip_gw,
                                     self.interface_in, self.interface_out)
         if status is False:
             LOG.error("Physical FW instance creation failure.")
@@ -96,16 +98,17 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
         tenant_name = data.get('tenant_name')
         in_subnet, in_ip_start, in_ip_end, in_gw = (
             self.get_in_ip_addr(tenant_id))
+        in_serv_node = self.get_in_srvc_node_ip_addr(tenant_id)
         out_subnet, out_ip_start, out_ip_end, out_ip_gw = (
             self.get_out_ip_addr(tenant_id))
+        out_serv_node = self.get_out_srvc_node_ip_addr(tenant_id)
         in_seg, in_vlan = self.get_in_seg_vlan(tenant_id)
         out_seg, out_vlan = self.get_out_seg_vlan(tenant_id)
 
         status = self.asa5585.cleanup(tenant_name, in_vlan, out_vlan,
-                                      in_ip_start, '255.255.255.0',
-                                      out_ip_start, '255.255.255.0',
+                                      in_serv_node, '255.255.255.0',
+                                      out_serv_node, '255.255.255.0',
                                       self.interface_in, self.interface_out)
-        self.delete_fabric_fw(tenant_id, tenant_name)
         return status
 
     def modify_fw(self, tenant_id, data):
