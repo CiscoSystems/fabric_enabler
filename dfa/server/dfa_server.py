@@ -644,10 +644,11 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         self.nwk_sub_create_notif(snet.get('tenant_id'), tenant_name,
                                   snet.get('cidr'))
 
-    def _get_segmentation_id(self, segid, netid):
+    def _get_segmentation_id(self, netid, segid, source):
         """Allocate segmentation id."""
 
-        return self.seg_drvr.allocate_segmentation_id(netid, seg_id=segid)
+        return self.seg_drvr.allocate_segmentation_id(netid, seg_id=segid,
+                                                      source=source)
 
     def network_create_event(self, network_info):
         """Process network create event.
@@ -721,7 +722,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             return
 
         pseg_id = self.network[net_id].get('provider:segmentation_id')
-        seg_id = self._get_segmentation_id(net_id, pseg_id)
+        seg_id = self._get_segmentation_id(net_id, pseg_id, 'openstack')
         self.network[net_id]['segmentation_id'] = seg_id
         try:
             cfgp, fwd_mod = self.dcnm_client.get_config_profile_for_network(
@@ -831,7 +832,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
 
         net_id = utils.get_uuid()
         pseg_id = dcnm_net_info.get('segmentId')
-        seg_id = self._get_segmentation_id(net_id, pseg_id)
+        seg_id = self._get_segmentation_id(net_id, pseg_id, 'DCNM')
         cfgp = dcnm_net_info.get('profileName')
         net_name = dcnm_net_info.get('networkName')
         fwd_mod = self.dcnm_client.config_profile_fwding_mode_get(cfgp)
