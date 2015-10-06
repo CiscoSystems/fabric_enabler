@@ -29,7 +29,7 @@ from dfa.common import constants
 from dfa.common import dfa_sys_lib as utils
 from dfa.common import utils as sys_utils
 from dfa.common import dfa_logger as logging
-#from neutron.openstack.common import loopingcall
+# from neutron.openstack.common import loopingcall
 
 LOG = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ LOG = logging.getLogger(__name__)
 #               default='0',
 #               help=_('Timeout in seconds for lldptool commands')),
 # ]
+
 
 def enable_lldp(self, port_name, is_ncb=True, is_nb=False):
     '''Function to enable LLDP on the interface.'''
@@ -134,7 +135,7 @@ class LldpadDriver(object):
             LOG.error("GPID cannot be set on NB")
             return False
 
-    #TODO(padkrish)
+    # TODO(padkrish)
     def _vdp_refrsh_hndlr(self):
         '''Periodic refresh of vNIC events to VDP
 
@@ -164,21 +165,18 @@ class LldpadDriver(object):
                     if key in self.vdp_vif_map:
                         LOG.debug("Sending Refresh for VSI %s" % lvdp_dict)
                         vdp_vlan = self.send_vdp_assoc(
-                                                vsiid=lvdp_dict.get('vsiid'),
-                                                mgrid=lvdp_dict.get('mgrid'),
-                                                typeid=lvdp_dict.get('typeid'),
-                                                typeid_ver=lvdp_dict.
-                                                get('typeid_ver'),
-                                                vsiid_frmt=lvdp_dict.
-                                                get('vsiid_frmt'),
-                                                filter_frmt=lvdp_dict.
-                                                get('filter_frmt'),
-                                                gid=lvdp_dict.get('gid'),
-                                                mac=lvdp_dict.get('mac'),
-                                                vlan=lvdp_dict.get('vdp_vlan'),
-                                                oui_id=oui_id,
-                                                oui_data=oui_data,
-                                                sw_resp=True)
+                            vsiid=lvdp_dict.get('vsiid'),
+                            mgrid=lvdp_dict.get('mgrid'),
+                            typeid=lvdp_dict.get('typeid'),
+                            typeid_ver=lvdp_dict.
+                            get('typeid_ver'),
+                            vsiid_frmt=lvdp_dict.
+                            get('vsiid_frmt'),
+                            filter_frmt=lvdp_dict.get('filter_frmt'),
+                            gid=lvdp_dict.get('gid'),
+                            mac=lvdp_dict.get('mac'),
+                            vlan=lvdp_dict.get('vdp_vlan'),
+                            oui_id=oui_id, oui_data=oui_data, sw_resp=True)
                 # check validity.
                 if not utils.is_valid_vlan_tag(vdp_vlan):
                     emsg = _("Returned vlan %(vlan)s is invalid.")
@@ -189,7 +187,7 @@ class LldpadDriver(object):
                 # Condition will be hit only during error cases when switch
                 # reloads or when compute reloads
                 if vdp_vlan != exist_vdp_vlan:
-                    #Invoke the CB Function
+                    # Invoke the CB Function
                     cb_fn = lvdp_dict.get('vsw_cb_fn')
                     cb_data = lvdp_dict.get('vsw_cb_data')
                     if cb_fn:
@@ -216,7 +214,7 @@ class LldpadDriver(object):
         param oui_data: OUI Opaque Data
         '''
         self.oui_vif_map[port_uuid] = {'oui_id': oui_type,
-                                  'oui_data': oui_data}
+                                       'oui_data': oui_data}
 
     def store_vdp_vsi(self, port_uuid, mgrid, typeid, typeid_ver,
                       vsiid_frmt, vsiid, filter_frmt, gid, mac, vlan,
@@ -295,17 +293,17 @@ class LldpadDriver(object):
         oui_list = []
         vm_name = oui_data.get('vm_name')
         if vm_name is not None:
-            oui_str = "oui=%s," % oui_id 
+            oui_str = "oui=%s," % oui_id
             oui_name_str = oui_str + "vm_name=" + vm_name
             oui_list.append(oui_name_str)
         ip_addr = oui_data.get('ip_addr')
         if ip_addr is not None:
-            oui_str = "oui=%s," % oui_id 
+            oui_str = "oui=%s," % oui_id
             ip_addr_str = oui_str + "ipv4_addr=" + ip_addr
             oui_list.append(ip_addr_str)
         vm_uuid = oui_data.get('vm_uuid')
         if vm_uuid is not None:
-            oui_str = "oui=%s," % oui_id 
+            oui_str = "oui=%s," % oui_id
             vm_uuid_str = oui_str + "vm_uuid=" + vm_uuid
             oui_list.append(vm_uuid_str)
         return oui_list
@@ -431,7 +429,7 @@ class LldpadDriver(object):
                                   "-c", vdp_key_str['typeid_ver'],
                                   "-c", vdp_key_str['vsiid']])
         return reply
- 
+
     def send_vdp_msg(self, mode, mgrid, typeid, typeid_ver, vsiid_frmt,
                      vsiid, filter_frmt, gid, mac, vlan, oui_id, oui_data,
                      sw_resp):
@@ -470,7 +468,7 @@ class LldpadDriver(object):
             # if found VDP will return the VLAN. Add support for this once
             # vdptool has the support for querying exact VSI filters
             # TODO(padkrish)
-            
+
             reply = self.run_vdptool(["-T", "-i", self.port_name, "-W",
                                       "-V", mode, "-c", vdp_key_str['mode'],
                                       "-c", vdp_key_str['mgrid'], "-c",
@@ -479,7 +477,7 @@ class LldpadDriver(object):
                                       vdp_key_str['vsiid'], "-c",
                                       "hints=none", "-c",
                                       vdp_key_str['filter']],
-                                      oui_args=oui_cmd_str)
+                                     oui_args=oui_cmd_str)
         else:
             reply = self.run_vdptool(["-T", "-i", self.port_name,
                                       "-V", mode, "-c", vdp_key_str['mode'],
@@ -489,7 +487,7 @@ class LldpadDriver(object):
                                       vdp_key_str['vsiid'], "-c",
                                       "hints=none", "-c",
                                       vdp_key_str['filter']],
-                                      oui_args=oui_cmd_str)
+                                     oui_args=oui_cmd_str)
         return reply
 
     def get_vlan_from_reply1(self, reply):
@@ -500,18 +498,21 @@ class LldpadDriver(object):
                 return constants.INVALID_VLAN
         except Exception:
             LOG.error("Incorrect Reply,no mode information found: %s" % reply)
+            return constants.INVALID_VLAN
         try:
             f_ind = reply.index("filter = ")
         except Exception:
-            LOG.error("Incorrect Reply,no filter information found: %s" % reply)
+            LOG.error("Incorrect Reply,no filter information found: %s"
+                      % reply)
             return constants.INVALID_VLAN
         try:
             l_ind = reply.rindex("filter = ")
         except Exception:
-            LOG.error("Incorrect Reply,no filter information found: %s" % reply)
+            LOG.error("Incorrect Reply,no filter information found: %s"
+                      % reply)
             return constants.INVALID_VLAN
         if f_ind != l_ind:
-            #Currently not supported if reply contains a filter keyword
+            # Currently not supported if reply contains a filter keyword
             LOG.error("Err: not supported currently")
             return constants.INVALID_VLAN
         try:
@@ -527,15 +528,17 @@ class LldpadDriver(object):
         try:
             f_ind = reply.index("filter")
         except Exception:
-            LOG.error("Incorrect Reply, no filter information found %s" % reply)
+            LOG.error("Incorrect Reply, no filter information found %s"
+                      % reply)
             return constants.INVALID_VLAN
         try:
             l_ind = reply.rindex("filter")
         except Exception:
-            LOG.error("Incorrect Reply, no filter information found %s" % reply)
+            LOG.error("Incorrect Reply, no filter information found %s"
+                      % reply)
             return constants.INVALID_VLAN
         if f_ind != l_ind:
-            #Currently not supported if reply contains a filter keyword
+            # Currently not supported if reply contains a filter keyword
             LOG.error("Err: not supported currently")
             return constants.INVALID_VLAN
         try:
@@ -609,7 +612,7 @@ class LldpadDriver(object):
         :param oui_data: OUI Data
         :param sw_resp: Flag indicating if response is required from the daemon
         '''
-        #Correct non-zero VLAN needs to be specified
+        # Correct non-zero VLAN needs to be specified
         self.send_vdp_msg("deassoc", mgrid, typeid, typeid_ver,
                           vsiid_frmt, vsiid, filter_frmt, gid, mac, vlan,
                           oui_id, oui_data, sw_resp)
@@ -641,6 +644,7 @@ class LldpadDriver(object):
         :return reply: VLAN reply from vdptool
         '''
         oui_id = None
+        oui_data = None
         if 'oui_id' in oui:
             oui_id = oui['oui_id']
             oui_data = oui
@@ -681,13 +685,14 @@ class LldpadDriver(object):
         :param oui_data: OUI Data
         :param sw_resp: Flag indicating if response is required from the daemon
         '''
-        #Correct non-zero VLAN needs to be specified
+        # Correct non-zero VLAN needs to be specified
         try:
             with self.mutex_lock:
                 self.send_vdp_deassoc(vsiid=vsiid, mgrid=mgrid, typeid=typeid,
-                                      typeid_ver=typeid_ver, vsiid_frmt=vsiid_frmt,
-                                      filter_frmt=filter_frmt, gid=gid, mac=mac,
-                                      vlan=vlan)
+                                      typeid_ver=typeid_ver,
+                                      vsiid_frmt=vsiid_frmt,
+                                      filter_frmt=filter_frmt, gid=gid,
+                                      mac=mac, vlan=vlan)
                 self.clear_vdp_vsi(port_uuid)
         except Exception as e:
             LOG.error("VNIC Down exception %s" % e)

@@ -1,3 +1,22 @@
+# Copyright 2014 Cisco Systems, Inc.
+# All Rights Reserved.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+#
+# @author: Padmanabhan Krishnan, Cisco Systems, Inc.
+
+"""Common Routines used by DFA enabler"""
+
 import os
 import shlex
 from eventlet import greenthread
@@ -319,3 +338,44 @@ def _build_flow_expr_str(flow_dict, cmd):
         flow_expr_arr.append(actions)
 
     return ','.join(flow_expr_arr)
+
+
+def get_all_run_phy_intf():
+    intf_list = []
+    base_dir = '/sys/class/net'
+    dir_exist = os.path.exists(base_dir)
+    if not dir_exist:
+        LOG.error("Unable to get interface list :Base dir %s does not exist",
+                  base_dir)
+        return intf_list
+    dir_cont = os.listdir(base_dir)
+    for subdir in dir_cont:
+        dev_dir = base_dir + '/' + subdir + '/' + 'device'
+        dev_exist = os.path.exists(dev_dir)
+        if dev_exist:
+            try:
+                oper_file = base_dir + '/' + subdir + '/' + 'operstate'
+                fd = open(oper_file, 'r')
+                oper_state = fd.read().strip('\n')
+                if oper_state == 'up':
+                    intf_list.append(subdir)
+            except Exception as e:
+                LOG.error("Exception in reading %s", str(e))
+                break
+        else:
+            LOG.info("Dev dir %s does not exist, not physical intf", dev_dir)
+    return intf_list
+
+
+def is_phy_intf_ipv4_cfgd(intf):
+    cmd = ["ip", "address", "show", "dev", intf]
+    try:
+        output = execute(cmd)
+    except Exception as e:
+        LOG.error("Unable to get IP address for %s", intf)
+        return False
+    inet_len = output.split('inet ')
+    if inet_len < 2:
+        return False
+    else:
+        return True
