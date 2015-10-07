@@ -18,6 +18,8 @@
 import json
 import Queue
 import time
+
+from dfa.common import config
 from dfa.common import utils
 from dfa.agent.vdp import ovs_vdp
 from dfa.common import constants
