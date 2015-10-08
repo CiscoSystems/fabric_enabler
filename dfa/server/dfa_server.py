@@ -29,7 +29,6 @@ import paramiko
 import platform
 import Queue
 import re
-from six import moves
 import sys
 import time
 import importlib
@@ -283,10 +282,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         # Create segmentation id pool.
         seg_id_min = int(cfg.dcnm.segmentation_id_min)
         seg_id_max = int(cfg.dcnm.segmentation_id_max)
-        self.segmentation_pool = set(moves.xrange(seg_id_min, seg_id_max + 1))
-        # Needs to be implemented here along with restart TODO(nlahouti)
-        # self.seg_drvr = dfa_dbm.DfaSegmentTypeDriver(seg_id_min, seg_id_max,
-        #                                              constants.RES_SEGMENT)
+        self.seg_drvr = dfa_dbm.DfaSegmentTypeDriver(seg_id_min, seg_id_max,
+                                                     constants.RES_SEGMENT,
+                                                     cfg)
 
         # Create queue for exception returned by a thread.
         self._excpq = Queue.Queue()
@@ -333,7 +331,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         if (cfg.loadbalance.lb_enabled.lower() == 'true'):
             LOG.debug("LBaaS is enabled")
             lbaas_module = importlib.import_module(
-                           'dfa.server.services.loadbalance.lb_mgr')
+                'dfa.server.services.loadbalance.lb_mgr')
             self._lbMgr = lbaas_module.LbMgr(cfg, self)
             self.events.update({
                 'pool.create.end': self._lbMgr.pool_create_event,
@@ -388,8 +386,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             self.network[net.network_id]['id'] = net.network_id
 
             # Remove the used segmentation id from the pool.
-            if net.segmentation_id in self.segmentation_pool:
-                self.segmentation_pool.remove(net.segmentation_id)
+#            if net.segmentation_id in self.segmentation_pool:
+#                self.segmentation_pool.remove(net.segmentation_id)
 
         LOG.info('Network info cache: %s', self.network)
 
@@ -646,17 +644,11 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         self.nwk_sub_create_notif(snet.get('tenant_id'), tenant_name,
                                   snet.get('cidr'))
 
-    def _get_segmentation_id(self, segid):
+    def _get_segmentation_id(self, netid, segid, source):
         """Allocate segmentation id."""
 
-        try:
-            newseg = (segid, self.segmentation_pool.remove(segid)
-                      if segid and segid in self.segmentation_pool else
-                      self.segmentation_pool.pop())
-            return newseg[0] if newseg[0] else newseg[1]
-        except KeyError:
-            LOG.exception('Error: Segmentation id pool is empty')
-            return 0
+        return self.seg_drvr.allocate_segmentation_id(netid, seg_id=segid,
+                                                      source=source)
 
     def network_create_event(self, network_info):
         """Process network create event.
@@ -730,7 +722,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             return
 
         pseg_id = self.network[net_id].get('provider:segmentation_id')
-        seg_id = self._get_segmentation_id(pseg_id)
+        seg_id = self._get_segmentation_id(net_id, pseg_id, 'openstack')
         self.network[net_id]['segmentation_id'] = seg_id
         try:
             cfgp, fwd_mod = self.dcnm_client.get_config_profile_for_network(
@@ -778,12 +770,13 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         try:
             self.dcnm_client.delete_network(tenant_name, net)
             # Put back the segmentation id into the pool.
-            self.segmentation_pool.add(segid)
+            self.seg_drvr.release_segmentation_id(segid)
 
             # Remove entry from database and cache.
             self.delete_network_db(net_id)
             del self.network[net_id]
-            snets = [(k) for k in self.subnet if self.subnet[k] == net_id]
+            snets = [(k) for k in self.subnet if (
+                self.subnet[k].get('network_id') == net_id)]
             [self.subnet.pop(s) for s in snets]
         except dexc.DfaClientRequestFailed:
             emsg = ('Failed to create network %(net)s.')
@@ -839,7 +832,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
 
         net_id = utils.get_uuid()
         pseg_id = dcnm_net_info.get('segmentId')
-        seg_id = self._get_segmentation_id(pseg_id)
+        seg_id = self._get_segmentation_id(net_id, pseg_id, 'DCNM')
         cfgp = dcnm_net_info.get('profileName')
         net_name = dcnm_net_info.get('networkName')
         fwd_mod = self.dcnm_client.config_profile_fwding_mode_get(cfgp)
