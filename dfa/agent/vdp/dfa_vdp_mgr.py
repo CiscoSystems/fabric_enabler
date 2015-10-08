@@ -145,6 +145,8 @@ class VdpMgr(object):
     def read_static_uplink(self):
         ''' Read the static uplink from file, if given '''
         cnt = 0
+        if self._cfg.general.node is None:
+            return
         for node in self._cfg.general.node.split(','):
             if node.strip() == self.host:
                 self.static_uplink = True
