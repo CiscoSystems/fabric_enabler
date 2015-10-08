@@ -50,8 +50,8 @@ startup_cmds = {
     'centos': {
         'stop_agent': 'systemctl stop fabric-enabler-agent',
         'start_agent': 'systemctl start fabric-enabler-agent',
-        'stop_keystone': 'systemctl stop openstack-keystone',
-        'start_keystone': 'systemctl start openstack-keystone',
+        'stop_keystone': 'systemctl stop httpd',
+        'start_keystone': 'systemctl start httpd',
         'stop_server': 'systemctl stop fabric-enabler-server',
         'start_server': 'systemctl start fabric-enabler-server',
         'stop_neutron_server': 'systemctl stop neutron-server',
@@ -65,9 +65,6 @@ class NexusFabricEnablerInstaller(object):
     """Represents Fabric Enabler Installation."""
 
     def __init__(self, mysql_user, mysql_passwd, mysql_host):
-        self.mysql_user = mysql_user
-        self.mysql_passwd = mysql_passwd
-        self.mysql_host = mysql_host
         self.root_helper = '' if os.geteuid() == 0 else 'sudo '
         self.src_dir = 'openstack_fabric_enabler'
         self.ssh_client_log = '%s/paramiko.log' % self.src_dir
@@ -75,15 +72,13 @@ class NexusFabricEnablerInstaller(object):
         self.script_dir = '%s/dfa/scripts' % self.src_dir
         self.rm_uplink = '%s rm -f /tmp/uplink*' % self.root_helper
         self.cp_uplink = 'cp %s/%s /tmp' % (self.src_dir, self.uplink_file)
-        self.run_dfa_prep_on_control = ('%s python %s/dfa_prepare_setup.py '
-                                        '--node-function=control '
-                                        '--mysql-user=%s '
-                                        '--mysql-password=%s '
-                                        '--mysql-host=%s' % (
-                                            self.root_helper, self.script_dir,
-                                            self.mysql_user,
-                                            self.mysql_passwd,
-                                            self.mysql_host))
+        self.run_dfa_prep_on_control = (
+            '%s python %s/dfa_prepare_setup.py --node-function=control '
+            '%s %s %s' % (
+                self.root_helper, self.script_dir,
+                '--mysql-user=' + mysql_user if mysql_user else '',
+                '--mysql-password=' + mysql_passwd if mysql_passwd else '',
+                '--mysql-host=' + mysql_host if mysql_host else ''))
         self.run_dfa_prep_on_compute = ('%s python %s/dfa_prepare_setup.py '
                                         '--node-function=compute' % (
                                             self.root_helper, self.script_dir))
@@ -399,15 +394,6 @@ if __name__ == '__main__':
         print("This script will setup openstack fabric enabler on compute "
               "node %s with uplink %s" % (
                   input_compute_name, input_uplink_converted))
-
-    if input_compute_name is None:
-        # The setup is for controller. Check if mysql parameters are given.
-        if args.mysql_user is None or args.mysql_password is None or (
-                args.mysql_host is None):
-            print('You must specifiy mysql-password, mysql-host '
-                  'and mysql-user when setting up a control node.')
-            print('Run "setup_enabler.py -h" for more help')
-            sys.exit(1)
 
     user_answer = raw_input("Would you like to continue(y/n)? ").lower()
     if user_answer.startswith('n'):

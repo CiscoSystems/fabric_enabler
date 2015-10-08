@@ -36,6 +36,7 @@ conf_file_list = [
 ]
 default_path = '/etc/neutron,/etc/keystone'
 dfa_cfg_file = 'enabler_conf.ini'
+mysqlcnf = '.my.cnf'
 
 dfa_neutron_option_list = [
     {'section': 'DEFAULT',
@@ -317,6 +318,25 @@ def copy_init_conf_files(node, root_helper):
             get_cmd_output(cmd3)
 
 
+def get_mysql_cred():
+
+    mysql_user = None
+    mysql_password = None
+    mysql_host = None
+    mysqlconf = os.path.join(os.path.expanduser('~'), mysqlcnf)
+    if os.path.exists(mysqlconf) is True:
+        config = ConfigParser.ConfigParser()
+        config.read(mysqlconf)
+        try:
+            mysql_user = config.get("client", "user")
+            mysql_password = config.get("client", "password")
+            mysql_host = 'localhost'
+        except:
+            print('Cannot find %s' % mysqlconf)
+
+    return mysql_user, mysql_password, mysql_host
+
+
 usage = ('\n'
          'python dfa_prepare_setup.py --dir-path filepath1[,filepath2,...]'
          '--node-function [control | compute]\n')
@@ -327,6 +347,8 @@ if __name__ == '__main__':
     if os.geteuid() != 0:
         # This is not root
         root_helper = 'sudo '
+    mysqluser, mysqlpass, mysqlhost = get_mysql_cred()
+
     parser = optparse.OptionParser(usage=usage)
 
     parser.add_option('--dir-path',
@@ -336,14 +358,14 @@ if __name__ == '__main__':
                       type='string', dest='node_function', default='control',
                       help='Choose the node runs as controller or compute.')
     parser.add_option('--mysql-user',
-                      type='string', dest='mysql_user', default=None,
+                      type='string', dest='mysql_user', default=mysqluser,
                       help='MySQL user name (only for a controller node.')
     parser.add_option('--mysql-host',
-                      type='string', dest='mysql_host', default=None,
+                      type='string', dest='mysql_host', default=mysqlhost,
                       help='MySQL host name or IP address'
                       '(only for a controller node.')
     parser.add_option('--mysql-password',
-                      type='string', dest='mysql_pass', default=None,
+                      type='string', dest='mysql_pass', default=mysqlpass,
                       help='MySQL password (only for a controller node.')
     (options, args) = parser.parse_args()
 
