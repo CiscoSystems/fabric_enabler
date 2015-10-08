@@ -1,4 +1,4 @@
-# -*- encoding: utf8 -*- 
+# -*- encoding: utf8 -*-
 # Copyright 2014 Cisco Systems, Inc.
 # All Rights Reserved.
 #
@@ -33,6 +33,7 @@ LOG = logging.getLogger(__name__)
 
 
 class DFAInstanceAPI(object):
+
     """This class provides API to get information for a given instance."""
 
     def __init__(self):
@@ -40,7 +41,7 @@ class DFAInstanceAPI(object):
         self._tenant_name = self._cfg.keystone_authtoken.admin_tenant_name
         self._user_name = self._cfg.keystone_authtoken.admin_user
         self._admin_password = self._cfg.keystone_authtoken.admin_password
-        self._TIMEOUT_RESPONSE = 10
+        self._timeout_respoonse = 10
         self._token = None
         self._project_id = None
         self._auth_url = None
@@ -48,6 +49,24 @@ class DFAInstanceAPI(object):
         self._token = None
         self._novaclnt = None
         self._url = self._cfg.keystone_authtoken.auth_uri
+        if not self._url:
+            proto = self._cfg.keystone_authtoken.auth_protocol
+            auth_host = self._cfg.keystone_authtoken.auth_host
+            auth_port = self._cfg.keystone_authtoken.auth_port
+            self._url = '%(proto)s://%(host)s:%(port)s/v2.0' % (
+                {'proto': proto if proto else 'http',
+                 'host': auth_host if auth_host else 'localhost',
+                 'port': auth_port if auth_port else '5000'})
+        else:
+            url_s = self._url.split('/')
+            if len(url_s) == 4:
+                url_s[-1] = 'v2.0'
+                self._url = '/'.join(url_s)
+            elif len(url_s) == 3:
+                self._url += '/v2.0'
+            else:
+                LOG.error('Invalid auth_uri=%s value.', self._url)
+
         self._inst_info_cache = {}
         LOG.debug('DFAInstanceAPI: initialization done...')
 
@@ -79,7 +98,7 @@ class DFAInstanceAPI(object):
         else:
             # Failed request.
             LOG.error('Failed to send token create request.')
-            return None
+            return
 
     def _create_nova_client(self):
         """Creates nova client object."""
@@ -95,8 +114,8 @@ class DFAInstanceAPI(object):
             return clnt
         except nexc.Unauthorized:
             thismsg = ('Failed to get novaclient:Unauthorised '
-                      'project_id=%s user=%s') % (self._project_id,
-                                                 self._user_name)
+                       'project_id=%s user=%s') % (self._project_id,
+                                                   self._user_name)
             raise nexc.ClientException(thismsg)
 
         except nexc.AuthorizationFailure as err:
@@ -132,7 +151,6 @@ class DFAInstanceAPI(object):
         :uuid: Instance's UUID
         :project_id: UUID of project (tenant)
         """
-        instance_name = None
         instance_name = self._inst_info_cache.get((uuid, project_id))
         if instance_name:
             return instance_name

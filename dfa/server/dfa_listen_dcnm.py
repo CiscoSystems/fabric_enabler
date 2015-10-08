@@ -1,3 +1,20 @@
+# Copyright 2015 Cisco Systems, Inc.
+# All Rights Reserved.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+#
+
+
 import json
 import pika
 import socket
@@ -47,9 +64,10 @@ class DCNMListener(object):
                 credentials = pika.PlainCredentials(self._user, self._pwd)
             # create connection, channel
             self._conn = pika.BlockingConnection(
-                pika.ConnectionParameters(host=self._server_ip,
-                                          port=self._port,
-                                          credentials=credentials))
+                pika.ConnectionParameters(
+                    host=self._server_ip,
+                    port=self._port,
+                    credentials=credentials))
 
             # create channels for consuming
             self.consume_channel = self._conn.channel()
@@ -62,12 +80,13 @@ class DCNMListener(object):
                 auto_delete=False)
 
             result = self.consume_channel.queue_declare(
-                queue=self._dcnm_queue_name, durable=True, auto_delete=False)
-            self._dcnm_queue_name = result.method.queue
-            self.consume_channel.queue_bind(
-                exchange=self._dcnm_exchange_name,
                 queue=self._dcnm_queue_name,
-                routing_key=key)
+                durable=True,
+                auto_delete=False)
+            self._dcnm_queue_name = result.method.queue
+            self.consume_channel.queue_bind(exchange=self._dcnm_exchange_name,
+                                            queue=self._dcnm_queue_name,
+                                            routing_key=key)
             # for info only
             msg_count = result.method.message_count
             LOG.debug('The exchange %(exch)s queue %(que)s has totally '
@@ -114,11 +133,10 @@ class DCNMListener(object):
         data = {"project_name": pre_project_name,
                 "partition_name": pre_partition_name,
                 "segmentation_id": pre_seg_id}
-        if (network_create_key in method.routing_key) or (
+        if network_create_key in method.routing_key or (
                 network_update_key in method.routing_key):
             pri = self._create_pri
             event_type = 'dcnm.network.create'
-
         else:
             pri = self._delete_pri
             event_type = 'dcnm.network.delete'
@@ -149,12 +167,16 @@ class DCNMListener(object):
                     self.consume_channel.basic_ack(mtd_fr.delivery_tag)
                 else:
                     # Queue is empty.
-                    self._conn.sleep(1)
-            except:
+                    try:
+                        self._conn.sleep(1)
+                    except AttributeError:
+                        time.sleep(1)
+            except Exception:
                 exc_type, exc_value, exc_tb = sys.exc_info()
-                tb_str = traceback.format_exception(exc_type, exc_value, exc_tb)
-                LOG.exception("Failed to read from queue: %(queue)s "
-                              "%(exc_type)s, %(exc_value)s, %(exc_tb)s.", {
+                tb_str = traceback.format_exception(exc_type,
+                                                    exc_value, exc_tb)
+                LOG.exception(("Failed to read from queue: %(queue)s "
+                              "%(exc_type)s, %(exc_value)s, %(exc_tb)s."), {
                                   'queue': self._dcnm_queue_name,
                                   'exc_type': exc_type,
                                   'exc_value': exc_value,
