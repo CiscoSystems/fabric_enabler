@@ -25,49 +25,58 @@ ConnectionFailed = ncexc.ConnectionFailed
 
 
 class NetworkNotFound(exceptions.NotFound):
+
     """Network cannot be found."""
 
-    message = "Network %(network_id)s could not be found."
+    message = _("Network %(network_id)s could not be found.")
 
 
 class ConfigProfileNotFound(exceptions.NotFound):
+
     """Config Profile cannot be found."""
 
-    message = "Config profile for network %(network_id)s could not be found."
+    message = _("Config profile for network %(network_id)s could "
+                "not be found.")
 
 
 class ConfigProfileFwdModeNotFound(exceptions.NotFound):
+
     """Config Profile forwarding mode cannot be found."""
 
-    message = ("Forwarding Mode for network %(network_id)s"
-               " could not be found.")
+    message = _("Forwarding Mode for network %(network_id)s "
+                "could not be found.")
 
 
 class ConfigProfileIdNotFound(exceptions.NotFound):
+
     """Config Profile ID cannot be found."""
 
-    message = "Config Profile %(profile_id)s could not be found."
+    message = _("Config Profile %(profile_id)s could not be found.")
 
 
 class ConfigProfileNameNotFound(exceptions.NotFound):
+
     """Config Profile name cannot be found."""
 
-    message = "Config Profile %(name)s could not be found."
+    message = _("Config Profile %(name)s could not be found.")
 
 
 class ProjectIdNotFound(exceptions.NotFound):
+
     """Project ID cannot be found."""
 
-    message = "Project ID %(project_id)s could not be found."
+    message = _("Project ID %(project_id)s could not be found.")
 
 
 class DfaClientRequestFailed(exceptions.ServiceUnavailable):
+
     """Request to DCNM failed."""
 
-    message = "Request to DCNM failed: %(reason)s."
+    message = _("Request to DCNM failed: %(reason)s.")
 
 
 class DfaAgentFailed(exceptions.ServiceUnavailable):
-    """    """
 
-    message = "Openstck is not running: %(reason)s."
+    """Failure in running DfaAgent."""
+
+    message = _("Openstck is not running: %(reason)s.")

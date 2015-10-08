@@ -16,9 +16,9 @@
 
 
 # RPC message type exchange between server and agent.
-VM_INFO        = 1000
+VM_INFO = 1000
 UPDATE_IP_RULE = 1001
-UPLINK_NAME    = 1002
+UPLINK_NAME = 1002
 
 
 # RPC queue name on agent side.
@@ -26,6 +26,7 @@ DFA_AGENT_QUEUE = 'dfa_agent'
 
 # RPC queue name on server side.
 DFA_SERVER_QUEUE = 'dfa_server_q'
+DFA_EXCHANGE = 'dfa'
 
 RESULT_FAIL = 'FAIL'
 RESULT_SUCCESS = 'SUCCESS'
@@ -62,4 +63,3 @@ UPLINK_DOWN_THRES = 2
 
 Q_UPL_PRIO = 1
 Q_VM_PRIO = 2
-

@@ -34,10 +34,11 @@ class DfaRpcClient(object):
 
     """RPC Client class for DFA enabler."""
 
-    def __init__(self, transport_url, topic):
+    def __init__(self, transport_url, topic, exchange=None, fanout=False):
         super(DfaRpcClient, self).__init__()
         transport = messaging.get_transport(cfg.CONF, url=transport_url)
-        target = messaging.Target(topic=topic)
+        target = messaging.Target(exchange=exchange,
+                                  topic=topic, fanout=fanout)
         self._client = messaging.RPCClient(transport, target)
 
     def make_msg(self, method, context, **kwargs):
@@ -62,16 +63,18 @@ class DfaRpcServer(object):
 
     """RPC server class for DFA enabler."""
 
-    def __init__(self, topic, server, endpoints, fanout=False,
-                 executor='eventlet'):
+    def __init__(self, topic, server, url, endpoints, exchange=None,
+                 fanout=False, executor='eventlet'):
         super(DfaRpcServer, self).__init__()
-        transport = messaging.get_transport(cfg.CONF)
-        target = messaging.Target(topic=topic, server=server, fanout=fanout)
-        endpoints=[endpoints]
+        transport = messaging.get_transport(cfg.CONF, url=url)
+        target = messaging.Target(exchange=exchange, topic=topic,
+                                  server=server, fanout=fanout)
+        endpoints = [endpoints]
         self._server = messaging.get_rpc_server(transport, target, endpoints,
                                                 executor=executor)
         LOG.debug('RPC server: topic=%s, server=%s, endpoints=%s' % (
-                   topic, server, endpoints))
+            topic, server, endpoints))
+
     def start(self):
         if self._server:
             self._server.start()
@@ -82,6 +85,7 @@ class DfaRpcServer(object):
 
     def stop(self):
         pass
+
 
 class DfaNotificationEndpoints(object):
 
@@ -98,10 +102,12 @@ class DfaNotifcationListener(object):
 
     """RPC Client class for DFA enabler."""
 
-    def __init__(self, topic, endpoints):
+    def __init__(self, topic, url, endpoints, exchange=None, fanout=False):
         super(DfaNotifcationListener, self).__init__()
-        transport = messaging.get_transport(cfg.CONF)
-        targets = [messaging.Target(topic=topic)]
+        transport = messaging.get_transport(cfg.CONF, url=url)
+        targets = [messaging.Target(exchange=exchange,
+                                    fanout=fanout,
+                                    topic=topic)]
         endpoints = [endpoints]
         self._listener = messaging.get_notification_listener(transport,
                                                              targets,
