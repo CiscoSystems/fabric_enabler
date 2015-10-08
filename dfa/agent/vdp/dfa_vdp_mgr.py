@@ -18,6 +18,8 @@
 import json
 import Queue
 import time
+
+from dfa.common import config
 from dfa.common import utils
 from dfa.agent.vdp import ovs_vdp
 from dfa.agent.topo_disc import topo_disc
@@ -141,8 +143,26 @@ class VdpMgr(object):
         self.process_uplink_ongoing = False
         self.uplink_down_cnt = 0
         self.is_os_run = False
+        self._cfg = config.CiscoDFAConfig().cfg
+        self.static_uplink = False
+        self.static_uplink_port = None
+        self.static_uplink_first = True
+        self.read_static_uplink()
         self.start()
         self.topo_disc = topo_disc.TopoDisc(self.topo_disc_cb, root_helper)
+
+    def read_static_uplink(self):
+        ''' Read the static uplink from file, if given '''
+        cnt = 0
+        if self._cfg.general.node is None:
+            return
+        for node in self._cfg.general.node.split(','):
+            if node.strip() == self.host:
+                self.static_uplink = True
+                self.static_uplink_port = self._cfg.general.node_uplink.\
+                    split(',')[cnt].strip()
+                return
+            cnt = cnt + 1
 
     def topo_disc_cb(self, intf, topo_disc_obj):
         return self.save_topo_disc_params(intf, topo_disc_obj)
@@ -317,6 +337,18 @@ class VdpMgr(object):
         except rpc.MessagingTimeout:
             LOG.error("RPC timeout: Failed to send topo disc on the server")
 
+    def static_uplink_detect(self, veth):
+        ''' Return the static uplink based on argument passed '''
+        if self.static_uplink_first:
+            self.static_uplink_first = False
+            if self.phy_uplink is not None and (
+               self.phy_uplink != self.static_uplink_port):
+                return 'down'
+        if veth is None:
+            return self.static_uplink_port
+        else:
+            return 'normal'
+
     def vdp_uplink_proc(self):
         '''
         -> restart_uplink_called: should be called by agent initially to set
@@ -353,14 +385,18 @@ class VdpMgr(object):
                 if self.veth_intf is None:
                     LOG.error("Incorrect state, Bug")
                     return
-        ret = uplink_det.detect_uplink(self.veth_intf)
+        if self.static_uplink:
+            ret = self.static_uplink_detect(self.veth_intf)
+        else:
+            ret = uplink_det.detect_uplink(self.veth_intf)
         if ret is 'down':
             if self.phy_uplink is None:
                 LOG.error("Wrong status down")
                 return
             # Call API to set the uplink as "" DOWN event
             self.uplink_down_cnt = self.uplink_down_cnt + 1
-            if self.uplink_down_cnt < constants.UPLINK_DOWN_THRES:
+            if not self.static_uplink and (
+               self.uplink_down_cnt < constants.UPLINK_DOWN_THRES):
                 return
             self.process_uplink_ongoing = True
             upl_msg = VdpQueMsg(constants.UPLINK_MSG_TYPE,
