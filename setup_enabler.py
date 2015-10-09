@@ -66,7 +66,8 @@ class NexusFabricEnablerInstaller(object):
 
     def __init__(self, mysql_user, mysql_passwd, mysql_host):
         self.root_helper = '' if os.geteuid() == 0 else 'sudo '
-        self.src_dir = 'openstack_fabric_enabler'
+        self.src_dir = os.path.basename(
+            os.path.dirname(os.path.realpath(__file__)))
         self.ssh_client_log = '%s/paramiko.log' % self.src_dir
         self.uplink_file = "uplink"
         self.script_dir = '%s/dfa/scripts' % self.src_dir
@@ -399,11 +400,10 @@ if __name__ == '__main__':
     if user_answer.startswith('n'):
         sys.exit(1)
 
-    os.chdir("../")
-
     fabric_inst = NexusFabricEnablerInstaller(args.mysql_user,
                                               args.mysql_password,
                                               args.mysql_host)
+    os.chdir("../")
 
     if input_compute_name is None:
         # If no compute node is specified, enabler is installed on controller

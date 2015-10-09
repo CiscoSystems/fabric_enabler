@@ -115,7 +115,7 @@ Make sure your OpenStack installation is running correctly based on required
 setting discussed in the sections above.
 
 4.1 On the control node in the OpenStack installation, get the source file:
-git clone https://github.com/CiscoSystems/fabric_enabler openstack_fabric_enabler
+git -b post_rel_1_0_0 clone https://github.com/CiscoSystems/fabric_enabler
 
 4.2 cd ~/openstack_fabric_enabler
 
