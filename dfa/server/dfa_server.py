@@ -247,7 +247,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         dcnm_ip = cfg.dcnm.dcnm_ip
         dcnm_amqp_user = cfg.dcnm.dcnm_amqp_user
         dcnm_password = cfg.dcnm.dcnm_password
-        self.dcnm_dhcp = (cfg.dcnm.dcnm_dhcp.lower() == 'true')
+        self.dcnm_dhcp = cfg.dcnm.dcnm_dhcp
 
         self.dcnm_client = cdr.DFARESTClient(cfg)
 

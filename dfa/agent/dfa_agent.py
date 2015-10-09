@@ -97,7 +97,7 @@ class DfaAgent(object):
         # Initialize iptables driver. This will be used to update the ip
         # rules in iptables, after launching an instance.
 
-        if (self._cfg.dcnm.dcnm_dhcp.lower() == 'true'):
+        if self._cfg.dcnm.dcnm_dhcp:
             self._iptd = iptd.IptablesDriver(self._cfg)
         else:
             self._iptd = None
