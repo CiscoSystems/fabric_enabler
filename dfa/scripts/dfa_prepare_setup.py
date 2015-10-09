@@ -1,5 +1,4 @@
-#!/usr/bin/python
-# Copyright 2014 Cisco Systems, Inc.
+# Copyright 2015 Cisco Systems, Inc.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -14,43 +13,110 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-# @author: Nader Lahouti, Cisco Systems, Inc.
 
+
+from __future__ import print_function
 
 import ConfigParser
-import commands
-import sys
 import optparse
 import os
+import platform
 import re
+import shlex
+import subprocess as subp
+import sys
 
-CONF_TMP_FILE = '%s_conf.new'
+
 NEUTRON = 'neutron'
 KEYSTONE = 'keystone'
 
 conf_file_list = [
     'keystone.conf',
-    'keystone.conf.sample',
     'neutron.conf'
 ]
-default_path = '/opt/stack,/etc/neutron,/etc/keystone'
-dfa_cfg_file = '/etc/enabler_conf.ini'
+default_path = '/etc/neutron,/etc/keystone'
+dfa_cfg_file = 'enabler_conf.ini'
+mysqlcnf = '.my.cnf'
+
+dfa_neutron_option_list = [
+    {'section': 'DEFAULT',
+     'option': 'rpc_backend',
+     'value': 'rabbit',
+     'is_list': False},
+    {'section': 'DEFAULT',
+     'option': 'notification_driver',
+     'value': 'messaging',
+     'is_list': False},
+    {'section': 'DEFAULT',
+     'option': 'notification_topics',
+     'value': 'cisco_dfa_neutron_notify',
+     'is_list': True},
+]
+dfa_keystone_option_list = [
+    {'section': 'DEFAULT',
+     'option': 'rpc_backend',
+     'value': 'rabbit',
+     'is_list': False},
+    {'section': 'DEFAULT',
+     'option': 'notification_driver',
+     'value': 'messaging',
+     'is_list': False},
+    {'section': 'DEFAULT',
+     'option': 'notification_topics',
+     'value': 'cisco_dfa_keystone_notify',
+     'is_list': True},
+]
+
+service_options = {
+    'neutron': dfa_neutron_option_list,
+    'keystone': dfa_keystone_option_list,
+}
+
+
+dist_data = {
+    'ubuntu': {'init_dir': '/etc/init/',
+               'server_conf': 'fabric-enabler-server.conf',
+               'agent_conf': 'fabric-enabler-agent.conf'},
+    'centos': {'init_dir': '/usr/lib/systemd/system/',
+               'server_conf': 'fabric-enabler-server.service',
+               'agent_conf': 'fabric-enabler-agent.service'},
+    'redhat': {'init_dir': '/usr/lib/systemd/system/',
+               'server_conf': 'fabric-enabler-server.service',
+               'agent_conf': 'fabric-enabler-agent.service'},
+}
+
+
+def get_cmd_output(cmd):
+    final_cmd = shlex.split(cmd)
+    try:
+        output = subp.check_output(final_cmd)
+    except subp.CalledProcessError as exc:
+        print("Error running %s: error: %s, output: %s" % (
+              cmd, exc.returncode, exc.output))
+        sys.exit(0)
+    except Exception as exc:
+        print("Exception %s running command %s" % (cmd, exc))
+        sys.exit(0)
+
+    return output
 
 
 def get_mysql_credentials(cfg_file):
-    """Get the creadentials and database name from options in config file."""
+    """Get the credentials and database name from options in config file."""
 
+    cfgfile = (os.path.dirname(os.path.dirname(os.path.abspath(__file__))) +
+               '/../' + cfg_file)
     try:
         parser = ConfigParser.ConfigParser()
-        cfg_fp = open(cfg_file)
+        cfg_fp = open(cfgfile)
         parser.readfp(cfg_fp)
         cfg_fp.close()
     except ConfigParser.NoOptionError:
         cfg_fp.close()
-        print 'Failed to find mysql connections credentials.'
+        print('Failed to find mysql connections credentials.')
         sys.exit(1)
     except IOError:
-        print 'ERROR: Cannot open %s.' % cfg_file
+        print('ERROR: Cannot open %s.', cfg_file)
         sys.exit(1)
 
     value = parser.get('dfa_mysql', 'connection')
@@ -68,99 +134,141 @@ def get_mysql_credentials(cfg_file):
         indices = [sobj.start(1), sobj.start(2), sobj.start(3), sobj.start(4)]
 
         # Get the credentials
-        cred = value[indices[0]+3:indices[1]].split(':')
+        cred = value[indices[0] + 3:indices[1]].split(':')
 
         # Get the host name
-        host = value[indices[1]+1:indices[2]]
+        host = value[indices[1] + 1:indices[2]]
 
         # Get the database name
-        db_name = value[indices[2]+1:indices[3]]
+        db_name = value[indices[2] + 1:indices[3]]
 
         # Get the character encoding
-        charset = value[indices[3]+1:].split('=')[1]
+        charset = value[indices[3] + 1:].split('=')[1]
 
         return cred[0], cred[1], host, db_name, charset
     except (ValueError, IndexError, AttributeError):
-        print 'Failed to find mysql connections credentials.'
+        print('Failed to find mysql connections credentials.')
         sys.exit(1)
 
 
 def modify_conf(cfgfile, service_name, outfn):
+    """Modify config file neutron and keystone to include enabler options."""
 
-    """Modify these lines in  config file for:
-    1. /opt/stack/neutron/etc/neutron.conf
-    2. /etc/neutron/neutron.conf
-    3. /etc/keystone/keyston.conf
-    4. /opt/stack/keystone/etc/keystone.conf.sample
+    if not cfgfile or not outfn:
+        print('ERROR: There is no config file.')
+        sys.exit(0)
 
-    rpc_backend = rabbit
-    notification_topics = cisco_dfa_neutron_notify
-    notification_driver = messaging
+    options = service_options[service_name]
+    with open(cfgfile, 'r') as cf:
+        lines = cf.readlines()
 
-    rpc_backend = rabbit
-    notification_topics = cisco_dfa_keystone_notify
-    notification_driver = messaging
-    """
-    fn = open(outfn, 'w')
-    notify_val = 'cisco_dfa_%s_notify' % service_name
-    notify_drvr = 'messaging'
-    if cfgfile:
-        with open(cfgfile, 'r') as cf:
-            lines = cf.readlines()
-            for line in lines:
-                line = line.strip('\n')
-                newline = line
-                opt = line.partition('=')
-                if opt[1] == '=':
-                    if line.startswith('#rpc_backend'):
-                        newline = 'rpc_backend = rabbit'
-                    elif line.startswith('#notification_driver'):
-                        newline = 'notification_driver = ' + notify_drvr
-                    elif 'notification_topics' in line:
-                        if opt[0].startswith('#notification_topics'):
-                            newline = 'notification_topics = ' + notify_val
-                        elif opt[0].startswith('notification_topics'):
-                            if notify_val not in opt[2]:
-                                newline = opt[0] + ' = ' + (
-                                    (opt[2] + ',' + notify_val)
-                                    if opt[2].strip(' ') else notify_val)
+    for opt in options:
+        op = opt.get('option')
+        res = [line for line in lines if line.startswith(op)]
+        if len(res) > 1:
+            print('ERROR: There are more than one %s option.' % res)
+            sys.exit(0)
+        if res:
+            (op, sep, val) = (res[0].strip('\n').replace(' ', '').
+                              partition('='))
+            new_val = None
+            if opt.get('is_list'):
+                # Value for this option can contain list of values.
+                # Append the value if it does not exist.
+                if not any(opt.get('value') == value for value in
+                           val.split(',')):
+                    new_val = ','.join((val, opt.get('value')))
+            else:
+                if val != opt.get('value'):
+                    new_val = opt.get('value')
+            if new_val:
+                opt_idx = lines.index(res[0])
+                # The setting is different, replace it with new one.
+                lines.pop(opt_idx)
+                lines.insert(opt_idx, '='.join((opt.get('option'),
+                             new_val + '\n')))
+        else:
+            # Option does not exist. Add the option.
+            try:
+                sec_idx = lines.index('[' + opt.get('section') + ']\n')
+                lines.insert(sec_idx + 1, '='.join(
+                    (opt.get('option'), opt.get('value') + '\n')))
+            except ValueError:
+                print('Invalid %s section name.' % opt.get('section'))
+                sys.exit(0)
 
-                fn.write(newline + '\n')
+    with open(outfn, 'w') as fwp:
+        all_lines = ''
+        for line in lines:
+            all_lines += line
 
-        fn.close()
+        fwp.write(all_lines)
 
 
-def prepare_db():
+def prepare_db(mysql_user, mysql_pass, mysql_host):
 
     (user, password, host, db, charset) = get_mysql_credentials(dfa_cfg_file)
 
     # Modify max_connections, if it is not 2000
-    logincmd = ("mysql -u%(user)s -p%(password)s -h%(host)s -e '" % (
-        {'user': user, 'password': password, 'host': host}))
-    conn_cmd = 'show variables like "' + 'max_connections";' + "'"
-    out = commands.getoutput(logincmd + conn_cmd)
+    mysql_cmd = ('mysql -u%s -p%s -h%s ') % (
+        mysql_user, mysql_pass, mysql_host)
+    get_var_cmd = (mysql_cmd +
+                   '-e "show variables like \'max_connections\';"')
+    out = get_cmd_output(get_var_cmd)
     try:
         val = int(out.split('\n')[1].split('\t')[1])
-    except:
-        print 'Invalid value: Cannot get max_connections from DB.'
+    except Exception:
+        print('Invalid value: Cannot get max_connections from DB.')
         sys.exit(0)
 
+    print('max_connections for mysql = %s' % val)
     if val < 2000:
         # Set max_connections to 2000 if it is not.
-        conn_cmd = 'set global max_connections = 2000' + "'"
-        out = commands.getoutput(logincmd + conn_cmd)
+        set_conn_cmd = (mysql_cmd +
+                        '-e "set global max_connections = 2000;"')
+        out = get_cmd_output(set_conn_cmd)
+        print(out)
 
     # Create database if it not existed.
-    create_cmd = ('mysql -u%(user)s -p%(password)s -h%(host)s '
+    create_cmd = (mysql_cmd +
                   '-e "CREATE DATABASE IF NOT EXISTS %(db)s '
                   'CHARACTER SET %(charset)s;"' % (
                       {'user': user, 'password': password, 'host': host,
                        'db': db, 'charset': charset}))
-    out = commands.getoutput(create_cmd)
-    print out
+    out = get_cmd_output(create_cmd)
+    print(out)
+
+    # Create user for enabler if it does not exist.
+    check_user_cmd = (mysql_cmd + '-e '
+                      '"SELECT EXISTS(SELECT DISTINCT user FROM mysql.user'
+                      ' WHERE user=\'%s\' AND host=\'%s\')as user;"' % (
+                          user, host))
+    out = get_cmd_output(check_user_cmd)
+    if int(out.split()[1]) == 0:
+        # User does not exist. Create new one.
+        create_user_cmd = (mysql_cmd + '-e '
+                           '"CREATE USER \'%(user)s\'@\'%(host)s\''
+                           'IDENTIFIED BY \'%(pwd)s\';"' % {
+                               'user': user, 'host': host, 'pwd': password})
+        out = get_cmd_output(create_user_cmd)
+        if 'ERROR' in out:
+            print('Failed to create %(user)s in MySQL.\n%(reason)s') % (
+                {'user': user, 'reason': out})
+            sys.exit(0)
+
+    # Grant permission to the user.
+    grant_perm_cmd = (mysql_cmd + "-e "
+                      "\"GRANT  ALL PRIVILEGES ON *.* TO "
+                      "'%(user)s'@'%(host)s';\"") % (
+                          {'user': user, 'host': host})
+    out = get_cmd_output(grant_perm_cmd)
+    if 'ERROR' in out:
+        print('Failed to grant permission to %(user)s.\n%(reason)s') % (
+            {'user': user, 'reason': out})
+        sys.exit(0)
 
 
-def find_conf_and_modify(os_path):
+def find_conf_and_modify(os_path, root_helper):
 
     # Search for the config files in the path
     for path in os_path.split(','):
@@ -174,62 +282,102 @@ def find_conf_and_modify(os_path):
 
                     # Keep the existing in .orig and copy the .modified
                     # to the exisiting one.
-                    cmd = 'cp %s %s.orig' % (fname, fname)
-                    print cmd
-                    commands.getoutput(cmd)
-                    cmd = 'cp %s.modified %s' % (fname, fname)
-                    print cmd
-                    commands.getoutput(cmd)
+                    cmd = root_helper + 'cp %s %s.orig' % (fname, fname)
+                    print(cmd)
+                    get_cmd_output(cmd)
+                    cmd = root_helper + 'cp %s.modified %s' % (fname, fname)
+                    print(cmd)
+                    get_cmd_output(cmd)
 
 
-def copy_init_conf_files(node):
+def copy_init_conf_files(node, root_helper):
 
-    # TODO get the path from input arguments.
-    # copy fabric_enabler_server.conf and fabric_enabler_agent.conf
-    # to /etc/init.
-    path = 'openstack_fabric_enabler/dfa/scripts/'
+    # Copy fabric-enabler-server and fabric-enabler-agent
+    # to init directory based on Linux distribution.
+    path = (os.path.dirname(os.path.dirname(os.path.abspath(__file__))) +
+            '/scripts/')
+    dist = platform.dist()[0].lower()
+    if dist not in dist_data:
+        print('This %s Linux distribution is not supported.') % dist
+        sys.exit(1)
+
+    init_dir = dist_data[dist].get('init_dir')
+    conf_fn = None
     if node == 'control':
-        conf_fn = 'fabric_enabler_server.conf'
-    else:
-        conf_fn = 'fabric_enabler_agent.conf'
-        uplink_script = 'openstack_fabric_enabler/dfa/agent/detect_uplink.sh'
-        cmd2 = 'sudo cp %s /usr/local/bin' % uplink_script
-        print cmd2
-        commands.getoutput(cmd2)
-    cmd = 'sudo cp %s /etc/init' % (path + conf_fn)
-    print cmd
-    commands.getoutput(cmd)
+        conf_fn = dist_data[dist].get('server_conf')
+    if node == 'compute':
+        conf_fn = dist_data[dist].get('agent_conf')
+
+    if conf_fn is not None:
+        cmd = root_helper + 'cp %s %s' % ((path + conf_fn), init_dir)
+        print(cmd)
+        get_cmd_output(cmd)
+        if dist == 'centos' or dist == 'redhat':
+            cmd3 = root_helper + 'systemctl enable %s' % conf_fn
+            print(cmd3)
+            get_cmd_output(cmd3)
 
 
-def copy_dfa_cfg():
+def get_mysql_cred():
 
-    # TODO get the path from input arguments.
-    path = 'openstack_fabric_enabler/'
-    dfa_cfg = 'enabler_conf.ini'
+    mysql_user = None
+    mysql_password = None
+    mysql_host = None
+    mysqlconf = os.path.join(os.path.expanduser('~'), mysqlcnf)
+    if os.path.exists(mysqlconf) is True:
+        config = ConfigParser.ConfigParser()
+        config.read(mysqlconf)
+        try:
+            mysql_user = config.get("client", "user")
+            mysql_password = config.get("client", "password")
+            mysql_host = 'localhost'
+        except:
+            print('Cannot find %s' % mysqlconf)
 
-    cmd = 'sudo cp %s /etc/' % (path + dfa_cfg)
-    print cmd
-    commands.getoutput(cmd)
+    return mysql_user, mysql_password, mysql_host
 
 
 usage = ('\n'
          'python dfa_prepare_setup.py --dir-path filepath1[,filepath2,...]'
-         '[control | compute]\n')
+         '--node-function [control | compute]\n')
 
 if __name__ == '__main__':
+
+    root_helper = ''
+    if os.geteuid() != 0:
+        # This is not root
+        root_helper = 'sudo '
+    mysqluser, mysqlpass, mysqlhost = get_mysql_cred()
 
     parser = optparse.OptionParser(usage=usage)
 
     parser.add_option('--dir-path',
                       type='string', dest='dir_path', default=default_path,
                       help='Path to neutron.conf and keystone.conf files')
+    parser.add_option('--node-function',
+                      type='string', dest='node_function', default='control',
+                      help='Choose the node runs as controller or compute.')
+    parser.add_option('--mysql-user',
+                      type='string', dest='mysql_user', default=mysqluser,
+                      help='MySQL user name (only for a controller node.')
+    parser.add_option('--mysql-host',
+                      type='string', dest='mysql_host', default=mysqlhost,
+                      help='MySQL host name or IP address'
+                      '(only for a controller node.')
+    parser.add_option('--mysql-password',
+                      type='string', dest='mysql_pass', default=mysqlpass,
+                      help='MySQL password (only for a controller node.')
     (options, args) = parser.parse_args()
 
-    copy_dfa_cfg()
-    node = 'compute'
-    if 'control' in args:
-        find_conf_and_modify(options.dir_path)
-        prepare_db()
-        node = 'control'
+    node = options.node_function.lower()
+    if node == 'control':
+        if options.mysql_pass is None or options.mysql_host is None or (
+                options.mysql_user is None):
+            print("MySQL credentials must be provided when setting up "
+                  "a controller node.\nUse --help for more help.")
+            sys.exit(1)
 
-    copy_init_conf_files(node)
+        find_conf_and_modify(options.dir_path.lower(), root_helper)
+        prepare_db(options.mysql_user, options.mysql_pass, options.mysql_host)
+
+    copy_init_conf_files(node, root_helper)

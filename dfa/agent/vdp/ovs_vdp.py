@@ -20,48 +20,50 @@ VDP is a part of LLDP Agent Daemon (lldpad). For more information on VDP,
 pls visit http://www.ieee802.org/1/pages/802.1bg.html
 """
 
-import sys
-
 from dfa.common import dfa_sys_lib as ovs_lib
 from neutron.agent.linux import ip_lib
 from dfa.agent.vdp import lldpad
-from dfa.common import dfa_sys_lib as utils
 from dfa.common import constants as cconstants
 from dfa.agent.vdp import vdp_constants as constants
 from dfa.common import dfa_exceptions as dfae
 from dfa.common import dfa_logger as logging
+from dfa.common import utils as sys_utils
 
 LOG = logging.getLogger(__name__)
 
 
 def is_uplink_already_added(root_helper, br_ex, port_name):
-    br, port_exist = utils.port_exists_glob(root_helper, port_name)
+    br, port_exist = ovs_lib.port_exists_glob(root_helper, port_name)
     if not port_exist:
         return False
     else:
         if br == br_ex:
             return True
         else:
-            LOG.error("Port %s added to wrong bridge %s Given %s" % 
-                      (port_name, br, br_ex))
+            LOG.error("Port %(port)s added to wrong bridge %(br)s "
+                      "Given %(br_ex)s",
+                      {'port': port_name, 'br': br, 'br_ex': br_ex})
             return False
+
 
 def delete_uplink_and_flows(root_helper, br_ex, port_name):
     glob_delete_vdp_flows(br_ex, root_helper)
     port_exist = is_uplink_already_added(root_helper, br_ex, port_name)
     if port_exist:
-        utils.delete_port_glob(root_helper, br_ex, port_name)
+        ovs_lib.delete_port_glob(root_helper, br_ex, port_name)
         lldp_ovs_veth_str = constants.LLDPAD_OVS_VETH_PORT + port_name
-        utils.delete_port_glob(root_helper, br_ex, lldp_ovs_veth_str)
+        ovs_lib.delete_port_glob(root_helper, br_ex, lldp_ovs_veth_str)
+
 
 def glob_delete_vdp_flows(br_ex, root_helper):
     br = ovs_lib.OVSBridge(br_ex, root_helper=root_helper)
     br.delete_flows(dl_dst=constants.NCB_DMAC, dl_type=constants.LLDP_ETYPE)
     br.delete_flows(dl_dst=constants.NCB_DMAC, dl_type=constants.LLDP_ETYPE)
-    br.delete_flows(dl_dst=constants.NCB_DMAC, 
+    br.delete_flows(dl_dst=constants.NCB_DMAC,
                     dl_type=constants.VDP22_ETYPE)
     br.delete_flows(dl_dst=constants.NCB_DMAC,
                     dl_type=constants.VDP22_ETYPE)
+
 
 def is_bridge_present(br, root_helper):
     ovs_bridges = ovs_lib.get_bridges(root_helper)
@@ -70,15 +72,74 @@ def is_bridge_present(br, root_helper):
     else:
         return False
 
-class LocalVlan:
+
+class LocalVlan():
+
     def __init__(self, vlan, segmentation_id):
         self.vlan = vlan
         self.segmentation_id = segmentation_id
         self.late_binding_vlan = 0
+        self.lvid = cconstants.INVALID_VLAN
         self.port_uuid_list = {}
+        # Generally for the same network, there will be only one VDP VLAN
+        # However, Inconsistencies can arise. This dictionary is to keep track
+        # of all VLAN's floating around for different vNIC's of the same
+        # network.
+        self.port_vdp_vlan_dict = {}
+
+    def set_port_uuid(self, port_uuid, vdp_vlan):
+        if port_uuid not in self.port_uuid_list:
+            port_vlan_set = [port_uuid, vdp_vlan]
+            self.port_uuid_list[port_uuid] = port_vlan_set
+            self.set_port_vlan(vdp_vlan)
+
+    def get_portid_vlan(self, port_id):
+        return self.port_uuid_list[port_id][1]
+
+    def set_portid_vlan(self, port_id, new_vlan):
+        self.port_uuid_list[port_id][1] = new_vlan
+
+    def set_port_vlan(self, vdp_vlan):
+        if not ovs_lib.is_valid_vlan_tag(vdp_vlan):
+            LOG.debug("Passed Invalid vlan")
+            return
+        if vdp_vlan not in self.port_vdp_vlan_dict:
+            self.port_vdp_vlan_dict[vdp_vlan] = 0
+        self.port_vdp_vlan_dict[vdp_vlan] += 1
+
+    def reset_port_vlan(self, vdp_vlan):
+        if not ovs_lib.is_valid_vlan_tag(vdp_vlan):
+            LOG.debug("Passed Invalid vlan")
+            return
+        if vdp_vlan not in self.port_vdp_vlan_dict:
+            LOG.error("wrongly called, no VLAN's present")
+            self.port_vdp_vlan_dict[vdp_vlan] = 0
+        else:
+            self.port_vdp_vlan_dict[vdp_vlan] -= 1
+            if not self.port_vdp_vlan_dict[vdp_vlan]:
+                del self.port_vdp_vlan_dict[vdp_vlan]
+
+    def decr_reset_vlan(self, port_uuid, new_vlan):
+        vlan = self.get_portid_vlan(port_uuid)
+        self.reset_port_vlan(vlan)
+        self.set_portid_vlan(port_uuid, new_vlan)
+        self.set_port_vlan(new_vlan)
+
+    def any_valid_vlan(self):
+        if not len(self.port_vdp_vlan_dict):
+            return False
+        else:
+            return True
+
+    def any_consistent_vlan(self):
+        if len(self.port_vdp_vlan_dict) != 1:
+            return False
+        else:
+            return self.port_vdp_vlan_dict.keys()[0]
 
 
 class OVSNeutronVdp(object):
+
     '''Implements the VDP specific changes in OVS
 
     Creating the veth pairs, programming the flows for VDP, deleting the VDP
@@ -88,7 +149,7 @@ class OVSNeutronVdp(object):
 
     def __init__(self, uplink, integ_br, ext_br, root_helper,
                  vdp_mode=constants.VDP_SEGMENT_MODE):
-        #self.root_helper = 'sudo'
+        # self.root_helper = 'sudo'
         self.root_helper = root_helper
         self.uplink = uplink
         self.integ_br = integ_br
@@ -97,6 +158,13 @@ class OVSNeutronVdp(object):
         self.local_vlan_map = {}
         self.lldpad_info = {}
         self.lldp_veth_port = None
+        self.ovs_vdp_lock = sys_utils.lock()
+        self.phy_peer_port_num = cconstants.INVALID_OFPORT
+        self.int_peer_port_num = cconstants.INVALID_OFPORT
+        self.int_peer_port = None
+        self.phy_peer_port = None
+        self.ext_br_obj = None
+        self.integ_br_obj = None
         self.setup_lldpad = self.setup_lldpad_ports()
 
     def is_lldpad_setup_done(self):
@@ -120,16 +188,14 @@ class OVSNeutronVdp(object):
 
     def delete_vdp_flows(self):
         br = self.ext_br_obj
-        br.delete_flows(dl_dst=constants.NCB_DMAC, dl_type=constants.LLDP_ETYPE)
-        br.delete_flows(dl_dst=constants.NCB_DMAC, dl_type=constants.LLDP_ETYPE)
-        br.delete_flows(dl_dst=constants.NCB_DMAC, 
-                        dl_type=constants.VDP22_ETYPE)
+        br.delete_flows(dl_dst=constants.NCB_DMAC,
+                        dl_type=constants.LLDP_ETYPE)
         br.delete_flows(dl_dst=constants.NCB_DMAC,
                         dl_type=constants.VDP22_ETYPE)
 
     def clear_obj_params(self):
         LOG.debug("Clearing Uplink Params")
-        # How is the IP link/veth going to be removed?? TODO
+        # How is the IP link/veth going to be removed?? fixme(padkrish)
         # IF the veth is removed, no need to unconfigure lldp/evb
         self.delete_vdp_flows()
         lldp_ovs_veth_str = constants.LLDPAD_OVS_VETH_PORT + self.uplink
@@ -137,13 +203,48 @@ class OVSNeutronVdp(object):
         br.delete_port(lldp_ovs_veth_str)
         br.delete_port(self.uplink)
         self.lldpad_info.clear_uplink()
-        del(self.lldpad_info)
+        del self.lldpad_info
         # It's ok if the veth remains even if the uplink changes, worst case
         # the number of veth's will be the number of physical server ports.
         # It's not a common occurrence for uplink to change, even if so
         # the unused veth can be removed manually.
         # Reason for not removing it is the same as given in function below.
-        #ip_lib.IPDevice(lldp_ovs_veth_str, self.root_helper).link.delete()
+        # ip_lib.IPDevice(lldp_ovs_veth_str, self.root_helper).link.delete()
+
+    def program_vm_ovs_flows(self, lvid, old_vlan, new_vlan):
+        if old_vlan:
+            # outbound
+            self.ext_br_obj.delete_flows(in_port=self.phy_peer_port_num,
+                                         dl_vlan=lvid)
+            # inbound
+            self.integ_br_obj.delete_flows(in_port=self.int_peer_port_num,
+                                           dl_vlan=old_vlan)
+        if new_vlan:
+            # outbound
+            self.ext_br_obj.add_flow(priority=4,
+                                     in_port=self.phy_peer_port_num,
+                                     dl_vlan=lvid,
+                                     actions="mod_vlan_vid:%s,normal" %
+                                             new_vlan)
+            # inbound
+            self.integ_br_obj.add_flow(priority=3,
+                                       in_port=self.int_peer_port_num,
+                                       dl_vlan=new_vlan,
+                                       actions="mod_vlan_vid:%s,normal" % lvid)
+
+    def gen_veth_str(self, const_str, intf_str):
+        '''Generate a veth string
+
+        Concatenates the constant string with remaining available length
+        of interface string from trailing position
+        '''
+        avl_len = constants.MAX_VETH_NAME - len(const_str)
+        if avl_len <= 0:
+            LOG.error("veth string name too short")
+            raise dfae.DfaAgentFailed(reason="Veth Unavailable")
+        start_pos = len(intf_str) - avl_len
+        veth_str = const_str + intf_str[start_pos:]
+        return veth_str
 
     def setup_lldpad_ports(self):
         '''Setup the flows for passing LLDP/VDP frames in OVS.'''
@@ -152,43 +253,52 @@ class OVSNeutronVdp(object):
         ovs_bridges = ovs_lib.get_bridges(self.root_helper)
         if self.ext_br not in ovs_bridges or self.integ_br not in ovs_bridges:
             LOG.error("Integ or Physical Bridge not configured by Openstack")
-            raise (dfae.DfaAgentFailed(reason="Bridge Unavailable"))
+            raise dfae.DfaAgentFailed(reason="Bridge Unavailable")
         br = ovs_lib.OVSBridge(self.ext_br, root_helper=self.root_helper)
         self.ext_br_obj = br
         int_br = ovs_lib.OVSBridge(self.integ_br, root_helper=self.root_helper)
         self.integ_br_obj = int_br
 
-        self.phy_peer_port, self.int_peer_port = self.find_interconnect_ports();
+        self.phy_peer_port, self.int_peer_port = self.find_interconnect_ports()
         if self.phy_peer_port is None or self.int_peer_port is None:
             LOG.error("Integ or Physical Patch/Veth Ports not configured by "
                       "Openstack")
-            raise (dfae.DfaAgentFailed(reason="Ports Unconfigured"))
+            raise dfae.DfaAgentFailed(reason="Ports Unconfigured")
 
         lldp_ovs_veth_str = constants.LLDPAD_OVS_VETH_PORT + self.uplink
+        if len(lldp_ovs_veth_str) > constants.MAX_VETH_NAME:
+            lldp_ovs_veth_str = self.gen_veth_str(
+                constants.LLDPAD_OVS_VETH_PORT,
+                self.uplink)
         lldp_loc_veth_str = constants.LLDPAD_LOC_VETH_PORT + self.uplink
+        if len(lldp_loc_veth_str) > constants.MAX_VETH_NAME:
+            lldp_loc_veth_str = self.gen_veth_str(
+                constants.LLDPAD_LOC_VETH_PORT,
+                self.uplink)
         ip_wrapper = ip_lib.IPWrapper(self.root_helper)
         self.delete_vdp_flows()
         br.delete_port(lldp_ovs_veth_str)
         if ip_lib.device_exists(lldp_ovs_veth_str, self.root_helper):
-            # What about OVS restart cases TODO(padkrish)
+            # What about OVS restart cases fixme(padkrish)
 
             # IMPORTANT.. The link delete should be done only for non-restart
             # cases. Otherwise, The MAC address of the veth interface changes
             # for every delete/create. So, if lldpad has the association sent
             # already, retriggering it will make the ASSOC appear as coming
             # from another station and more than one VSI instance will appear
-            # at the Leaf. Deleting the assoc and creating the assoc for new 
-            # veth is not optimal. TODO(padkrish)
-            #ip_lib.IPDevice(lldp_ovs_veth_str, self.root_helper).link.delete()
-            utils.execute(['/sbin/udevadm', 'settle', '--timeout=10'])
+            # at the Leaf. Deleting the assoc and creating the assoc for new
+            # veth is not optimal. fixme(padkrish)
+            # ip_lib.IPDevice(lldp_ovs_veth_str,self.root_helper).link.delete()
+            # This is commented below, sometimes doesn't work TODO
+            # ovs_lib.execute(['/sbin/udevadm', 'settle', '--timeout=10'])
             lldp_loc_veth = ip_wrapper.device(lldp_loc_veth_str)
             lldp_ovs_veth = ip_wrapper.device(lldp_ovs_veth_str)
         else:
-            # TODO(padkrish) Due to above reason, do the veth create below only
+            # fixme(padkrish) Due to above reason, do the vethcreate below only
             # if it doesn't exist and not deleted.
             lldp_loc_veth, lldp_ovs_veth = (
-                                        ip_wrapper.add_veth(lldp_loc_veth_str,
-                                        lldp_ovs_veth_str))
+                ip_wrapper.add_veth(lldp_loc_veth_str,
+                                    lldp_ovs_veth_str))
         if not br.port_exists(self.uplink):
             phy_port_num = br.add_port(self.uplink)
         else:
@@ -205,7 +315,7 @@ class OVSNeutronVdp(object):
             return False
         lldp_loc_veth.link.set_up()
         lldp_ovs_veth.link.set_up()
-        # What about OVS restart cases TODO(padkrish)
+        # What about OVS restart cases fixme(padkrish)
         self.program_vdp_flows(lldp_ovs_portnum, phy_port_num)
 
         self.phy_peer_port_num = br.get_port_ofport(self.phy_peer_port)
@@ -213,8 +323,8 @@ class OVSNeutronVdp(object):
         if self.phy_peer_port_num == cconstants.INVALID_OFPORT or\
            self.int_peer_port_num == cconstants.INVALID_OFPORT:
             LOG.error("int or phy peer OF Port not detected on Int or"
-                      "Phy Bridge %s %s" % (self.phy_peer_port_num,
-                      self.int_peer_port_num))
+                      "Phy Bridge %s %s" %
+                      (self.phy_peer_port_num, self.int_peer_port_num))
             return False
         self.lldpad_info = (lldpad.LldpadDriver(lldp_loc_veth_str, self.uplink,
                                                 self.root_helper))
@@ -231,7 +341,7 @@ class OVSNeutronVdp(object):
 
     def find_interconnect_ports(self):
         '''Find the internal veth or patch ports'''
-        
+
         phy_port_list = self.ext_br_obj.get_port_name_list()
         int_port_list = self.integ_br_obj.get_port_name_list()
         for port in phy_port_list:
@@ -242,7 +352,7 @@ class OVSNeutronVdp(object):
                 peer_port = ovs_lib.get_peer(self.root_helper, port)
                 if peer_port in int_port_list:
                     return port, peer_port
-        # A solution is needed for veth pairs also, TODO(padkrish)
+        # A solution is needed for veth pairs also, fixme(padkrish)
         # ip_wrapper.get_devices() returns all the devices
         # Pick the ones whose type is veth (?) and get the other pair
         # Combination of "ethtool -S xxx" command and "ip tool" command.
@@ -253,50 +363,103 @@ class OVSNeutronVdp(object):
         lvm = self.local_vlan_map.get(net_uuid)
         if lvm:
             vdp_vlan = lvm.late_binding_vlan
-            lldpad_port.send_vdp_vnic_down(port_uuid=port_uuid, vsiid=port_uuid,
+            lldpad_port.send_vdp_vnic_down(port_uuid=port_uuid,
+                                           vsiid=port_uuid,
                                            gid=segmentation_id,
                                            mac=mac, vlan=vdp_vlan, oui=oui)
             temp_port_uuid = lvm.port_uuid_list.pop(port_uuid, None)
+            lvm.reset_port_vlan(vdp_vlan)
+            # Check here that if all the VM's in that network has
+            # 0 as VLN (dis-assoc sent by switch, but flow not removed), then
+            # also remove the flow by calling unprovision. Do this after the
+            # pop instruction above.
+            # Check with the late binding vlan, if that still points to
+            # old_vlan, remove the flow and make late_binding_vlan as 0
+            # late_binding_vlan should reflect the VLAN that is installed
+            # for the flow.
             if not lvm.port_uuid_list:
                 self.unprovision_vdp_overlay_networks(net_uuid, lvm.lvid,
                                                       vdp_vlan, oui)
                 self.local_vlan_map.pop(net_uuid)
-                LOG.debug("Deleting flows")
+                LOG.debug("No valid ports, clearing flows")
+            else:
+                # There are ports present in the network case.
+                if not lvm.any_valid_vlan():
+                    # This condition will be hit when there are still ports
+                    # remaining in the network, but none of them have a valid
+                    # VLAN. i.e. Dis-assoc sent by switch for all ports except
+                    # one, vdp_vlan_change will not remove flows, since there's
+                    # a valid port left with a VLAN. Now, user removes the VM
+                    # with valid port. Now flow has to be deleted since
+                    # there's no valid port with a VLAN.
+                    self.unprovision_vdp_overlay_networks(net_uuid, lvm.lvid,
+                                                          vdp_vlan, oui)
+                    lvm.late_binding_vlan = 0
+                    LOG.debug("unprovisioned %s,%s VLAN since no VM has valid "
+                              "VLAN" % (lvm.lvid, vdp_vlan))
+                else:
+                    # There are still valid VLAN's present.
+                    # Say, out of 3 VM's one VM got a VLAN change due to which
+                    # the new flow will be programmed according to new vlan.
+                    # The VM with new VLAN gets deleted.
+                    # Say, for whatever reason, the other VM's in the 'same'
+                    # network didn't gets changed to new VLAN.
+                    # VLAN change function won't be called and so it will
+                    # be stranded with stale flow unless the below
+                    # functionality of putting back the old VLAN is there.
+                    vlan_other = lvm.any_consistent_vlan()
+                    if vlan_other and ovs_lib.is_valid_vlan_tag(vlan_other) \
+                       and vlan_other != lvm.late_binding_vlan:
+                        self.program_vm_ovs_flows(lvm.lvid, vdp_vlan,
+                                                  vlan_other)
+                        lvm.late_binding_vlan = vlan_other
+                        self.vdp_nego_req = True
+                        LOG.debug("Reprogrammed old Flows %s %s %s" %
+                                  (lvm.lvid, vdp_vlan, vlan_other))
         else:
-            #There's no logical change of this condition being hit
-            #So, not returning False here.
+            # There's no logical change of this condition being hit
+            # So, not returning False here.
             LOG.error("Local VLAN Map not available in port down")
         return True
 
     def port_up_segment_mode(self, lldpad_port, port_name, port_uuid, mac,
                              net_uuid, segmentation_id, oui):
+        # Check if there are any VM's like the below check.
+        # If there are, do a regular send and not provision.
+        # If all VM's do not have a unified Vlan, fill the VLAN as 0 and not
+        # as late_binding_vlan/vdp_vlan
+        # This late_binding_vlan should be 0 only if all VM's are dis-assoc
+        # by switch.
         lvm = self.local_vlan_map.get(net_uuid)
-        if lvm and lvm.late_binding_vlan:
+        if lvm and lvm.late_binding_vlan and (not lvm.vdp_nego_req):
             vdp_vlan = lvm.late_binding_vlan
             ovs_cb_data = {'obj': self, 'mac': mac,
                            'port_uuid': port_uuid, 'net_uuid': net_uuid}
-            lldpad_port.send_vdp_vnic_up(port_uuid=port_uuid, 
+            lldpad_port.send_vdp_vnic_up(port_uuid=port_uuid,
                                          vsiid=port_uuid, gid=segmentation_id,
                                          mac=mac, vlan=vdp_vlan, oui=oui,
                                          vsw_cb_fn=self.vdp_vlan_change,
                                          vsw_cb_data=ovs_cb_data)
-            lvm.port_uuid_list[port_uuid] = port_uuid
+            lvm.set_port_uuid(port_uuid, vdp_vlan)
             return True
         else:
             int_br = self.integ_br_obj
             lvid = int_br.get_port_vlan_tag(port_name)
             if lvid != cconstants.INVALID_VLAN:
-                ret, vdp_vlan = self.provision_vdp_overlay_networks(port_uuid,
-                                                               mac, net_uuid,
-                                                               segmentation_id,
-                                                               lvid, oui)
+                ret, vdp_vlan = self.provision_vdp_overlay_networks(
+                    port_uuid, mac, net_uuid, segmentation_id, lvid, oui)
                 if not lvm:
                     lvm = LocalVlan(lvid, segmentation_id)
                     self.local_vlan_map[net_uuid] = lvm
                 lvm.lvid = lvid
-                lvm.port_uuid_list[port_uuid] = port_uuid
+                # This is just populating the list of ports in a network.
+                # The vdp_vlan that's a part of port_list is just for debugging
+                # So, it's ok to populate the port UUID list even if VDP VLAN
+                # is invalid.
+                lvm.set_port_uuid(port_uuid, vdp_vlan)
                 if vdp_vlan != cconstants.INVALID_VLAN:
                     lvm.late_binding_vlan = vdp_vlan
+                    lvm.vdp_nego_req = False
                 else:
                     LOG.error("Cannot provision VDP overlay")
                 return ret
@@ -304,8 +467,8 @@ class OVSNeutronVdp(object):
                 LOG.error("Invalid VLAN")
                 return False
 
-    def send_vdp_port_event(self, port_uuid, mac, net_uuid,
-                            segmentation_id, status, oui):
+    def send_vdp_port_event_internal(self, port_uuid, mac, net_uuid,
+                                     segmentation_id, status, oui):
         '''Send vNIC UP/Down event to VDP
 
         :param port: a ovslib.VifPort object.
@@ -318,23 +481,44 @@ class OVSNeutronVdp(object):
             LOG.error("There is no LLDPad port available.")
             return False
 
-        lvm = self.local_vlan_map.get(net_uuid)
         if status == 'up':
             if self.vdp_mode == constants.VDP_SEGMENT_MODE:
                 port_name = self.ext_br_obj.get_ofport_name(port_uuid)
                 if port_name is None:
                     LOG.error("Unknown portname for uuid %s" % port_uuid)
                     return False
-                LOG.info('portname for uuid %s is ' % port_name)
+                LOG.info("Status up forportname for uuid %(uuid)s is %(port)s",
+                         {'uuid': port_uuid, 'port': port_name})
                 ret = self.port_up_segment_mode(lldpad_port, port_name,
                                                 port_uuid, mac, net_uuid,
                                                 segmentation_id, oui)
         else:
             if self.vdp_mode == constants.VDP_SEGMENT_MODE:
+                LOG.info("Status down for portname for uuid %s is ", port_uuid)
                 ret = self.port_down_segment_mode(lldpad_port, port_uuid,
                                                   mac, net_uuid,
                                                   segmentation_id, oui)
         return ret
+
+    def send_vdp_port_event(self, port_uuid, mac, net_uuid,
+                            segmentation_id, status, oui):
+        '''Send vNIC UP/Down event to VDP
+
+        :param port: a ovslib.VifPort object.
+        :param net_uuid: the net_uuid this port is to be associated with.
+        :param segmentation_id: the VID for 'vlan' or tunnel ID for 'tunnel'
+        :param status: Type of port event. 'up' or 'down'
+        '''
+        try:
+            with self.ovs_vdp_lock:
+                ret = self.send_vdp_port_event_internal(port_uuid, mac,
+                                                        net_uuid,
+                                                        segmentation_id,
+                                                        status, oui)
+                return ret
+        except Exception as e:
+            LOG.error("Exception in send_vdp_port_event %s" % str(e))
+            return False
 
     def unprovision_vdp_overlay_networks(self, net_uuid, lvid, vdp_vlan, oui):
         '''Provisions a overlay type network configured using VDP.
@@ -345,36 +529,32 @@ class OVSNeutronVdp(object):
         :vdp_vlan: VDP VLAN ID
         '''
         # check validity
-        if not utils.is_valid_vlan_tag(vdp_vlan):
-            LOG.error("Cannot unprovision VDP Overlay network for"\
-                   " net-id=%(net_uuid)s - Invalid ", {'net_uuid': net_uuid})
+        if not ovs_lib.is_valid_vlan_tag(vdp_vlan):
+            LOG.error("Cannot unprovision VDP Overlay network for"
+                      " net-id=%(net_uuid)s - Invalid ",
+                      {'net_uuid': net_uuid})
             return
 
-        lmsg = ('unprovision_vdp_overlay_networks: add_flow for '
+        lmsg = ('unprovision_vdp_overlay_networks: delete_flow for '
                 'Local Vlan %(local_vlan)s VDP VLAN %(vdp_vlan)s')
         LOG.info(lmsg, {'local_vlan': lvid, 'vdp_vlan': vdp_vlan})
-        # outbound
-        self.ext_br_obj.delete_flows(
-                                 in_port=self.phy_peer_port_num, dl_vlan=lvid)
-        # inbound
-        self.integ_br_obj.delete_flows(in_port=self.int_peer_port_num,
-                                       dl_vlan=vdp_vlan)
+        self.program_vm_ovs_flows(lvid, vdp_vlan, 0)
 
-    #TODO(padkrish)
-    def vdp_vlan_change(self, vsw_cb_data, vdp_vlan):
+    # fixme(padkrish)
+    def vdp_vlan_change_internal(self, vsw_cb_data, vdp_vlan):
         '''Callback Function from VDP when provider VLAN changes
 
         This will be called only during error cases when switch
         reloads or when compute reloads
         '''
-        LOG.debug("In VDP VLAN change VLAN %s" % vdp_vlan)
         if not vsw_cb_data:
             LOG.error("NULL vsw_cb_data Info received")
             return
         net_uuid = vsw_cb_data.get('net_uuid')
+        port_uuid = vsw_cb_data.get('port_uuid')
         lvm = self.local_vlan_map.get(net_uuid)
         if not lvm:
-            LOG.error("Network %s is not in the local vlan map" %  net_uuid)
+            LOG.error("Network %s is not in the local vlan map" % net_uuid)
             return
         lldpad_port = self.lldpad_info
         if not lldpad_port:
@@ -383,35 +563,51 @@ class OVSNeutronVdp(object):
         exist_vdp_vlan = lvm.late_binding_vlan
         lvid = lvm.vlan
         br = self.ext_br_obj
-        LOG.debug("lvid %s exist %s" % (lvid, exist_vdp_vlan))
+        LOG.debug("lvid %s exist %s New VDP VLAN %s" % (lvid, exist_vdp_vlan,
+                                                        vdp_vlan))
+        lvm.decr_reset_vlan(port_uuid, vdp_vlan)
         if vdp_vlan == exist_vdp_vlan:
             LOG.debug("No change in provider VLAN %s" % vdp_vlan)
             return
-        if utils.is_valid_vlan_tag(exist_vdp_vlan):
-            #Clear the old flows
-            # outbound
-            br.delete_flows(in_port=self.phy_peer_port_num,
-                            dl_vlan=lvid)
-            # inbound
-            self.integ_br_obj.delete_flows(in_port=self.int_peer_port_num,
-                                           dl_vlan=exist_vdp_vlan)
-        if utils.is_valid_vlan_tag(vdp_vlan):
-            #Add the new flows
-            # outbound
-            br.add_flow(priority=4,
-                        in_port=self.phy_peer_port_num, dl_vlan=lvid,
-                        actions="mod_vlan_vid:%s,normal" % vdp_vlan)
-            # inbound
-            self.integ_br_obj.add_flow(priority=3,
-                                      in_port=self.int_peer_port_num,
-                                      dl_vlan=vdp_vlan,
-                                      actions="mod_vlan_vid:%s,normal" % lvid)
+        # Logic is if the VLAN changed to 0, clear the flows only if none of
+        # the VM's in the network has a valid VLAN.
+        if not ovs_lib.is_valid_vlan_tag(vdp_vlan):
+            if ovs_lib.is_valid_vlan_tag(exist_vdp_vlan) and not (
+               lvm.any_valid_vlan()):
+                # Clear the old flows
+                LOG.debug("Clearing flows, no valid vlans")
+                self.program_vm_ovs_flows(lvid, exist_vdp_vlan, 0)
+                lvm.late_binding_vlan = 0
+            lvm.vdp_nego_req = False
         else:
-            LOG.error("Returned vlan %s is invalid" % vdp_vlan)
+            # If any VM gets a VLAN change, we immediately modify the flow.
+            # This is done to not wait for all VM's VLAN getting updated from
+            # switch. Logic is if any VM gts a new VLAN, the other VM's of the
+            # same network will be updated eventually.
+            if vdp_vlan != exist_vdp_vlan and (
+               ovs_lib.is_valid_vlan_tag(vdp_vlan)):
+                # Add the new flows and remove the old flows
+                LOG.warn("Non Zero VDP Vlan change %s %s" %
+                         (vdp_vlan, exist_vdp_vlan))
+                self.program_vm_ovs_flows(lvid, exist_vdp_vlan, vdp_vlan)
+                lvm.late_binding_vlan = vdp_vlan
+                lvm.vdp_nego_req = False
+            else:
+                LOG.error("Invalid or same VLAN  (%s %s)" % (exist_vdp_vlan,
+                                                             vdp_vlan))
 
-        # Even if it's 0, it's still stored to reflect provider
-        # hasn't allocated a VLAN from VDP, happens during error case.
-        lvm.late_binding_vlan = vdp_vlan
+    def vdp_vlan_change(self, vsw_cb_data, vdp_vlan):
+        '''Callback Function from VDP when provider VLAN changes
+
+        This will be called only during error cases when switch
+        reloads or when compute reloads
+        '''
+        LOG.debug("In VDP VLAN change VLAN %s" % vdp_vlan)
+        try:
+            with self.ovs_vdp_lock:
+                self.vdp_vlan_change_internal(vsw_cb_data, vdp_vlan)
+        except Exception as e:
+            LOG.error("Exception in vdp_vlan_change %s" % str(e))
 
     def provision_vdp_overlay_networks(self, port_uuid, mac, net_uuid,
                                        segmentation_id, lvid, oui):
@@ -428,33 +624,22 @@ class OVSNeutronVdp(object):
         if lldpad_port:
             ovs_cb_data = {'obj': self, 'port_uuid': port_uuid, 'mac': mac,
                            'net_uuid': net_uuid}
-            vdp_vlan = lldpad_port.send_vdp_vnic_up(port_uuid=port_uuid,
-                                                    vsiid=port_uuid,
-                                                    gid=segmentation_id,
-                                                    mac=mac, new_network=True,
-                                                    oui=oui,
-                                                    vsw_cb_fn=
-                                                    self.vdp_vlan_change,
-                                                    vsw_cb_data=ovs_cb_data)
+            vdp_vlan = lldpad_port.send_vdp_vnic_up(
+                port_uuid=port_uuid, vsiid=port_uuid, gid=segmentation_id,
+                mac=mac, new_network=True, oui=oui,
+                vsw_cb_fn=self.vdp_vlan_change, vsw_cb_data=ovs_cb_data)
         else:
             LOG.error("There is no LLDPad port available.")
             return False, cconstants.INVALID_VLAN
         # check validity
-        if not utils.is_valid_vlan_tag(vdp_vlan):
-            LOG.error("Cannot provision VDP Overlay network for"\
-                      " net-id=%(net_uuid)s - Invalid ", {'net_uuid': net_uuid})
+        if not ovs_lib.is_valid_vlan_tag(vdp_vlan):
+            LOG.error("Cannot provision VDP Overlay network for"
+                      " net-id=%(net_uuid)s - Invalid ",
+                      {'net_uuid': net_uuid})
             return True, cconstants.INVALID_VLAN
 
         lmsg = ('provision_vdp_overlay_networks: add_flow for '
                 'Local Vlan %(local_vlan)s VDP VLAN %(vdp_vlan)s')
         LOG.info(lmsg, {'local_vlan': lvid, 'vdp_vlan': vdp_vlan})
-        # outbound
-        self.ext_br_obj.add_flow(priority=4,
-                                 in_port=self.phy_peer_port_num, dl_vlan=lvid,
-                                 actions="mod_vlan_vid:%s,normal" % vdp_vlan)
-        # inbound
-        self.integ_br_obj.add_flow(priority=3,
-                                   in_port=self.int_peer_port_num,
-                                   dl_vlan=vdp_vlan,
-                                   actions="mod_vlan_vid:%s,normal" % lvid)
+        self.program_vm_ovs_flows(lvid, 0, vdp_vlan)
         return True, vdp_vlan

@@ -51,7 +51,7 @@ DEFAULT_LOG_LEVELS = (
 
 default_log_opts = {
     'dfa_log': {
-        'use_syslog': 'False',
+        'use_syslog': False,
         'syslog_lgo_facility': 'LOG_USER',
         'log_dir': '.',
         'log_file': 'fabric_enabler.log',
@@ -104,7 +104,11 @@ class CiscoDFAConfig(object):
         self.dfa_cfg = {}
         self._load_default_opts()
         args = sys.argv[1:]
-        opts = [(args[i], args[i+1]) for i in range(0, len(args), 2)]
+        try:
+            opts = [(args[i], args[i + 1]) for i in range(0, len(args), 2)]
+        except IndexError:
+            opts = []
+
         cfgfile = cfg.find_config_files(service_name)
         for k, v in opts:
             if k == '--config-file':
@@ -121,10 +125,18 @@ class CiscoDFAConfig(object):
                 if parsed_item not in self.dfa_cfg:
                     self.dfa_cfg[parsed_item] = {}
                 for key, value in parsed_file[parsed_item].items():
-                    self.dfa_cfg[parsed_item][key] = value[0]
+                    self.dfa_cfg[parsed_item][key] = (
+                        self._inspect_val(value[0]))
 
         # Convert it to object.
-        self._cfg = utils.dict_to_obj(self.dfa_cfg)
+        self._cfg = utils.Dict2Obj(self.dfa_cfg)
+
+    def _inspect_val(self, val):
+
+        if isinstance(val, str):
+            return True if val.lower() == 'true' else False if (
+                val.lower() == 'false') else val
+        return val
 
     def _load_default_opts(self):
         """Load default options."""

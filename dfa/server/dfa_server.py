@@ -29,7 +29,7 @@ import paramiko
 import platform
 import Queue
 import re
-from six import moves
+import six
 import sys
 import time
 
@@ -91,7 +91,7 @@ class RpcCallBacks(object):
         payload = {'agent': agent}
         timestamp = time.ctime()
         data = (event_type, payload)
-        pri = self.obj.PRI_LOW_START+1
+        pri = self.obj.PRI_LOW_START + 1
         self.obj.pqueue.put((pri, timestamp, data))
         LOG.debug('Added request uplink info into queue.')
 
@@ -107,7 +107,7 @@ class RpcCallBacks(object):
         payload = {'agent': agent}
         timestamp = time.ctime()
         data = (event_type, payload)
-        pri = self.obj.PRI_LOW_START+2
+        pri = self.obj.PRI_LOW_START + 2
         self.obj.pqueue.put((pri, timestamp, data))
         LOG.debug('Added request VMs info into queue.')
 
@@ -169,9 +169,9 @@ class RpcCallBacks(object):
         port_id = args.get('port_uuid')
         result = args.get('result')
         LOG.debug('update_vm_result received from %(agent)s: '
-                  '%(port_id)s %(result)s' % ({'agent': agent,
-                                               'port_id': port_id,
-                                               'result': result}))
+                  '%(port_id)s %(result)s', {'agent': agent,
+                                             'port_id': port_id,
+                                             'result': result})
 
         # Add the request into queue for processing.
         event_type = 'agent.vm_result.update'
@@ -179,7 +179,7 @@ class RpcCallBacks(object):
         timestamp = time.ctime()
         data = (event_type, payload)
         # TODO use value defined in constants
-        pri = self.obj.PRI_LOW_START+10
+        pri = self.obj.PRI_LOW_START + 10
         self.obj.pqueue.put((pri, timestamp, data))
         LOG.debug('Added request vm result update into queue.')
 
@@ -227,7 +227,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         # Create segmentation id pool.
         seg_id_min = int(cfg.dcnm.segmentation_id_min)
         seg_id_max = int(cfg.dcnm.segmentation_id_max)
-        self.segmentation_pool = set(moves.xrange(seg_id_min, seg_id_max + 1))
+        self.segmentation_pool = set(six.moves.range(
+            seg_id_min, seg_id_max + 1))
 
         # Create queue for exception returned by a thread.
         self._excpq = Queue.Queue()
@@ -258,12 +259,14 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                                                self.PRI_MEDIUM_START,
                                                self.PRI_MEDIUM_START + 5)
 
-        self.dcnm_event = dfa_dcnm.DCNMListener(name='dcnm', ip=dcnm_ip,
-                                                user=dcnm_amqp_user,
-                                                password=dcnm_password,
-                                                pqueue=self.pqueue,
-                                                c_pri=self.PRI_MEDIUM_START+1,
-                                                d_pri=self.PRI_MEDIUM_START+6)
+        self.dcnm_event = dfa_dcnm.DCNMListener(
+            name='dcnm',
+            ip=dcnm_ip,
+            user=dcnm_amqp_user,
+            password=dcnm_password,
+            pqueue=self.pqueue,
+            c_pri=self.PRI_MEDIUM_START + 1,
+            d_pri=self.PRI_MEDIUM_START + 6)
 
         self._inst_api = dfa_inst.DFAInstanceAPI()
 
@@ -318,7 +321,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         """Setup RPC server for dfa server."""
 
         endpoints = RpcCallBacks(self)
-        self.server = rpc.DfaRpcServer(self.ser_q, self._host, endpoints)
+        self.server = rpc.DfaRpcServer(self.ser_q, self._host,
+                                       self.cfg.dfa_rpc.transport_url,
+                                       endpoints,
+                                       exchange=constants.DFA_EXCHANGE)
 
     def start_rpc(self):
         self.server.start()
@@ -359,7 +365,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             # There is no dci_id in the project name
             return proj_name, None
 
-        proj_fields = proj_name[dci_index+1:].split(':')
+        proj_fields = proj_name[dci_index + 1:].split(':')
         if len(proj_fields) == 2:
             if (proj_fields[1].isdigit()
                     and proj_fields[0] == dciid_key[1:-1]):
@@ -425,7 +431,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             LOG.error("Failed to find project %s.", proj_id)
             return
 
-        new_proj_name, new_dci_id, = self._get_dci_id_and_proj_name(proj.name)
+        new_proj_name, new_dci_id = self._get_dci_id_and_proj_name(proj.name)
         # Check if project name and dci_id are the same, there is no change.
         orig_proj_name = self.get_project_name(proj_id)
         orig_dci_id = self.get_dci_id(proj_id)
@@ -450,9 +456,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
 
         # Valid update request.
         LOG.debug('Changing project DCI id for %(proj)s from %(orig_dci)s to '
-                  '%(new_dci)s.', ({'proj': proj_id,
-                                    'orig_dci': orig_dci_id,
-                                    'new_dci': new_dci_id}))
+                  '%(new_dci)s.', {'proj': proj_id,
+                                   'orig_dci': orig_dci_id,
+                                   'new_dci': new_dci_id})
 
         try:
             self.dcnm_client.update_project(new_proj_name,
@@ -470,8 +476,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             self.update_project_info_cache(proj_id, name=new_proj_name,
                                            dci_id=new_dci_id,
                                            opcode='update')
-            LOG.debug('Updated project %(proj)s %(name)s.', (
-                {'proj': proj_id, 'name': proj.name}))
+            LOG.debug('Updated project %(proj)s %(name)s.',
+                      {'proj': proj_id, 'name': proj.name})
 
     def project_delete_event(self, proj_info):
         """Process project delete event."""
@@ -517,6 +523,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             self.subnet[snet_id].update(snet)
 
         net = self.network.get(self.subnet[snet_id].get('network_id'))
+        if not net:
+            LOG.error(('Network %(network_id)s does not exist.'),
+                      {'network_id': self.subnet[snet_id].get('network_id')})
+            return
 
         # Check if the network is created by DCNM.
         query_net = self.get_network(net.get('id'))
@@ -529,8 +539,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             return
 
         tenant_name = self.get_project_name(snet['tenant_id'])
-        subnet = utils.dict_to_obj(snet)
-        dcnm_net = utils.dict_to_obj(net)
+        subnet = utils.Dict2Obj(snet)
+        dcnm_net = utils.Dict2Obj(net)
         if not tenant_name:
             LOG.error('Project %(tenant_id)s does not exist.', (
                       {'tenant_id': subnet.tenant_id}))
@@ -572,11 +582,11 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         tenant_id = net.get('tenant_id')
 
         # Extract segmentation_id from the network name
+        net_ext_name = self.cfg.dcnm.dcnm_net_ext
+        nobj = re.search(net_ext_name, net_name)
         try:
-            net_ext_name = self.cfg.dcnm.dcnm_net_ext
-            nobj = re.search(net_ext_name, net_name)
-            seg_id = int((net_name[nobj.start(0)+len(net_ext_name)-1:]
-                         if nobj else None))
+            seg_id = int((net_name[nobj.start(0) + len(net_ext_name) - 1:]
+                          if nobj else None))
         except (IndexError, TypeError, ValueError):
             seg_id = None
 
@@ -598,14 +608,17 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                 # Update the network name. After extracting the segmentation_id
                 # no need to keep it in the name. Removing it and update
                 # the network.
-                updated_net_name = net_name[:nobj.start(0)+len(net_ext_name)-1]
+                updated_net_name = (
+                    net_name[:nobj.start(0) + len(net_ext_name) - 1])
                 try:
                     body = {'network': {'name': updated_net_name, }}
                     dcnm_net = self.neutronclient.update_network(
                         net_id, body=body).get('network')
+                    LOG.debug('Updated network %(network)s', dcnm_net)
                 except:
                     LOG.exception('Failed to update network '
-                                  '%(network)s.', {'network': dcnm_net})
+                                  '%(network)s.',
+                                  {'network': updated_net_name})
                     return
 
             LOG.info('network_create_event: network %(name)s was created '
@@ -653,7 +666,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         segid = self.network[net_id].get('segmentation_id')
         tenant_id = self.network[net_id].get('tenant_id')
         tenant_name = self.get_project_name(tenant_id)
-        net = utils.dict_to_obj(self.network[net_id])
+        net = utils.Dict2Obj(self.network[net_id])
         if not tenant_name:
             LOG.error('Project %(tenant_id)s does not exist.', (
                       {'tenant_id': tenant_id}))
@@ -668,7 +681,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             # Remove entry from database and cache.
             self.delete_network_db(net_id)
             del self.network[net_id]
-            snets = [(k) for k in self.subnet if self.subnet[k] == net_id]
+            snets = [k for k in self.subnet if (
+                self.subnet[k].get('network_id') == net_id)]
             [self.subnet.pop(s) for s in snets]
         except dexc.DfaClientRequestFailed:
             emsg = ('Failed to create network %(net)s.')
@@ -1151,8 +1165,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                                                                 str(vm_info))
                             except (rpc.MessagingTimeout, rpc.RPCException,
                                     rpc.RemoteError):
-                                LOG.error(_LE('Failed to send VM info to '
-                                              'agent.'))
+                                LOG.error(('Failed to send VM info to agent.'))
 
     def check_dhcp_ports(self):
         instances = self.get_vms()
@@ -1304,7 +1317,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                                                     str(vm_info))
                 except (rpc.MessagingTimeout, rpc.RPCException,
                         rpc.RemoteError):
-                    LOG.error(_LE('Failed to send VM info to agent.'))
+                    LOG.error('Failed to send VM info to agent.')
 
     def vm_result_update(self, payload):
         """Update the result field in VM database.
@@ -1360,7 +1373,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         fr_thrd = utils.PeriodicTask(interval=constants.FAIL_REC_INTERVAL,
                                      func=self.add_events,
                                      event_queue=self.pqueue,
-                                     priority=self.PRI_LOW_START+10,
+                                     priority=self.PRI_LOW_START + 10,
                                      excq=self._excpq)
 
         # Start all the threads.
@@ -1381,9 +1394,10 @@ def save_my_pid(cfg):
             if not os.path.exists(pid_path):
                 os.makedirs(pid_path)
         except OSError:
-            pass
-        else:
-            pid_file_path = os.path.join(pid_path, pid_file)
+            LOG.error(('Fail to create %s'), pid_path)
+            return
+
+        pid_file_path = os.path.join(pid_path, pid_file)
 
         LOG.debug('dfa_server pid=%s', mypid)
         with open(pid_file_path, 'w') as funcp:
@@ -1418,7 +1432,7 @@ def dfa_server():
                     LOG.error(emsg)
             # Check on dfa agents
             cur_time = time.time()
-            for agent, time_s in dfa.agents_status_table.iteritems():
+            for agent, time_s in six.iteritems(dfa.agents_status_table):
                 last_seen = time.mktime(time.strptime(time_s))
                 if abs(cur_time - last_seen -
                        constants.MAIN_INTERVAL) > constants.HB_INTERVAL:

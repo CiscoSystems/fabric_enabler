@@ -18,9 +18,9 @@
 """DFA logging helper module."""
 
 
-import os
 import logging
 import logging.handlers as log_hdlr
+import os
 import sys
 
 # Rotating file size limit.
@@ -51,6 +51,7 @@ def getLogger(name):
     _loggers[name] = logger
 
     return logger
+
 
 def setup_logger(project, cfg):
 
@@ -87,7 +88,7 @@ def setup_logger(project, cfg):
     else:
         handler = logging.StreamHandler(sys.stdout)
 
-    if cfg.dfa_log.use_syslog.lower() == 'true':
+    if cfg.dfa_log.use_syslog:
         log_fac = cfg.dfa_log.syslog_log_facility
         facility = getattr(log_hdlr.SysLogHandler, log_fac, None)
         handler = log_hdlr.SysLogHandler(address='/dev/log',

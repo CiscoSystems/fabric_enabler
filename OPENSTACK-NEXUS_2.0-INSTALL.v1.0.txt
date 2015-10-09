@@ -1,18 +1,20 @@
 1.0 General
 ===========
-This is an installation guide for enabling nexus fabric support on top of 
+This is an installation guide for enabling nexus fabric support on top of
 an OpenStack instllation.
 
 Please refer to nexus fabric system configuration for how to bring up
-the fabric using a spine and leaf topology with DCNM as the fabric manager.  
+the fabric using a spine and leaf topology with DCNM as the fabric manager.
 The compute node in an OpenStack setup should be connected to the nexus
 fabric leaf switch. This link on the compute node/server is often
 referred as uplink in this note.
 
-This guide does not cover OpenStack installation, which is a complex task by itself.
-For your info,  there are basically three ways in which an OpenStack 
+This guide does not cover OpenStack installation, which is a complex task by
+itself.
+For your info,  there are basically three ways in which an OpenStack
 installation can be done:
-a) use DevStack for an installation for development and testing purposes (that's what we do too)
+a) use DevStack for an installation for development and testing
+purposes (that's what we do too)
 b) use a third-party supported OpenStack installation package
 c) use the OpenStack general installation guidelines
 
@@ -21,7 +23,7 @@ and LLDPad - both of them are open sourced free software, similar to OpenStack.
 Please follow their respective README notes to install the latest versions on
 all servers that will be used as compute nodes. Please see more details below.
 
-Please note that since OpenStack and its assoicated other pieces of open 
+Please note that since OpenStack and its assoicated other pieces of open
 sourced software for this purpose is open sourced software, it generally 
 requires you install the various software on your target servers as they
 come from different sources.
@@ -29,20 +31,21 @@ come from different sources.
 
 2.0 Prerequisites
 =================
-The prerequisites for installing Nexus fabric OpenStack enabler are the following:
+The prerequisites for installing Nexus fabric OpenStack enabler are the
+following:
     - Linux installation on your target servers
     - Build and install LLDPad
-    - Build and install OVS 
-(they need to be compiled and installed on all target compute nodes in the OpenStack
-setup as binaries could not be directly provied and used)
+    - Build and install OVS
+(they need to be compiled and installed on all target compute nodes in the
+OpenStack setup as binaries could not be directly provied and used)
 
-2.1 Linux installation on your target servers (we use Ubuntu 14.04.1 LTS in our 
+2.1 Linux installation on your target servers (we use Ubuntu 14.04.1 LTS in our
   development and UT environments.)
 
 2.2 Build and install LLDPad
 
-Please use the lldpad open source community mailing list of http://open-lldp.org/
-for general questions.
+Please use the lldpad open source community mailing list of
+http://open-lldp.org/ for general questions.
 
 Clone the repoitory using for installation:
 git clone git://github.com/jrfastab/lldpad.git -b devel
@@ -50,13 +53,15 @@ git clone git://github.com/jrfastab/lldpad.git -b devel
 Follow the instructions in README to build and install.
 
 2.2.1 Prereq
-Prereq packages for Ubuntu 12.04: 
+Prereq packages for Ubuntu 12.04:
        libtool libnl-dev libreadline6 libconfig8 autoconf flex
 
-Prereq packages for Ubuntu 14.04: 
-       libtool libnl-3-dev libreadline6 libconfig8-dev libreadline-dev libconfig-dev autoconf flex
+Prereq packages for Ubuntu 14.04:
+       libtool libnl-3-dev libreadline6 libconfig8-dev libreadline-dev
+       libconfig-dev autoconf flex
  
-The following are the general instructions for building and installing the lldpad package. 
+The following are the general instructions for building and installing the
+lldpad package.
 Always refer the README for more comprehensive and up-to-date instructions.
 ./bootstrap.sh
 ./configure --prefix=/usr
@@ -64,21 +69,25 @@ make
 make install
 
 
-The first two commands will check for your environment and setup the necessary configuration. 
-If any pre-req packages are not found, it will detect it right away and display a error message. 
-After fixing the errors or installing the necessary packages, proceed with the make.
+The first two commands will check for your environment and setup the necessary
+configuration.
+If any pre-req packages are not found, it will detect it right away and display a error message.
+After fixing the errors or installing the necessary packages, proceed with the
+make.
 
 
 
 2.3 Build and install OVS
-Download OVS according to instructions given in http://www.openvswitch.org/download/
+Download OVS according to instructions given in
+http://www.openvswitch.org/download/
 Use the most recent release or any stable release after Apr 24, 2014.
 
 3.0 OpenStack installation
 ==========================
-For an OpenStack installation (see the three ways mentioned in the general section above), 
-Specifically for supporting Nexus Fabric as the networking fabric for OpenStack, the [ml2] 
-and [ovs] sections in 
+For an OpenStack installation (see the three ways mentioned in the general
+section above),
+Specifically for supporting Nexus Fabric as the networking fabric for
+OpenStack, the [ml2] and [ovs] sections in
 ./etc/neutron/plugins/ml2/ml2_conf.ini should be configured as follows:
 
 [ml2]
@@ -88,7 +97,7 @@ mechanism_drivers = openvswitch
 [ovs]
 bridge_mappings = ethd:br-ethd
 
-([ml2_type_flat], [ml2_type_vlan], [ml2_type_gre] and 
+([ml2_type_flat], [ml2_type_vlan], [ml2_type_gre] and
 [ml2_type_vxlan] sections should not be specified)
 
 Additionally, the following OpenStack services should not be enabled
@@ -96,17 +105,17 @@ in an OpenStack installation:
 
 - L3 agent
 - DHCP service
-- 'tunnel_types' should not be set. 
+- 'tunnel_types' should not be set.
 (i.e. 'tunnel_types =' which is in [agent] section)
 
 
 4.0 Install fabric OpenStack enabler
 =====================================
-Make sure your OpenStack installation is running correctly based on required setting
-discussed in the sections above.
+Make sure your OpenStack installation is running correctly based on required
+setting discussed in the sections above.
 
 4.1 On the control node in the OpenStack installation, get the source file:
-   git clone https://github.com/CiscoSystems/fabric_enabler openstack_fabric_enabler
+git -b post_rel_1_0_0 clone https://github.com/CiscoSystems/fabric_enabler
 
 4.2 cd ~/openstack_fabric_enabler
 
@@ -114,45 +123,52 @@ discussed in the sections above.
 The sections for modification is the following:
 
 [dcnm]
-cnm_ip = 172.20.234.180
-dcnm_user = root                                                                                  
-dcnm_amqp_user=admin 
-dcnm_password = cisco123
+dcnm_ip = <DCNM IP address>
+dcnm_user = <DCNM user>
+dcnm_amqp_user = <DCNM AMQP user>
+dcnm_password = <DCNM password>
 gateway_mac = 20:20:00:00:00:AA
-segmentation_id_min = 10000
-segmentation_id_max = 10100    
+segmentation_id_min = <segmentation id min value>
+segmentation_id_max = <segmentation id max value>
 
-Please make sure gateway_mac matches your PoAP template setting in DCNM for your leaf
-switch. 
-Please also make sure you use the right range of segment IDs administratrated by
-your fabric manager.
+Please make sure gateway_mac matches your PoAP template setting in DCNM for
+your leaf switch.
+Please also make sure you use the right range of segment IDs administratrated
+by your fabric manager.
 
 
 [dfa_mysql]
 # MYSQL DB connection parameter
-connection = 'mysql://<username>:<password>@localhost/cisco_dfa?charset=utf8'
-We used username=root and password=cisco123, this is the application level 
-user name and password.
+connection = 'mysql://<username>:<password>@<mysqlhost>/cisco_dfa?charset=utf8'
+We used username and password, and mysqlhost must be provided based on
+the setup.
  
  
 [dfa_rpc]
 # Transport URL parameter for RPC
-transport_url = 'rabbit://guest:guest@%(ip)s:5672//'
-We used username=guest and password=guest
+transport_url = 'rabbit://<userid>:<password>@%<rabbit server host>:5672//'
+We used userid=guest and password=guest
 This is the application level user name and password.
 
 [general]
-compute_user = localadmin
-compute_passwd = cisco123
+compute_user = <userid of compute node>
+compute_passwd = <password of compute node>
 
+It requires all control/compute nodes have same username/password
+This is user's Linux account on the servers to run as control/compute nodes.
 
-The following options should be set in the keystone_authtoken section in
+The following options should be set in the following config files:
 a)  neutron.conf:
+
+[DEFAULT]
+notification_driver = messaging
+notification_topics = cisco_dfa_neutron_notify
+rpc_backend = rabbit
+
 [keystone_authtoken]
 ...
-auth_uri = http://<ip address of controller>:5000/v2.0
-identity_uri = http://<ip address of controller>:35357
 auth_host = <ip address of controller>
+auth_port = 35357
 admin_tenant_name = service
 admin_user = neutron
 admin_password = <admin password>
@@ -165,15 +181,20 @@ admin_password = <admin password>
 admin_user = nova
 admin_tenant_name = service
 auth_uri = http://<ip address of controller>:5000/v2.0
-identity_uri = http://<ip address of controller>:35357
 auth_host = <ip address of controller>
 ...
 
 
-It requires all control/compute nodes have same username/password - 
-This is user's Linux account on the servers to run as control/compute nodes.                        
+c) keystone.conf:
+[DEFAULT]
+notification_driver = messaging
+notification_topics = cisco_dfa_keystone_notify
+admin_endpoint = http://<services ip address>:%(admin_port)s/
+rpc_backend = rabbit
 
-4.5 python setup_enabler
+
+
+4.5 python setup_enabler.py
 
 5.0 Post installation
 =====================
@@ -195,8 +216,8 @@ cisco_dfa_neutron_notify.info   0
 
 
 5.2 Use OpenStack with Nexus powered fabric
-There is nothing special. Just use the normal procedure with OpenStack via Horizon or
-Python OpenStack script:
+There is nothing special. Just use the normal procedure with OpenStack via
+Horizon or Python OpenStack script:
 
 - Login OpenStack as admin
 - Create project/tenant  (DCNM orgname should be automatically created too)
