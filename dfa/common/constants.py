@@ -13,13 +13,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-
-
 # RPC message type exchange between server and agent.
-VM_INFO        = 1000
-UPDATE_IP_RULE = 1001
-UPLINK_NAME    = 1002
 
+VM_INFO = 1000
+UPDATE_IP_RULE = 1001
+UPLINK_NAME = 1002
 
 # RPC queue name on agent side.
 DFA_AGENT_QUEUE = 'dfa_agent'
@@ -33,6 +31,7 @@ CREATE_FAIL = 'CREATE:FAIL'
 DELETE_FAIL = 'DELETE:FAIL'
 UPDATE_FAIL = 'UPDATE:FAIL'
 
+IP_DHCP_WAIT = "W"
 
 MAIN_INTERVAL = 5
 
@@ -62,4 +61,3 @@ UPLINK_DOWN_THRES = 2
 
 Q_UPL_PRIO = 1
 Q_VM_PRIO = 2
-

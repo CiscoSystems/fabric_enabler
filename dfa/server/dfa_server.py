@@ -246,6 +246,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         dcnm_ip = cfg.dcnm.dcnm_ip
         dcnm_amqp_user = cfg.dcnm.dcnm_amqp_user
         dcnm_password = cfg.dcnm.dcnm_password
+        self.dcnm_dhcp = (cfg.dcnm.dcnm_dhcp.lower() == 'true')
+
         self.dcnm_client = cdr.DFARESTClient(cfg)
 
         self.keystone_event = deh.EventsHandler('keystone', self.pqueue,
@@ -536,7 +538,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             return
 
         try:
-            self.dcnm_client.create_network(tenant_name, dcnm_net, subnet)
+            self.dcnm_client.create_network(tenant_name, dcnm_net,
+                                            subnet, self.dcnm_dhcp)
         except dexc.DfaClientRequestFailed:
             emsg = 'Failed to create network %(net)s.'
             LOG.exception(emsg, {'net': dcnm_net.name})
@@ -671,6 +674,13 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             emsg = ('Failed to create network %(net)s.')
             LOG.error(emsg, {'net': net.name})
             self.update_network_db(net_id, constants.DELETE_FAIL)
+        # deleting all related VMs
+        instances = self.get_vms()
+        instances_related = [(k) for k in instances
+                             if k.network_id == net_id]
+        for vm in instances_related:
+            LOG.info("deleting vm %s because network is deleted" % vm.name)
+            self.delete_vm_function(vm.port_id, vm)
 
     def dcnm_network_create_event(self, network_info):
         """Process network create event from DCNM."""
@@ -798,15 +808,20 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             iprange = ["{'start': '%s', 'end': '%s'}" % (
                 p.split('-')[0], p.split('-')[1]) for p in pool.split(',')]
             [allocation_pools.append(eval(ip)) for ip in iprange]
-
+        if (self.dcnm_dhcp):
+            enable_dhcp = False
+        else:
+            enable_dhcp = True
         try:
             body = {'subnet': {'cidr': subnet.get('subnet'),
                                'gateway_ip': subnet.get('gateway'),
                                'ip_version': 4,
                                'network_id': net_id,
                                'tenant_id': tenant_id,
-                               'enable_dhcp': False,
+                               'enable_dhcp': enable_dhcp,
                                'allocation_pools': allocation_pools, }}
+            if self.dcnm_dhcp is False:
+                body.get('subnet').pop('allocation_pools', None)
             # Send requenst to create subnet in neutron.
             LOG.debug('Creating subnet %(subnet)s for DCNM request.' % body)
             dcnm_subnet = self.neutronclient.create_subnet(
@@ -846,19 +861,27 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             LOG.exception('dcnm_network_delete_event: Failed to delete '
                           '%(network)s.', {'network': query_net.name})
 
-    def _make_vm_info(self, port, status):
+    def _make_vm_info(self, port, status, dhcp_port=False):
         port_id = port.get('id')
         device_id = port.get('device_id').replace('-', '')
         tenant_id = port.get('tenant_id')
         net_id = port.get('network_id')
+        inst_ip = '0.0.0.0'
         inst_name = self._inst_api.get_instance_for_uuid(device_id,
                                                          tenant_id)
+
         segid = (net_id in self.network and
                  self.network[net_id].get('segmentation_id')) or 0
         fwd_mod = (net_id in self.network and
                    self.network[net_id].get('fwd_mod')) or 'anycast-gateway'
         gw_mac = self._gateway_mac if fwd_mod == 'proxy-gateway' else None
         vm_mac = port.get('mac_address')
+        if (self.dcnm_dhcp is False):
+            fixed_ip = port.get('fixed_ips')
+            inst_ip = fixed_ip[0].get('ip_address')
+            if (dhcp_port):
+                inst_name = str(segid)+'_' + fixed_ip[0].get('ip_address')
+                device_id = inst_name
 
         vm_info = dict(status=status,
                        vm_mac=vm_mac,
@@ -866,7 +889,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                        host=port.get('binding:host_id'),
                        port_uuid=port_id,
                        net_uuid=port.get('network_id'),
-                       oui=dict(ip_addr='0.0.0.0',
+                       oui=dict(ip_addr=inst_ip,
                                 vm_name=inst_name,
                                 vm_uuid=device_id,
                                 gw_mac=gw_mac,
@@ -899,9 +922,15 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
             # Failed to send info to the agent. Keep the data in the
             # database as failure to send it later.
+            if self.dcnm_dhcp is False:
+                vm_info['oui']["ip_addr"] += constants.IP_DHCP_WAIT
             self.add_vms_db(vm_info, constants.CREATE_FAIL)
             LOG.error('Failed to send VM info to agent.')
         else:
+            # if using native DHCP , append a W at the end of ip address
+            # to indicate that the dhcp port needs to be queried
+            if self.dcnm_dhcp is False:
+                vm_info['oui']["ip_addr"] += constants.IP_DHCP_WAIT
             self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
 
     def port_update_event(self, port_info):
@@ -974,10 +1003,13 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         if port_id is None:
             LOG.debug("port_delete_event : %s does not exist." % port_id)
             return
+        self.delete_vm_function(port_id)
 
-        vm = self.get_vm(port_id)
+    def delete_vm_function(self, port_id, vm=None):
         if not vm:
-            LOG.error("port_delete_event: port %s does not exist." % port_id)
+            vm = self.get_vm(port_id)
+        if not vm:
+            LOG.error("delete_vm_function: port %s does not exist." % port_id)
             return
         vm_info = dict(status='down',
                        vm_mac=vm.mac,
@@ -991,7 +1023,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                                 gw_mac=vm.gw_mac,
                                 fwd_mod=vm.fwd_mod,
                                 oui_id='cisco'))
-        LOG.debug("port_delete_event : %s" % vm_info)
+        LOG.debug("deleting port : %s" % vm_info)
         try:
             self.neutron_event.send_vm_info(str(vm_info.get('host')),
                                             str(vm_info))
@@ -1002,6 +1034,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         else:
             self.delete_vm_db(vm.instance_id)
             LOG.info('Deleted VM %(vm)s from DB.', {'vm': vm.instance_id})
+        if vm.port_id in self.port:
+            del self.port[vm.port_id]
 
     def process_data(self, data):
         LOG.debug('process_data: event: %s, payload: %s' % (data[0], data[1]))
@@ -1120,6 +1154,62 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                                 LOG.error(_LE('Failed to send VM info to '
                                               'agent.'))
 
+    def check_dhcp_ports(self):
+        instances = self.get_vms()
+        if instances is None:
+            return
+        network_processed = []
+        wait_dhcp_instances = [(k) for k in instances
+                               if k.ip.endswith(constants.IP_DHCP_WAIT)]
+        for vm in wait_dhcp_instances:
+            found = False
+            net_id = vm.network_id
+            if net_id in network_processed:
+                LOG.info("net_id %s has been queried for dhcp port"
+                         % net_id)
+                self.strip_wait_dhcp(vm)
+
+            search_opts = {'network_id': net_id,
+                           'device_owner': 'network:dhcp'}
+
+            data = self.neutronclient.list_ports(**search_opts)
+            dhcp_ports = data.get('ports', [])
+            found = False
+            for p in dhcp_ports:
+                found = True
+                network_processed.append(net_id)
+                port_id = p['id']
+                if port_id in self.port or self.get_vm(port_id):
+                    LOG.info("net id %s has dhcp port added" %
+                             net_id)
+                    self.strip_wait_dhcp(vm)
+                    continue
+
+                vm_info = self._make_vm_info(p, 'up', dhcp_port=True)
+                LOG.debug("check_dhcp_ports : %s" % vm_info)
+                self.port[port_id] = vm_info
+                try:
+                    self.neutron_event.send_vm_info(str(vm_info.get('host')),
+                                                    str(vm_info))
+                    self.port[port_id] = vm_info
+                except (rpc.MessagingTimeout, rpc.RPCException,
+                        rpc.RemoteError):
+                    # Failed to send info to the agent. Keep the data in the
+                    # database as failure to send it later.
+                    self.add_vms_db(vm_info, constants.CREATE_FAIL)
+                    LOG.error('Failed to send VM info to agent.')
+                else:
+                    self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
+
+            if found is True:
+                self.strip_wait_dhcp(vm)
+
+    def strip_wait_dhcp(self, vm):
+        LOG.info("updaing port %s ip address" % vm.port_id)
+        ip = vm.ip.replace(constants.IP_DHCP_WAIT, '')
+        params = dict(columns=dict(ip=ip))
+        self.update_vm_db(vm.port_id, **params)
+
     def request_vms_info(self, payload):
         """Get the VMs from the database and send the info to the agent."""
 
@@ -1130,13 +1220,17 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         req = dict(host=payload.get('agent'))
         instances = self.get_vms_for_this_req(**req)
         for vm in instances:
+            if vm.ip.endswith(constants.IP_DHCP_WAIT):
+                ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
+            else:
+                ipaddr = vm.ip
             vm_info = dict(status=vm.status,
                            vm_mac=vm.mac,
                            segmentation_id=vm.segmentation_id,
                            host=vm.host,
                            port_uuid=vm.port_id,
                            net_uuid=vm.network_id,
-                           oui=dict(ip_addr=vm.ip,
+                           oui=dict(ip_addr=ipaddr,
                                     vm_name=vm.name,
                                     vm_uuid=vm.instance_id,
                                     gw_mac=vm.gw_mac,
@@ -1305,7 +1399,10 @@ def dfa_server():
         dfa.create_threads()
         while True:
             time.sleep(constants.MAIN_INTERVAL)
-            dfa.update_port_ip_address()
+            if (dfa.dcnm_dhcp):
+                dfa.update_port_ip_address()
+            else:
+                dfa.check_dhcp_ports()
             for trd in dfa.dfa_threads:
                 if not trd.am_i_active:
                     LOG.info("Thread %s is not active.", trd.name)

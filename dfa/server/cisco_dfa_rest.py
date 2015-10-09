@@ -61,8 +61,7 @@ class DFARESTClient(object):
                                     '/%s/partitions/%s/networks')
         self._cfg_profile_list_url = ('http://%s/rest/auto-config/profiles' %
                                       self._ip)
-        self._cfg_profile_get_url = (self._cfg_profile_list_url +
-                                     '/%s/type/ipbd')
+        self._cfg_profile_get_url = self._cfg_profile_list_url + '/%s'
         self._create_part_url = ('http://%s/rest/auto-config/' % self._ip +
                                  'organizations/%s/partitions')
         self._update_part_url = ('http://%s/rest/auto-config/' % self._ip +
@@ -313,7 +312,8 @@ class DFARESTClient(object):
         fwd_mod = self.config_profile_fwding_mode_get(prof)
         return (prof, fwd_mod)
 
-    def create_network(self, tenant_name, network, subnet):
+    def create_network(self, tenant_name, network,
+                       subnet, dhcp_range=True):
         """Create network on the DCNM.
 
         :param tenant_name: name of tenant the network belongs to
@@ -350,7 +350,11 @@ class DFARESTClient(object):
                         "organizationName": tenant_name,
                         "partitionName": self._part_name,
                         "description": network.name,
-                        "dhcpScope": dhcp_scopes}
+                        "netmaskLength":  subnet_ip_mask[1],
+                        "gateway": gw_ip}
+        if dhcp_range:
+            network_info["dhcpScope"] = dhcp_scopes
+
         if self.is_iplus:
             # Need to add the vrf name to the network info
             prof = self._config_profile_get(network.config_profile)
