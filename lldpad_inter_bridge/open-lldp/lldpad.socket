@@ -1,6 +1,0 @@
-[Socket]
-ListenDatagram=@/com/intel/lldpad
-PassCredentials=true
-
-[Install]
-WantedBy=sockets.target
