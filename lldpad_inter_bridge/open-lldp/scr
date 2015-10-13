@@ -1,6 +1,0 @@
-for file in `find . -name "*" -print`
-do
-    file2=`ls ~/oocl_ut/fabric_enabler/lldpad_inter_bridge/open-lldp/$file`
-    echo Diff beween $file and $file2
-    diff $file $file2
-done
