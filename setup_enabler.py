@@ -149,7 +149,7 @@ class NexusFabricEnablerInstaller(object):
                                              stderr=stderr)
         except subprocess.CalledProcessError as e:
             if check_result:
-                print e
+                print e.output
                 sys.exit(e.returncode)
             else:
                 returncode = e.returncode
