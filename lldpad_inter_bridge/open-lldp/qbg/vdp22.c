@@ -745,6 +745,9 @@ static int data_from_evb(char *ifname, struct evb22_to_vdp22 *ptr)
 		vdp->vdp_rwd = ptr->max_rwd;
 		vdp->gpid = ptr->gpid;
 		vdp->evbon = ptr->evbon;
+		/* The following hardcoding is done to make it work for Fex */
+		vdp->gpid = 1;
+		vdp->evbon = 1;
 		LLDPAD_DBG("%s:%s rwd:%d rka:%d gpid:%d retry:%d rte:%d evb:%d\n",
 			   __func__, ifname, ptr->max_rwd, ptr->max_rka,
 			   ptr->gpid, ptr->max_retry, ptr->max_rte, ptr->evbon);
