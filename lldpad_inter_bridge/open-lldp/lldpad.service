@@ -1,0 +1,12 @@
+[Unit]
+Description=Link Layer Discovery Protocol Agent Daemon.
+After=syslog.target network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/lldpad -t
+ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target
+Also=lldpad.socket
