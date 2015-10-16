@@ -373,6 +373,8 @@ if __name__ == '__main__':
     if node == 'control':
         if options.mysql_pass is None or options.mysql_host is None or (
                 options.mysql_user is None):
+            mysqlconf = os.path.join(os.path.expanduser('~'), mysqlcnf)
+            print("Cannot find %s" % mysqlconf)
             print("MySQL credentials must be provided when setting up "
                   "a controller node.\nUse --help for more help.")
             sys.exit(1)
