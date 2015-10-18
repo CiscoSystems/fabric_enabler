@@ -117,8 +117,8 @@ class CiscoDFAConfig(object):
         read_ok = multi_parser.read(cfgfile)
 
         if len(read_ok) != len(cfgfile):
-            raise cfg.Error(("Failed to read config files %(cfgf)s"),
-                            {'cfgf': cfgfile})
+            raise cfg.Error(("Failed to read config files read_ok = %s "
+                             "cfgfile = %s" % (read_ok, cfgfile)))
 
         for parsed_file in multi_parser.parsed:
             for parsed_item in parsed_file.keys():
