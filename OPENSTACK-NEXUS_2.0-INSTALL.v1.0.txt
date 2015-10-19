@@ -1,7 +1,7 @@
 1.0 General
 ===========
 This is an installation guide for enabling nexus fabric support on top of
-an OpenStack instllation.
+an OpenStack installation.
 
 Please refer to nexus fabric system configuration for how to bring up
 the fabric using a spine and leaf topology with DCNM as the fabric manager.
@@ -23,7 +23,7 @@ and LLDPad - both of them are open sourced free software, similar to OpenStack.
 Please follow their respective README notes to install the latest versions on
 all servers that will be used as compute nodes. Please see more details below.
 
-Please note that since OpenStack and its assoicated other pieces of open
+Please note that since OpenStack and its associated other pieces of open
 sourced software for this purpose is open sourced software, it generally 
 requires you install the various software on your target servers as they
 come from different sources.
@@ -109,15 +109,15 @@ in an OpenStack installation:
 (i.e. 'tunnel_types =' which is in [agent] section)
 
 
-4.0 Install fabric OpenStack enabler
-=====================================
+4.0 Install Fabric Enabler
+==========================
 Make sure your OpenStack installation is running correctly based on required
 setting discussed in the sections above.
 
 4.1 On the control node in the OpenStack installation, get the source file:
 git -b post_rel_1_0_0 clone https://github.com/CiscoSystems/fabric_enabler
 
-4.2 cd ~/openstack_fabric_enabler
+4.2 cd ~/fabric_enabler
 
 4.3 modify enabler_conf.ini
 The sections for modification is the following:
@@ -133,7 +133,9 @@ segmentation_id_max = <segmentation id max value>
 
 Please make sure gateway_mac matches your PoAP template setting in DCNM for
 your leaf switch.
-Please also make sure you use the right range of segment IDs administratrated
+Please also make sure you use the right range of segment IDs administrated
+
+
 by your fabric manager.
 
 
