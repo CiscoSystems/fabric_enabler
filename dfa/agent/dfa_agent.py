@@ -83,9 +83,10 @@ class DfaAgent(object):
     """DFA agent."""
 
     def __init__(self, host, rpc_qn):
-        self._my_host = host
-        self._qn = '_'.join((rpc_qn, self._my_host))
         self._cfg = config.CiscoDFAConfig('neutron').cfg
+        self._my_host = self._cfg.DEFAULT.host if self._cfg.DEFAULT.host else (
+            host)
+        self._qn = '_'.join((rpc_qn, self._my_host))
         LOG.debug('Starting DFA Agent on %s', self._my_host)
 
         # List of task in the agent
@@ -112,7 +113,7 @@ class DfaAgent(object):
         br_ext = 'br-ethd'
         root_helper = self._cfg.sys.root_helper
         self._vdpm = vdpm.VdpMgr(br_int, br_ext, root_helper, self.clnt,
-                                 thishost)
+                                 self._my_host)
         self.pool = eventlet.GreenPool()
         self.setup_rpc()
 
@@ -124,7 +125,7 @@ class DfaAgent(object):
 
     def send_heartbeat(self):
         context = {}
-        args = json.dumps(dict(when=time.ctime(), agent=thishost))
+        args = json.dumps(dict(when=time.ctime(), agent=self._my_host))
         msg = self.clnt.make_msg('heartbeat', context, msg=args)
         resp = self.clnt.cast(msg)
         LOG.debug("send_heartbeat: resp = %s", resp)
@@ -132,7 +133,7 @@ class DfaAgent(object):
     def request_uplink_info(self):
         context = {}
         msg = self.clnt.make_msg('request_uplink_info',
-                                 context, agent=thishost)
+                                 context, agent=self._my_host)
         try:
             resp = self.clnt.call(msg)
             LOG.debug("request_uplink_info: resp = %s" % resp)
