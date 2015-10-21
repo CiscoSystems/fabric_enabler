@@ -261,14 +261,15 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                                                self.PRI_MEDIUM_START,
                                                self.PRI_MEDIUM_START + 5)
 
-        self.dcnm_event = dfa_dcnm.DCNMListener(
-            name='dcnm',
-            ip=dcnm_ip,
-            user=dcnm_amqp_user,
-            password=dcnm_password,
-            pqueue=self.pqueue,
-            c_pri=self.PRI_MEDIUM_START + 1,
-            d_pri=self.PRI_MEDIUM_START + 6)
+        if cfg.dcnm.dcnm_net_create:
+            self.dcnm_event = dfa_dcnm.DCNMListener(
+                name='dcnm',
+                ip=dcnm_ip,
+                user=dcnm_amqp_user,
+                password=dcnm_password,
+                pqueue=self.pqueue,
+                c_pri=self.PRI_MEDIUM_START + 1,
+                d_pri=self.PRI_MEDIUM_START + 6)
 
         self._inst_api = dfa_inst.DFAInstanceAPI()
 
@@ -1408,11 +1409,12 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         self.dfa_threads.append(hb_thrd)
 
         # Create thread to listen to dcnm network create event
-        dcnmL_thrd = utils.EventProcessingThread('DcnmListener',
-                                                 self.dcnm_event,
-                                                 'process_amqp_msgs',
-                                                 self._excpq)
-        self.dfa_threads.append(dcnmL_thrd)
+        if self.cfg.dcnm.dcnm_net_create:
+            dcnmL_thrd = utils.EventProcessingThread('DcnmListener',
+                                                     self.dcnm_event,
+                                                     'process_amqp_msgs',
+                                                     self._excpq)
+            self.dfa_threads.append(dcnmL_thrd)
 
         # Create periodic task to process failure cases in create/delete
         # networks and projects.
