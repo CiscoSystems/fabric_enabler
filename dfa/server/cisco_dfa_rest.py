@@ -20,6 +20,7 @@
 
 import json
 import requests
+import sys
 
 from dfa.common import dfa_exceptions as dexc
 from dfa.common import dfa_logger as logging
@@ -97,12 +98,14 @@ class DFARESTClient(object):
         try:
             cfgplist = self.config_profile_list()
             if self.default_cfg_profile not in cfgplist:
-                self.default_cfg_profile = ('defaultNetworkUniversalEfProfile'
-                                            if self.is_iplus else
-                                            'defaultNetworkIpv4EfProfile')
+                LOG.error("Invalid config profile %s.",
+                          self.default_cfg_profile)
+                sys.exit(_("ERROR: Unable to validate %s" %
+                           self.default_cfg_profile))
         except dexc.DfaClientRequestFailed:
             LOG.error("Failed to send requst to DCNM.")
-            self.default_cfg_profile = 'defaultNetworkIpv4EfProfile'
+            sys.exit(_("ERROR: Unable to validate %s" %
+                       self.default_cfg_profile))
 
     def _create_network(self, network_info):
         """Send create network request to DCNM.
@@ -134,9 +137,12 @@ class DFARESTClient(object):
         url = self._cfg_profile_list_url
         payload = {}
 
-        res = self._send_request('GET', url, payload, 'config-profile')
-        if res and res.status_code in self._resp_ok:
-            return res.json()
+        try:
+            res = self._send_request('GET', url, payload, 'config-profile')
+            if res and res.status_code in self._resp_ok:
+                return res.json()
+        except dexc.DfaClientRequestFailed:
+            LOG.error("Failed to send requst to DCNM.")
 
     def _create_org(self, name, desc):
         """Create organization on the DCNM.
@@ -509,5 +515,6 @@ class DFARESTClient(object):
             res = self._send_request('GET', url, payload, 'dcnm-version')
             if res and res.status_code in self._resp_ok:
                 return res.json().get('Dcnm-Version')
-        except dexc.DfaClientRequestFailed:
+        except dexc.DfaClientRequestFailed as exc:
             LOG.error("Failed to get DCNM version.")
+            sys.exit(_("ERROR: Failed to connect to DCNM: %s" % exc))

@@ -70,7 +70,7 @@ default_sys_opts = {
 
 default_dcnm_opts = {
     'dcnm': {
-        'default_cfg_profile': 'defaultNetworkIpv4EfProfile',
+        'default_cfg_profile': 'defaultNetworkUniversalTfProfile',
         'default_vrf_profile': 'vrf-common-universal',
         'default_partition_name': 'CTX',
         'dcnm_net_ext': '(DCNM)',
