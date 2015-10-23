@@ -15,8 +15,9 @@
 #
 
 
-Description=Nexus Fabric Enabler Agent.
-After=syslog.target network.target
+[Unit]
+Description=Nexus Fabric Enabler Agent
+After=syslog.target network.target neutron-openvswitch-agent.service
 
 [Service]
 Type=simple
@@ -29,4 +30,3 @@ RestartSec=10s
 
 [Install]
 WantedBy=multi-user.target
-
