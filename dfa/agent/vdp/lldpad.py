@@ -525,8 +525,43 @@ class LldpadDriver(object):
             return constants.INVALID_VLAN
         return vlan
 
+    def check_hints(self, reply):
+        '''Parse the hints to check for errors'''
+        try:
+            f_ind = reply.index("hints")
+        except Exception:
+            LOG.error("Incorrect Reply, no hints information found %s"
+                      % reply)
+            return False
+        try:
+            l_ind = reply.rindex("hints")
+        except Exception:
+            LOG.error("Incorrect Reply, no hints information found %s"
+                      % reply)
+            return False
+        if f_ind != l_ind:
+            # Currently not supported if reply contains a filter keyword
+            LOG.error("Err: not supported currently")
+            return False
+        try:
+            hints_compl = reply.partition("hints")[2]
+            hints_val = reply.partition("hints")[2][0:4]
+            len_hints = int(hints_val)
+            hints_val = hints_compl[4:4 + len_hints]
+            hints = int(hints_val)
+            if hints != 0:
+                return False
+        except ValueError:
+            LOG.error("Reply not formatted correctly %s" % reply)
+            return False
+        return True
+
     def get_vlan_from_reply(self, reply):
         '''Parse the reply from VDP daemon to get the VLAN value'''
+        hints_ret = self.check_hints(reply)
+        if not hints_ret:
+            LOG.error("Incorrect hints found %s", reply)
+            return constants.INVALID_VLAN
         try:
             f_ind = reply.index("filter")
         except Exception:
