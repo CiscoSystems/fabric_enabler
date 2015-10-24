@@ -216,6 +216,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             'agent.request.uplink': self.request_uplink_info,
             'cli.static_ip.set': self.set_static_ip_address,
             'agent.vm_result.update': self.vm_result_update,
+            'dhcp_agent.network.remove': self.dhcp_agent_network_remove,
+            'dhcp_agent.network.add': self.dhcp_agent_network_add,
         }
         self.project_info_cache = {}
         self.network = {}
@@ -259,20 +261,23 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                                                self.PRI_MEDIUM_START,
                                                self.PRI_MEDIUM_START + 5)
 
-        self.dcnm_event = dfa_dcnm.DCNMListener(
-            name='dcnm',
-            ip=dcnm_ip,
-            user=dcnm_amqp_user,
-            password=dcnm_password,
-            pqueue=self.pqueue,
-            c_pri=self.PRI_MEDIUM_START + 1,
-            d_pri=self.PRI_MEDIUM_START + 6)
+        if cfg.dcnm.dcnm_net_create:
+            self.dcnm_event = dfa_dcnm.DCNMListener(
+                name='dcnm',
+                ip=dcnm_ip,
+                user=dcnm_amqp_user,
+                password=dcnm_password,
+                pqueue=self.pqueue,
+                c_pri=self.PRI_MEDIUM_START + 1,
+                d_pri=self.PRI_MEDIUM_START + 6)
 
         self._inst_api = dfa_inst.DFAInstanceAPI()
 
         # RPC setup
         self.ser_q = constants.DFA_SERVER_QUEUE
         self._setup_rpc()
+        # doing dhcp consistency check at startup
+        self.turn_on_dhcp_check()
 
     @property
     def cfg(self):
@@ -1167,6 +1172,68 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
                                     rpc.RemoteError):
                                 LOG.error(('Failed to send VM info to agent.'))
 
+    def turn_on_dhcp_check(self):
+        self.dhcp_consist_check = constants.DHCP_PORT_CHECK
+
+    def decrement_dhcp_check(self):
+        self.dhcp_consist_check = self.dhcp_consist_check - 1
+
+    def need_dhcp_check(self):
+        if self.dhcp_consist_check > 0:
+            return True
+        else:
+            return False
+
+    def add_dhcp_port(self, p):
+        port_id = p['id']
+        if self.get_vm(port_id):
+            LOG.info("dhcp port %s has already been  added" %
+                     port_id)
+            return
+
+        vm_info = self._make_vm_info(p, 'up', dhcp_port=True)
+        LOG.debug("add_dhcp_ports : %s" % vm_info)
+        self.port[port_id] = vm_info
+        try:
+            self.neutron_event.send_vm_info(str(vm_info.get('host')),
+                                            str(vm_info))
+        except (rpc.MessagingTimeout, rpc.RPCException,
+                rpc.RemoteError):
+            # Failed to send info to the agent. Keep the data in the
+            # database as failure to send it later.
+            self.add_vms_db(vm_info, constants.CREATE_FAIL)
+            LOG.error('Failed to send VM info to agent.')
+        else:
+            self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
+        return
+
+    def correct_dhcp_ports(self, net_id):
+
+        search_opts = {'network_id': net_id,
+                       'device_owner': 'network:dhcp'}
+
+        data = self.neutronclient.list_ports(**search_opts)
+        dhcp_ports = data.get('ports', [])
+        add = False
+        remove = False
+        for p in dhcp_ports:
+            port_id = p['id']
+            status = p['status']
+            ip_host = p.get('binding:host_id')
+            if not self.neutron_event._clients.get(ip_host):
+                LOG.info("Agent on %s is not active" % ip_host)
+                LOG.info("Ignore DHCP port %s" % port_id)
+                continue
+            if status == 'ACTIVE':
+                add = True
+                self.add_dhcp_port(p)
+            else:
+                self.delete_vm_function(port_id)
+                remove = True
+                LOG.info("port %s, is deleted due to dhcp HA remove"
+                         % port_id)
+        return (add, remove)
+
     def check_dhcp_ports(self):
         instances = self.get_vms()
         if instances is None:
@@ -1175,47 +1242,17 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         wait_dhcp_instances = [(k) for k in instances
                                if k.ip.endswith(constants.IP_DHCP_WAIT)]
         for vm in wait_dhcp_instances:
-            found = False
             net_id = vm.network_id
             if net_id in network_processed:
                 LOG.info("net_id %s has been queried for dhcp port"
                          % net_id)
                 self.strip_wait_dhcp(vm)
+                continue
+            add, remove = self.correct_dhcp_ports(net_id)
 
-            search_opts = {'network_id': net_id,
-                           'device_owner': 'network:dhcp'}
-
-            data = self.neutronclient.list_ports(**search_opts)
-            dhcp_ports = data.get('ports', [])
-            found = False
-            for p in dhcp_ports:
-                found = True
-                network_processed.append(net_id)
-                port_id = p['id']
-                if port_id in self.port or self.get_vm(port_id):
-                    LOG.info("net id %s has dhcp port added" %
-                             net_id)
-                    self.strip_wait_dhcp(vm)
-                    continue
-
-                vm_info = self._make_vm_info(p, 'up', dhcp_port=True)
-                LOG.debug("check_dhcp_ports : %s" % vm_info)
-                self.port[port_id] = vm_info
-                try:
-                    self.neutron_event.send_vm_info(str(vm_info.get('host')),
-                                                    str(vm_info))
-                    self.port[port_id] = vm_info
-                except (rpc.MessagingTimeout, rpc.RPCException,
-                        rpc.RemoteError):
-                    # Failed to send info to the agent. Keep the data in the
-                    # database as failure to send it later.
-                    self.add_vms_db(vm_info, constants.CREATE_FAIL)
-                    LOG.error('Failed to send VM info to agent.')
-                else:
-                    self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
-
-            if found is True:
+            if add is True:
                 self.strip_wait_dhcp(vm)
+                network_processed.append(net_id)
 
     def strip_wait_dhcp(self, vm):
         LOG.info("updaing port %s ip address" % vm.port_id)
@@ -1335,6 +1372,16 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             params = dict(columns=dict(result=result))
             self.update_vm_db(port_id, **params)
 
+    def dhcp_agent_network_add(self, dhcp_net_info):
+        """Process dhcp agent net add event.
+        """
+        self.turn_on_dhcp_check()
+
+    def dhcp_agent_network_remove(self, dhcp_net_info):
+        """Process dhcp agent net remove event.
+        """
+        self.turn_on_dhcp_check()
+
     def create_threads(self):
         """Create threads on server."""
 
@@ -1362,11 +1409,12 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         self.dfa_threads.append(hb_thrd)
 
         # Create thread to listen to dcnm network create event
-        dcnmL_thrd = utils.EventProcessingThread('DcnmListener',
-                                                 self.dcnm_event,
-                                                 'process_amqp_msgs',
-                                                 self._excpq)
-        self.dfa_threads.append(dcnmL_thrd)
+        if self.cfg.dcnm.dcnm_net_create:
+            dcnmL_thrd = utils.EventProcessingThread('DcnmListener',
+                                                     self.dcnm_event,
+                                                     'process_amqp_msgs',
+                                                     self._excpq)
+            self.dfa_threads.append(dcnmL_thrd)
 
         # Create periodic task to process failure cases in create/delete
         # networks and projects.

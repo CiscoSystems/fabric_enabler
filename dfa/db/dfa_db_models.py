@@ -16,6 +16,8 @@
 # @author: Nader Lahouti, Cisco Systems, Inc.
 
 
+import sys
+
 import sqlalchemy as sa
 import sqlalchemy.orm.exc as orm_exc
 
@@ -36,9 +38,8 @@ class DfaNetwork(db.Base):
     segmentation_id = sa.Column(sa.Integer)
     tenant_id = sa.Column(sa.String(36))
     fwd_mod = sa.Column(sa.String(16))
-    vlan = sa.Column(sa.Integer)
     source = sa.Column(sa.String(16))
-    result = sa.Column(sa.String(16))
+    result = sa.Column(sa.String(255))
 
 
 class DfaTenants(db.Base):
@@ -49,7 +50,7 @@ class DfaTenants(db.Base):
     id = sa.Column(sa.String(36), primary_key=True)
     name = sa.Column(sa.String(255), primary_key=True)
     dci_id = sa.Column(sa.Integer)
-    result = sa.Column(sa.String(16))
+    result = sa.Column(sa.String(255))
 
 
 class DfaVmInfo(db.Base):
@@ -68,7 +69,9 @@ class DfaVmInfo(db.Base):
     fwd_mod = sa.Column(sa.String(16))
     gw_mac = sa.Column(sa.String(17))
     host = sa.Column(sa.String(255))
-    result = sa.Column(sa.String(16))
+    vdp_vlan = sa.Column(sa.Integer)
+    local_vlan = sa.Column(sa.Integer)
+    result = sa.Column(sa.String(255))
 
 
 class DfaAgentsDb(db.Base):
@@ -88,7 +91,11 @@ class DfaDBMixin(object):
 
     def __init__(self, cfg):
         # Configure database.
-        db.configure_db(cfg)
+        try:
+            db.configure_db(cfg)
+        except sa.exc.OperationalError:
+            LOG.error('Failed to access to MySQL database.')
+            sys.exit(1)
 
     def add_project_db(self, pid, name, dci_id, result):
         proj = DfaTenants(id=pid, name=name, dci_id=dci_id, result=result)

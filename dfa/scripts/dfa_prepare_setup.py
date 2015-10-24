@@ -82,7 +82,8 @@ dist_data = {
                'agent_conf': 'fabric-enabler-agent.service'},
     'redhat': {'init_dir': '/usr/lib/systemd/system/',
                'server_conf': 'fabric-enabler-server.service',
-               'agent_conf': 'fabric-enabler-agent.service'},
+               'agent_conf': 'fabric-enabler-agent.service',
+               'host': '%'},
 }
 
 
@@ -101,7 +102,7 @@ def get_cmd_output(cmd):
     return output
 
 
-def get_mysql_credentials(cfg_file):
+def get_db_credentials(cfg_file):
     """Get the credentials and database name from options in config file."""
 
     cfgfile = (os.path.dirname(os.path.dirname(os.path.abspath(__file__))) +
@@ -138,6 +139,9 @@ def get_mysql_credentials(cfg_file):
 
         # Get the host name
         host = value[indices[1] + 1:indices[2]]
+        dist = platform.dist()[0].lower()
+        if dist in dist_data:
+            host = dist_data[dist].get('host')
 
         # Get the database name
         db_name = value[indices[2] + 1:indices[3]]
@@ -207,7 +211,7 @@ def modify_conf(cfgfile, service_name, outfn):
 
 def prepare_db(mysql_user, mysql_pass, mysql_host):
 
-    (user, password, host, db, charset) = get_mysql_credentials(dfa_cfg_file)
+    (user, password, host, db, charset) = get_db_credentials(dfa_cfg_file)
 
     # Modify max_connections, if it is not 2000
     mysql_cmd = ('mysql -u%s -p%s -h%s ') % (
@@ -328,8 +332,13 @@ def get_mysql_cred():
         config = ConfigParser.ConfigParser()
         config.read(mysqlconf)
         try:
-            mysql_user = config.get("client", "user")
-            mysql_password = config.get("client", "password")
+            user = config.get("client", "user")
+            mysql_user = user[1:-1] if (user[0] == user[-1] == '"' or
+                                        user[0] == user[-1] == "'") else user
+            password = config.get("client", "password")
+            mysql_password = password[1:-1] if (
+                password[0] == password[-1] == '"' or
+                password[0] == password[-1] == "'") else password
             mysql_host = 'localhost'
         except:
             print('Cannot find %s' % mysqlconf)
@@ -347,6 +356,7 @@ if __name__ == '__main__':
     if os.geteuid() != 0:
         # This is not root
         root_helper = 'sudo '
+
     mysqluser, mysqlpass, mysqlhost = get_mysql_cred()
 
     parser = optparse.OptionParser(usage=usage)
@@ -373,6 +383,8 @@ if __name__ == '__main__':
     if node == 'control':
         if options.mysql_pass is None or options.mysql_host is None or (
                 options.mysql_user is None):
+            mysqlconf = os.path.join(os.path.expanduser('~'), mysqlcnf)
+            print("Cannot find %s" % mysqlconf)
             print("MySQL credentials must be provided when setting up "
                   "a controller node.\nUse --help for more help.")
             sys.exit(1)

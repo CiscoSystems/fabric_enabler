@@ -16,8 +16,6 @@
 # @author: Nader Lahouti, Cisco Systems, Inc.
 
 
-import socket
-
 from keystoneclient.v3 import client
 from neutronclient.v2_0 import client as nc
 
@@ -105,17 +103,12 @@ class EventsHandler(object):
     def create_rpc_client(self, thishost):
         clnt = self._clients.get(thishost)
         if clnt is None:
-            try:
-                host_ip = socket.gethostbyname(thishost)
-            except socket.gaierror:
-                LOG.error('Invalid host name for agent: %s' % thishost)
-            else:
-                clnt = rpc.DfaRpcClient(self._url,
-                                        '_'.join((self._q_agent, thishost)),
-                                        exchange=constants.DFA_EXCHANGE)
-                self._clients[thishost] = clnt
-                LOG.debug('Created client for agent: %(host)s:%(ip)s',
-                          {'host': thishost, 'ip': host_ip})
+            clnt = rpc.DfaRpcClient(self._url,
+                                    '_'.join((self._q_agent, thishost)),
+                                    exchange=constants.DFA_EXCHANGE)
+            self._clients[thishost] = clnt
+            LOG.debug('Created client for agent: %(host)s',
+                      {'host': thishost})
 
     def callback(self, timestamp, event_type, payload):
         """Callback method for processing events in notification queue.
@@ -137,7 +130,7 @@ class EventsHandler(object):
             elif 'update' in event_type:
                 pri = self._update_pri
             else:
-                return
+                pri = self._delete_pri
             self._pq.put((pri, timestamp, data))
 
         except Exception as exc:

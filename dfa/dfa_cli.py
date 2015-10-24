@@ -227,7 +227,7 @@ def dfa_cli():
     if len(sys.argv[1:]) % 2:
         sys.argv.append("")
     sys.argv.append('--config-file')
-    sys.argv.append('/etc/enabler_conf.ini')
+    sys.argv.append('/etc/saf/enabler_conf.ini')
     DfaCli().cmdloop()
 
 if __name__ == '__main__':

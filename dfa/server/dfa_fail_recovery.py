@@ -237,4 +237,12 @@ class DfaFailureRecovery(object):
                 LOG.debug("Success on failure recovery to deleted "
                           "%(project)s", {'project': proj.name})
 
+        # 6. DHCP port consistency check for HA.
+        if self.need_dhcp_check():
+            nets = self.get_all_networks()
+            for net in nets:
+                net_id = net.network_id
+                LOG.info("dhcp consistency check for net id %s" % net_id)
+                self.correct_dhcp_ports(net_id)
+            self.decrement_dhcp_check()
         LOG.info("Finished failure_recovery.")
