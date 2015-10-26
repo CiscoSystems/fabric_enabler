@@ -34,6 +34,8 @@ startup_cmds = {
         'start_keystone': 'service apache2 start',
         'stop_server': 'stop fabric-enabler-server',
         'start_server': 'start fabric-enabler-server',
+        'stop_neutron_server': 'stop neutron-server',
+        'start_neutron_server': 'start neutron-server',
         'get_pty': False,
     },
     'redhat': {
@@ -99,12 +101,11 @@ class NexusFabricEnablerInstaller(object):
         print('    Restarting Neutron Processes   ')
         if (os.path.isfile('/etc/init/neutron-server.conf') or
            os.path.isfile('/usr/lib/systemd/system/neutron-server.service')):
-            if self.distr_name == 'redhat' or self.distr_name == 'centos':
-                self.run_cmd_line(self.stop_neutron_server,
-                                  check_result=False)
-                time.sleep(10)
-                self.run_cmd_line(self.start_neutron_server,
-                                  check_result=False)
+            self.run_cmd_line(self.stop_neutron_server,
+                              check_result=False)
+            time.sleep(10)
+            self.run_cmd_line(self.start_neutron_server,
+                              check_result=False)
         else:
             reg_exes = {}
             for proc in self.neutron_restart_procs:
