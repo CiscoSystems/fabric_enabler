@@ -141,7 +141,9 @@ def get_db_credentials(cfg_file):
         host = value[indices[1] + 1:indices[2]]
         dist = platform.dist()[0].lower()
         if dist in dist_data:
-            host = dist_data[dist].get('host')
+            host = (
+                dist_data[dist].get('host')
+                if dist_data[dist].get('host') else host)
 
         # Get the database name
         db_name = value[indices[2] + 1:indices[3]]
