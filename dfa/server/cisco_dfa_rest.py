@@ -399,7 +399,8 @@ class DFARESTClient(object):
         fwd_mod = self.config_profile_fwding_mode_get(prof)
         return (prof, fwd_mod)
 
-    def create_network(self, tenant_name, network, subnet, part=None):
+    def create_network(self, tenant_name, network, subnet,
+                       part=None, dhcp_range=True):
         """Create network on the DCNM.
 
         :param tenant_name: name of tenant the network belongs to
@@ -438,7 +439,11 @@ class DFARESTClient(object):
                         "organizationName": tenant_name,
                         "partitionName": part,
                         "description": network.name,
-                        "dhcpScope": dhcp_scopes}
+                        "netmaskLength":  subnet_ip_mask[1],
+                        "gateway": gw_ip}
+        if dhcp_range:
+            network_info["dhcpScope"] = dhcp_scopes
+
         if self.is_iplus:
             # Need to add the vrf name to the network info
             prof = self._config_profile_get(network.config_profile)

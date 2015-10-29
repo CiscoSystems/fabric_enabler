@@ -97,6 +97,7 @@ default_dcnm_opts = {
         'dcnm_dhcp_leases': '/var/lib/dhcpd/dhcpd.leases',
         'vlan_id_min': const.VLAN_ID_MIN,
         'vlan_id_max': const.VLAN_ID_MAX,
+        'dcnm_dhcp': 'true',
     },
 }
 
