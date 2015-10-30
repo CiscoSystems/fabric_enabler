@@ -356,6 +356,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                 'dhcp_agent.network.add': self.dhcp_agent_network_add,
             })
             LOG.info("Using internal DHCP")
+        else:
+            self.dhcp_consist_check = 0
+            LOG.info("Using DCNM DHCP")
 
     @property
     def cfg(self):
