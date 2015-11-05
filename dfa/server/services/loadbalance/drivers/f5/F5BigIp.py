@@ -1004,6 +1004,7 @@ class LTM(object):
             response = self.bigip.session.get(request_url,
                                               timeout=REQUEST_TIMEOUT)
             if (response.status_code < 400):
+                js = json.loads(response.text)
                 parentMonitor = js.get('defaultsFrom')
                 if (parentMonitor != None):
                     return mtype

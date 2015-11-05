@@ -7,10 +7,11 @@ import json
 import time
 
 class F5Device(object):
-    def __init__(self, f5IpAddr, username, password):
+    def __init__(self, f5IpAddr, username, password, interface):
         self.username = username
         self.password = password
         self.f5IpAddr = f5IpAddr
+        self.f5Interface = interface
         self.initF5Connection(f5IpAddr, username, password)
 
     def initF5Connection(self, f5hostname, username, password):
@@ -79,7 +80,7 @@ class F5Device(object):
             return False
 
         try:
-            if (big.network.createVlan(vlanName, vlanid, "1.1",  \
+            if (big.network.createVlan(vlanName, vlanid, self.f5Interface,  \
                               context, "Vlan for Tenant" + context) == False):
                 return False
         except F5BigIp.VLANCreateException as vexc:

@@ -52,12 +52,14 @@ class LbMgr(object):
         self._box_ip_list = cfg.loadbalance.lb_mgmt_ip.strip().split(',')
         lb_user_name = cfg.loadbalance.lb_user_name
         lb_user_password = cfg.loadbalance.lb_user_password
+        lb_f5_interface = cfg.loadbalance.lb_f5_interface
         for box in self._box_ip_list:
             LOG.info("Creating driver obj for ip %s" % box)
             self._driver_obj[box] = lb_import_object(cfg.loadbalance.lb_driver,
                                                      box,
                                                      lb_user_name,
-                                                     lb_user_password)
+                                                     lb_user_password,
+                                                     lb_f5_interface)
 
     @property
     def dfa_server(self):
@@ -182,7 +184,7 @@ class LbMgr(object):
         self.release_vlan(vlan_id)
         lb_service = self.get_driver_obj_from_tenant(tenant_id)
         if lb_service:
-            LOG.info("calling cleanupF5Netwwork with vlan %d, tenant %d" %
+            LOG.info("calling cleanupF5Netwwork with vlan %s, tenant %s" %
                      (vlan_id, tenant_id))
             lb_service.cleanupF5Network(vlan_id, tenant_id)
             self.delete_mapping(tenant_id)
@@ -226,6 +228,7 @@ class LbMgr(object):
                                            tenant_id,
                                            self._lb_net_gw,
                                            self._lb_net_mask)
+
         self.call_driver(function_name, pool_info)
 
     def get_tenant_id(self, event):
