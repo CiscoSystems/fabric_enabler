@@ -164,18 +164,13 @@ class RpcCallBacks(object):
         The result reflects the success of failure of operation when an
         agent processes the vm info.
         """
-        args = json.loads(msg)
+        payload = json.loads(msg)
         agent = context.get('agent')
-        port_id = args.get('port_uuid')
-        result = args.get('result')
-        LOG.debug('update_vm_result received from %(agent)s: '
-                  '%(port_id)s %(result)s', {'agent': agent,
-                                             'port_id': port_id,
-                                             'result': result})
+        LOG.debug('update_vm_result received from %(agent)s: %(payload)s',
+                  {'agent': agent, 'payload': payload})
 
         # Add the request into queue for processing.
         event_type = 'agent.vm_result.update'
-        payload = {'port_id': port_id, 'result': result}
         timestamp = time.ctime()
         data = (event_type, payload)
         # TODO use value defined in constants
@@ -1047,14 +1042,18 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
             self.neutron_event.send_vm_info(str(vm_info.get('host')),
                                             str(vm_info))
         except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
-            params = dict(columns=dict(result=constants.DELETE_FAIL))
+            params = dict(columns=dict(status='down',
+                                       result=constants.DELETE_FAIL))
             self.update_vm_db(vm.port_id, **params)
             LOG.error('Failed to send VM info to agent')
         else:
-            self.delete_vm_db(vm.instance_id)
-            LOG.info('Deleted VM %(vm)s from DB.', {'vm': vm.instance_id})
-        if vm.port_id in self.port:
-            del self.port[vm.port_id]
+            # Updating the result to delete pending state. The entry should be
+            # removed when agent confirms delete is successful.
+            params = dict(columns=dict(status='down',
+                                       result=constants.DELETE_PENDING))
+            self.update_vm_db(vm.port_id, **params)
+            LOG.info('VM %(vm)s is in delete pending state.',
+                     {'vm': vm.port_id})
 
     def process_data(self, data):
         LOG.debug('process_data: event: %s, payload: %s' % (data[0], data[1]))
@@ -1267,28 +1266,32 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         # time and uplink is detected.
         agent = payload.get('agent')
         LOG.debug('request_vms_info: Getting VMs info for %s', agent)
-        req = dict(host=payload.get('agent'))
+        req = dict(host=agent)
         instances = self.get_vms_for_this_req(**req)
+        vm_info = []
         for vm in instances:
             if vm.ip.endswith(constants.IP_DHCP_WAIT):
                 ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
             else:
                 ipaddr = vm.ip
-            vm_info = dict(status=vm.status,
+            vm_info.append(dict(status=vm.status,
                            vm_mac=vm.mac,
                            segmentation_id=vm.segmentation_id,
                            host=vm.host,
                            port_uuid=vm.port_id,
                            net_uuid=vm.network_id,
+                           vdp_vlan=vm.vdp_vlan,
+                           local_vlan=vm.local_vlan,
                            oui=dict(ip_addr=ipaddr,
                                     vm_name=vm.name,
                                     vm_uuid=vm.instance_id,
                                     gw_mac=vm.gw_mac,
                                     fwd_mod=vm.fwd_mod,
-                                    oui_id='cisco'))
+                                    oui_id='cisco')))
+
+        if vm_info:
             try:
-                self.neutron_event.send_vm_info(vm.host,
-                                                str(vm_info))
+                self.neutron_event.send_vm_info(agent, str(vm_info))
             except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
                 LOG.error('Failed to send VM info to agent.')
 
@@ -1364,12 +1367,36 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin):
         in the agent.
         """
 
-        port_id = payload.get('port_id')
+        port_id = payload.get('port_uuid')
         result = payload.get('result')
 
         if port_id and result:
+            # Get the entry for this port_id
+            req = dict(port_id=port_id)
+            vms = self.get_vms_for_this_req(**req)
+            if vms is None:
+                LOG.error("There is no instance for port_id %s", port_id)
+                return
+            # Check whether the result is for success on delete.
+            for vm in vms:
+                if vm.result in constants.DELETE_LIST and (
+                   result == constants.RESULT_SUCCESS):
+                    # Deleting VM on the compute node was successful.
+                    # Now delete the VM from the database.
+                    self.delete_vm_db(vm.port_id)
+                    LOG.info('Deleted VM %(vm)s from DB.', {'vm': vm.name})
+                    if vm.port_id in self.port:
+                        del self.port[vm.port_id]
+                    return
+
             # Update the VM's result field.
-            params = dict(columns=dict(result=result))
+            if payload.get('vdp_vlan') is None or (
+               payload.get('local_vlan') is None):
+                params = dict(columns=dict(result=result))
+            else:
+                params = dict(columns=dict(vdp_vlan=payload.get('vdp_vlan'),
+                              local_vlan=payload.get('local_vlan'),
+                              result=result))
             self.update_vm_db(port_id, **params)
 
     def dhcp_agent_network_add(self, dhcp_net_info):

@@ -55,7 +55,8 @@ class VdpQueMsg(object):
     '''Construct VDP Message'''
     def __init__(self, msg_type, port_uuid=None, vm_mac=None, oui=None,
                  net_uuid=None, segmentation_id=None, status=None,
-                 phy_uplink=None, br_int=None, br_ex=None, root_helper=None):
+                 vm_bulk_list=None, phy_uplink=None, br_int=None, br_ex=None,
+                 root_helper=None):
         self.msg_dict = {}
         self.msg_type = msg_type
         if msg_type == constants.VM_MSG_TYPE:
@@ -64,6 +65,8 @@ class VdpQueMsg(object):
         elif msg_type == constants.UPLINK_MSG_TYPE:
             self.construct_uplink_msg(status, phy_uplink, br_int, br_ex,
                                       root_helper)
+        elif msg_type == constants.VM_BULK_SYNC_MSG_TYPE:
+            self.construct_vm_bulk_sync_msg(vm_bulk_list, phy_uplink)
 
     def construct_vm_msg(self, port_uuid, vm_mac, net_uuid,
                          segmentation_id, status, oui, phy_uplink):
@@ -74,6 +77,10 @@ class VdpQueMsg(object):
         self.msg_dict['status'] = status
         self.msg_dict['oui'] = oui
         self.msg_dict['phy_uplink'] = phy_uplink
+
+    def construct_vm_bulk_sync_msg(self, vm_bulk_list, phy_uplink):
+        self.msg_dict['phy_uplink'] = phy_uplink
+        self.msg_dict['vm_bulk_list'] = vm_bulk_list
 
     def construct_uplink_msg(self, status, phy_uplink, br_int, br_ex,
                              root_helper):
@@ -155,9 +162,14 @@ class VdpMgr(object):
                 return
             cnt = cnt + 1
 
-    def update_vm_result(self, port_uuid, result):
+    def update_vm_result(self, port_uuid, result, lvid=None,
+                         vdp_vlan=None):
         context = {'agent': self.host}
-        args = json.dumps(dict(port_uuid=port_uuid, result=result))
+        if lvid is None or vdp_vlan is None:
+            args = json.dumps(dict(port_uuid=port_uuid, result=result))
+        else:
+            args = json.dumps(dict(port_uuid=port_uuid, local_vlan=lvid,
+                                   vdp_vlan=vdp_vlan, result=result))
         msg = self.rpc_clnt.make_msg('update_vm_result', context, msg=args)
         try:
             resp = self.rpc_clnt.call(msg)
@@ -165,15 +177,29 @@ class VdpMgr(object):
         except rpc.MessagingTimeout:
             LOG.error("RPC timeout: Failed to update VM result on the server")
 
+    def vdp_vlan_change_cb(self, port_uuid, lvid, vdp_vlan):
+        '''
+            Callback function for updating the VDP VLAN in DB,
+            called by VDP
+        '''
+        LOG.info("Vlan change CB lvid %(lvid)s VDP %(vdp)s",
+                 {'lvid': lvid, 'vdp': vdp_vlan})
+        self.update_vm_result(port_uuid, constants.RESULT_SUCCESS,
+                              lvid=lvid, vdp_vlan=vdp_vlan)
+
     def process_vm_event(self, msg, phy_uplink):
         LOG.info("In processing VM Event status %s for MAC %s UUID %s oui %s"
                  % (msg.get_status(), msg.get_mac(),
                     msg.get_port_uuid(), msg.get_oui()))
         time.sleep(10)
+        if msg.get_status() == 'up':
+            res_fail = constants.CREATE_FAIL
+        else:
+            res_fail = constants.DELETE_FAIL
         if (not self.uplink_det_compl or
                 phy_uplink not in self.ovs_vdp_obj_dict):
             LOG.error("Uplink Port Event not received yet")
-            self.update_vm_result(msg.get_port_uuid(), constants.CREATE_FAIL)
+            self.update_vm_result(msg.get_port_uuid(), res_fail)
             return
         ovs_vdp_obj = self.ovs_vdp_obj_dict[phy_uplink]
         ret = ovs_vdp_obj.send_vdp_port_event(msg.get_port_uuid(),
@@ -184,10 +210,45 @@ class VdpMgr(object):
                                               msg.get_oui())
         if not ret:
             LOG.error("Error in VDP port event, Err Queue enq")
-            self.update_vm_result(msg.get_port_uuid(), constants.CREATE_FAIL)
+            self.update_vm_result(msg.get_port_uuid(), res_fail)
         else:
+            LOG.error("Success in VDP port event")
+            lvid, vdp_vlan = ovs_vdp_obj.get_lvid_vdp_vlan(msg.get_net_uuid(),
+                                                           msg.get_port_uuid())
             self.update_vm_result(msg.get_port_uuid(),
-                                  constants.RESULT_SUCCESS)
+                                  constants.RESULT_SUCCESS,
+                                  lvid=lvid, vdp_vlan=vdp_vlan)
+
+    def process_bulk_vm_event(self, msg, phy_uplink):
+        LOG.info("In processing Bulk VM Event status %s", msg)
+        time.sleep(3)
+        if (not self.uplink_det_compl or
+                phy_uplink not in self.ovs_vdp_obj_dict):
+            LOG.error("Uplink Port Event not received yet in bulk process")
+            # This condition shouldn't be hit as only when uplink is obtained
+            # save_uplink is called and that in turns calls this process_bulk.
+            # But, wrong failure constant is passed below. Unless the message
+            # is processed, it's not known if it's CREATE or DELETE fail.
+            self.update_vm_result(msg.get_port_uuid(), constants.CREATE_FAIL)
+            return
+        ovs_vdp_obj = self.ovs_vdp_obj_dict[phy_uplink]
+        for vm_dict in msg.msg_dict.get('vm_bulk_list'):
+            if vm_dict['status'] == 'down':
+                ovs_vdp_obj.pop_local_cache(vm_dict['port_uuid'],
+                                            vm_dict['vm_mac'],
+                                            vm_dict['net_uuid'],
+                                            vm_dict['local_vlan'],
+                                            vm_dict['vdp_vlan'],
+                                            vm_dict['segmentation_id'])
+            vm_msg = VdpQueMsg(constants.VM_MSG_TYPE,
+                               port_uuid=vm_dict['port_uuid'],
+                               vm_mac=vm_dict['vm_mac'],
+                               net_uuid=vm_dict['net_uuid'],
+                               segmentation_id=vm_dict['segmentation_id'],
+                               status=vm_dict['status'],
+                               oui=vm_dict['oui'],
+                               phy_uplink=phy_uplink)
+            self.process_vm_event(vm_msg, phy_uplink)
 
     def process_uplink_event(self, msg, phy_uplink):
         LOG.info("Received New uplink Msg %s for uplink %s" %
@@ -197,7 +258,7 @@ class VdpMgr(object):
             try:
                 self.ovs_vdp_obj_dict[phy_uplink] = ovs_vdp.OVSNeutronVdp(
                     phy_uplink, msg.get_integ_br(), msg.get_ext_br(),
-                    msg.get_root_helper())
+                    msg.get_root_helper(), self.vdp_vlan_change_cb)
             except Exception as e:
                 LOG.error("OVS VDP Object creation failed")
                 ovs_exc_raised = True
@@ -232,6 +293,8 @@ class VdpMgr(object):
             try:
                 if msg_type == constants.VM_MSG_TYPE:
                     self.process_vm_event(msg, phy_uplink)
+                elif msg_type == constants.VM_BULK_SYNC_MSG_TYPE:
+                    self.process_bulk_vm_event(msg, phy_uplink)
                 elif msg_type == constants.UPLINK_MSG_TYPE:
                     try:
                         self.process_uplink_event(msg, phy_uplink)
@@ -422,18 +485,24 @@ class VdpMgr(object):
             # yield
             LOG.info("Enqueued Uplink Msg")
 
-    def vdp_vm_event(self, vm_dict):
-        LOG.info("Obtained VM event Enqueueing Status %s MAC %s uuid %s oui %s"
-                 % (vm_dict['status'], vm_dict['vm_mac'], vm_dict['net_uuid'],
-                    vm_dict['oui']))
-        vm_msg = VdpQueMsg(constants.VM_MSG_TYPE,
-                           port_uuid=vm_dict['port_uuid'],
-                           vm_mac=vm_dict['vm_mac'],
-                           net_uuid=vm_dict['net_uuid'],
-                           segmentation_id=vm_dict['segmentation_id'],
-                           status=vm_dict['status'],
-                           oui=vm_dict['oui'],
-                           phy_uplink=self.phy_uplink)
+    def vdp_vm_event(self, vm_dict_list):
+        if isinstance(vm_dict_list, list):
+            vm_msg = VdpQueMsg(constants.VM_BULK_SYNC_MSG_TYPE,
+                               vm_bulk_list=vm_dict_list,
+                               phy_uplink=self.phy_uplink)
+        else:
+            vm_dict = vm_dict_list
+            LOG.info("Obtained VM event Enqueueing Status %s MAC %s uuid %s "
+                     "oui %s", vm_dict['status'], vm_dict['vm_mac'],
+                     vm_dict['net_uuid'], vm_dict['oui'])
+            vm_msg = VdpQueMsg(constants.VM_MSG_TYPE,
+                               port_uuid=vm_dict['port_uuid'],
+                               vm_mac=vm_dict['vm_mac'],
+                               net_uuid=vm_dict['net_uuid'],
+                               segmentation_id=vm_dict['segmentation_id'],
+                               status=vm_dict['status'],
+                               oui=vm_dict['oui'],
+                               phy_uplink=self.phy_uplink)
         self.que.enqueue(constants.Q_VM_PRIO, vm_msg)
 
     def dfa_uplink_restart(self, uplink_dict):

@@ -156,6 +156,8 @@ class EventsHandler(object):
             return
 
         context = {}
+        LOG.debug("send_vm_info: host: %(host)s, msg: %(msg)s",
+                  {'host': thishost, 'msg': msg})
         thismsg = clnt.make_msg('send_vm_info', context, msg=msg)
         resp = clnt.call(thismsg)
         LOG.debug("send_vm_info: resp = %s" % resp)

@@ -181,17 +181,15 @@ class DfaFailureRecovery(object):
                     self.update_vm_db(vm.port_id, **params)
                     LOG.info('Created VM %(vm)s.', {'vm': vm.name})
 
-        for vm in instances:
             if vm.result == constants.DELETE_FAIL:
-                vm_info['status'] = 'down'
                 try:
                     self.neutron_event.send_vm_info(str(vm.host), str(vm_info))
                 except Exception as e:
                     LOG.error('Failed to send VM info to agent. Reason %s' % (
                         str(e)))
-                else:
-                    self.delete_vm_db(vm.instance_id)
-                    LOG.info('Deleted VM %(vm)s from DB.', {'vm': vm.name})
+                # Do not delete the vm from database, as it may not be deleted
+                # in the agent side. Keep it in the database till agent sends
+                # success on deleteing the VM, then delete it from database.
 
         # 4. Try failure recovery for delete network.
         for net in nets:

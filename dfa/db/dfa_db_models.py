@@ -241,11 +241,11 @@ class DfaDBMixin(object):
                            result=result)
             session.add(vm)
 
-    def delete_vm_db(self, vm_uuid):
+    def delete_vm_db(self, port_id):
         session = db.get_session()
         with session.begin(subtransactions=True):
             vm = session.query(DfaVmInfo).filter_by(
-                instance_id=vm_uuid).first()
+                port_id=port_id).first()
             session.delete(vm)
 
     def update_vm_db(self, vm_port_id, **params):
