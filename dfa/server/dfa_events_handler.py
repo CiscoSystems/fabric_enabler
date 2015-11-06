@@ -85,7 +85,7 @@ class EventsHandler(object):
         # Setup RPC client.
         self._q_agent = constants.DFA_AGENT_QUEUE
         self._url = self._cfg.dfa_rpc.transport_url
-    
+
     @property
     def nclient(self):
         user = self._cfg.keystone_authtoken.admin_user
@@ -130,14 +130,14 @@ class EventsHandler(object):
             else:
                 url = self._url % {'ip': host_ip}
                 clnt = rpc.DfaRpcClient(url, self._q_agent)
-                self._clients[thishost]=clnt
+                self._clients[thishost] = clnt
                 LOG.debug('Created client for agent: %s:%s' % (
                           thishost, host_ip))
 
     def callback(self, timestamp, event_type, payload):
         """Callback method for processing events in notification queue.
 
-        :param timestamp: time the message is received. 
+        :param timestamp: time the message is received.
         :param event_type: event type in the notification queue such as
                            identity.project.created, identity.project.deleted.
         :param payload: Contains information of an event
@@ -178,6 +178,8 @@ class EventsHandler(object):
             return
 
         context = {}
+        LOG.debug("send_vm_info: host: %(host)s, msg: %(msg)s",
+                   {'host': thishost, 'msg': msg})
         thismsg = clnt.make_msg('send_vm_info', context, msg=msg)
         resp = clnt.call(thismsg)
         LOG.debug("send_vm_info: resp = %s" % resp)

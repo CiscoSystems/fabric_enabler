@@ -42,29 +42,31 @@ class RpcCallBacks(object):
 
     """RPC call back methods."""
 
-    def __init__(self, vdpd, iptd):
+    def __init__(self, vdpd, ipt_drvr):
         self._vdpd = vdpd
-        self._iptd = iptd
+        self._iptd = ipt_drvr
 
-    def test(self, context, args):
-        LOG.debug("RX: context=%s, args=%s" % (context, args))
-        resp = 'Reply from %s.' % thishost
-        return resp
+    def _enqueue_event(self, vm):
+        oui = vm.get('oui')
+        if oui and oui.get('ip_addr') != '0.0.0.0' and self._iptd:
+            rule_info = dict(mac=vm.get('vm_mac'),
+                             ip=oui.get('ip_addr'),
+                             port=vm.get('port_uuid'),
+                             status=vm.get('status'))
+            self._iptd.enqueue_event(rule_info)
 
     def send_vm_info(self, context, msg):
         vm_info = eval(msg)
-        LOG.debug('Received %(vm_info)s for %(instance)s' % (
-            {'vm_info': vm_info, 'instance': vm_info.get('inst_name')}))
+        LOG.debug('Received vm_info: %(vm_info)s', {'vm_info': vm_info})
         # Call VDP/LLDPad API to send the info
         self._vdpd.vdp_vm_event(vm_info)
 
         # Enqueue the vm info for updating iptables.
-        oui = vm_info.get('oui')
-        if oui and oui.get('ip_addr') != '0.0.0.0' and self._iptd:
-            rule_info = dict(mac=vm_info.get('vm_mac'), ip=oui.get('ip_addr'),
-                             port=vm_info.get('port_uuid'),
-                             status=vm_info.get('status'))
-            self._iptd.enqueue_event(rule_info)
+        if isinstance(vm_info, list):
+            for vm in vm_info:
+                self._enqueue_event(vm)
+        else:
+            self._enqueue_event(vm_info)
 
     def update_ip_rule(self, context, msg):
         rule_info = eval(msg)
@@ -137,7 +139,8 @@ class DfaAgent(object):
 
     def request_uplink_info(self):
         context = {}
-        msg = self.clnt.make_msg('request_uplink_info', context, agent=thishost)
+        msg = self.clnt.make_msg('request_uplink_info', context,
+                                 agent=thishost)
         try:
             resp = self.clnt.call(msg)
             LOG.debug("request_uplink_info: resp = %s" % resp)
