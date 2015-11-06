@@ -35,6 +35,7 @@ setup(
         ],
         'services.firewall.native.drivers': [
             'phy_asa = dfa.server.services.firewall.native.drivers.phy_asa:PhyAsa',
+            'native = dfa.server.services.firewall.native.drivers.native:NativeFw',
         ]
     },
     zip_safe=False,
