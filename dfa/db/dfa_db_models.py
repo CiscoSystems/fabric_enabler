@@ -305,7 +305,7 @@ class DfaNetwork(db.Base):
     vlan = sa.Column(sa.Integer)
     mob_domain = sa.Column(sa.String(16))
     source = sa.Column(sa.String(16))
-    result = sa.Column(sa.String(16))
+    result = sa.Column(sa.String(255))
 
 
 class DfaTenants(db.Base):
@@ -316,7 +316,7 @@ class DfaTenants(db.Base):
     id = sa.Column(sa.String(36), primary_key=True)
     name = sa.Column(sa.String(255), primary_key=True)
     dci_id = sa.Column(sa.Integer)
-    result = sa.Column(sa.String(16))
+    result = sa.Column(sa.String(255))
 
 
 class DfaVmInfo(db.Base):
@@ -335,7 +335,9 @@ class DfaVmInfo(db.Base):
     fwd_mod = sa.Column(sa.String(16))
     gw_mac = sa.Column(sa.String(17))
     host = sa.Column(sa.String(255))
-    result = sa.Column(sa.String(16))
+    vdp_vlan = sa.Column(sa.Integer)
+    local_vlan = sa.Column(sa.Integer)
+    result = sa.Column(sa.String(255))
 
 
 class DfaAgentsDb(db.Base):
@@ -541,11 +543,11 @@ class DfaDBMixin(object):
                            result=result)
             session.add(vm)
 
-    def delete_vm_db(self, vm_uuid):
+    def delete_vm_db(self, port_id):
         session = db.get_session()
         with session.begin(subtransactions=True):
             vm = session.query(DfaVmInfo).filter_by(
-                instance_id=vm_uuid).first()
+                port_id=port_id).first()
             session.delete(vm)
 
     def update_vm_db(self, vm_port_id, **params):

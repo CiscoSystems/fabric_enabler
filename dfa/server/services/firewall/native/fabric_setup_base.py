@@ -232,9 +232,49 @@ class ServiceIpSegTenantMap(dfa_dbm.DfaDBMixin):
         ''' Store the state of FW create/del operation '''
         self.state = state
 
-    def get_state(self):
+    # Following is the logic for the two functions below:
+    # OS_Status      DCNM_Status
+    #  CR              CR or UPD  => Create in Both (done or ongoing)
+    #  DEL             DEL        => Delete in both (done or ongoing)
+    #  CR              DEL        => Create happened in OS, DEL ongoing in DCNM
+    #  DEL             CR or UPD  => Invalid state
+    # Only if OS status is Create and DCNM is not Delete (None is ok), then
+    # Create is ongoing
+    # If DCNM status is Delete then irrespective of OS state, delete is
+    # ongoing
+
+    def is_cur_state_create(self):
+        os_stat = 'CREATE' in self.fw_dict['os_status']
+        if os_stat and 'DEL' not in self.fw_dict['dcnm_status']:
+            return True
+        else:
+            return False
+
+    def is_cur_state_delete(self):
+        dcnm_stat = 'DEL' in self.fw_dict['dcnm_status']
+        return dcnm_stat
+
+    def get_state(self, from_str):
         ''' Retrieve the state of FW create/del operation '''
-        return self.state
+        # IF create is done completely, just return that state.
+        # IF delete is done completely, there's nothing in DB, so no need to
+        # check that condition
+        if 'os_status' not in self.fw_dict or \
+           'dcnm_status' not in self.fw_dict or \
+           self.fw_dict['dcnm_status'] == fw_const.DCNM_CREATE_SUCCESS:
+            return self.state
+        if from_str == 'DELETE':
+            ret = self.is_cur_state_create()
+            if ret:
+                return self.state - 1
+            else:
+                return self.state
+        else:
+            ret = self.is_cur_state_delete()
+            if ret:
+                return self.state + 1
+            else:
+                return self.state
 
 
 class FabricApi(object):
@@ -467,7 +507,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         self.dcnm_obj = None
         # This is a mapping of create result message string to state.
         self.fabric_state_map = {
-            fw_const.INIT_STATE: fw_const.OS_IN_NETWORK_STATE,
+            fw_const.INIT_STATE_STR: fw_const.OS_IN_NETWORK_STATE,
             fw_const.OS_IN_NETWORK_CREATE_FAIL:
                 fw_const.OS_IN_NETWORK_STATE,
             fw_const.OS_IN_NETWORK_CREATE_SUCCESS:
@@ -502,7 +542,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
                 fw_const.FABRIC_PREPARE_DONE_STATE}
         # This is a mapping of delete result message string to state.
         self.fabric_state_del_map = {
-            fw_const.INIT_STATE: fw_const.OS_IN_NETWORK_STATE,
+            fw_const.INIT_STATE_STR: fw_const.OS_IN_NETWORK_STATE,
             fw_const.OS_IN_NETWORK_DEL_FAIL:
                 fw_const.OS_IN_NETWORK_STATE,
             fw_const.OS_IN_NETWORK_DEL_SUCCESS:
@@ -530,7 +570,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             fw_const.DCNM_OUT_NETWORK_DEL_FAIL:
                 fw_const.DCNM_OUT_NETWORK_STATE,
             fw_const.DCNM_OUT_NETWORK_DEL_SUCCESS:
-                fw_const.DCNM_OUT_PART_UPDATE_STATE,
+                fw_const.DCNM_OUT_PART_STATE,
             fw_const.DCNM_OUT_PART_UPDDEL_FAIL:
                 fw_const.DCNM_OUT_PART_UPDATE_STATE,
             fw_const.DCNM_OUT_PART_UPDDEL_SUCCESS:
@@ -539,6 +579,8 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         # This is a mapping of state to a dict of appropriate
         # create and delete functions.
         self.fabric_fsm = {
+            fw_const.INIT_STATE:
+                [self.init_state, self.init_state],
             fw_const.OS_IN_NETWORK_STATE:
                 [self.create_os_in_nwk, self.delete_os_in_nwk],
             fw_const.OS_OUT_NETWORK_STATE:
@@ -1369,6 +1411,10 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         LOG.info("Out partition cleared -noop- with service ip addr")
         return True
 
+    def init_state(self, tenant_id, tenant_name, is_fw_virt=False):
+        ''' Dummy function called at the init stage '''
+        return True
+
     def prepare_fabric_done(self, tenant_id, tenant_name, is_fw_virt=False):
         ''' Dummy function called at the final stage '''
         return True
@@ -1409,7 +1455,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         ret = True
         serv_obj = self.get_service_obj(tenant_id)
         serv_obj.get_store_local_final_result()
-        state = serv_obj.get_state()
+        state = serv_obj.get_state('CREATE')
         while ret:
             try:
                 ret = self.fabric_fsm[state][0](tenant_id, tenant_name,
@@ -1438,7 +1484,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         ret = True
         serv_obj = self.get_service_obj(tenant_id)
         serv_obj.get_store_local_final_result()
-        state = serv_obj.get_state()
+        state = serv_obj.get_state('DELETE')
         while ret:
             try:
                 ret = self.fabric_fsm[state][1](tenant_id, tenant_name,

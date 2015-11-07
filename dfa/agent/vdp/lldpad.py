@@ -650,6 +650,21 @@ class LldpadDriver(object):
         :param sw_resp: Flag indicating if response is required from the daemon
         '''
         # Correct non-zero VLAN needs to be specified
+        if filter_frmt == vdp_const.VDP_FILTER_GIDMACVID:
+            reply = self.send_vdp_query_msg("assoc", mgrid, typeid, typeid_ver,
+                                            vsiid_frmt, vsiid, filter_frmt,
+                                            gid, mac, vlan, oui_id, oui_data)
+            vlan_resp = self.get_vlan_from_reply(reply)
+            # This is to cover cases where the enabler has a different VLAN
+            # than LLDPAD. deassoc won't go through if wrong VLAN is passed.
+            # Since enabler does not have right VLAN, most likely flows are not
+            # programmed. Otherwise, there will be stale flows. No way of
+            # knowing unless all flows are read and compared.
+            if vlan_resp != constants.INVALID_VLAN:
+                if vlan != vlan_resp:
+                    LOG.info("vlan_resp %(resp)s different from passed VLAN "
+                             "%(vlan)s", {'resp': vlan_resp, 'vlan': vlan})
+                    vlan = vlan_resp
         self.send_vdp_msg("deassoc", mgrid, typeid, typeid_ver,
                           vsiid_frmt, vsiid, filter_frmt, gid, mac, vlan,
                           oui_id, oui_data, sw_resp)

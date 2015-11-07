@@ -87,15 +87,19 @@ class DeviceMgr(object):
         self.mgmt_ip_list = cfg.firewall.fw_mgmt_ip
         self.mgmt_ip_list = self.mgmt_ip_list.strip('[').rstrip(']').split(',')
         self.user_list = cfg.firewall.fw_username
-        self.user_list = self.user_list.strip('[').rstrip(']').split(',')
+        if self.user_list:
+            self.user_list = self.user_list.strip('[').rstrip(']').split(',')
         self.pwd_list = cfg.firewall.fw_password
-        self.pwd_list = self.pwd_list.strip('[').rstrip(']').split(',')
+        if self.pwd_list:
+            self.pwd_list = self.pwd_list.strip('[').rstrip(']').split(',')
         self.interface_in_list = cfg.firewall.fw_interface_in
-        self.interface_in_list = self.interface_in_list.strip('[').\
-            rstrip(']').split(',')
+        if self.interface_in_list:
+            self.interface_in_list = self.interface_in_list.strip('[').\
+                rstrip(']').split(',')
         self.interface_out_list = cfg.firewall.fw_interface_out
-        self.interface_out_list = self.interface_out_list.strip('[').\
-            rstrip(']').split(',')
+        if self.interface_out_list:
+            self.interface_out_list = self.interface_out_list.strip('[').\
+                rstrip(']').split(',')
         self.obj_dict = dict()
         cnt = 0
         dev = cfg.firewall.device
@@ -135,10 +139,14 @@ class DeviceMgr(object):
             cfg_dict = {}
             drvr_obj = self.obj_dict.get(ip).get('drvr_obj')
             cfg_dict['mgmt_ip_addr'] = ip
-            cfg_dict['user'] = self.user_list[cnt]
-            cfg_dict['pwd'] = self.pwd_list[cnt]
-            cfg_dict['interface_in'] = self.interface_in_list[cnt]
-            cfg_dict['interface_out'] = self.interface_out_list[cnt]
+            if self.user_list is not None:
+                cfg_dict['user'] = self.user_list[cnt]
+            if self.pwd_list is not None:
+                cfg_dict['pwd'] = self.pwd_list[cnt]
+            if self.interface_in_list is not None:
+                cfg_dict['interface_in'] = self.interface_in_list[cnt]
+            if self.interface_out_list is not None:
+                cfg_dict['interface_out'] = self.interface_out_list[cnt]
             drvr_obj.initialize(cfg_dict)
             cnt = cnt + 1
 
