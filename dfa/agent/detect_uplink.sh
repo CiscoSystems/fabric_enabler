@@ -21,7 +21,7 @@ logger  -t DFA_UPLINK_DET "Interface list is $interface_list"
 for interface in $interface_list
 do
    logger -t DFA_UPLINK_DET $interface
-   ip addr show $interface | grep 'inet' >/dev/null
+   ip addr show $interface | grep -w 'inet' >/dev/null
    if [ $? -ne 0 ]
    then
       logger -t DFA_UPLINK_DET "checking if $interface is an uplink"
