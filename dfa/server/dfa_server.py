@@ -1218,10 +1218,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             # Failed to send info to the agent. Keep the data in the
             # database as failure to send it later.
             params = dict(columns=dict(result=constants.DELETE_FAIL))
-            self.update_vm_db(vnic_info.get('vm_uuid'), **params)
+            self.update_vm_db(vnic_info.get('port_id'), **params)
             LOG.error('Failed to send VM info to agent')
         else:
-            self.delete_vm_db(vnic_info.get('vm_uuid'))
+            self.delete_vm_db(vnic_info.get('port_id'))
 
     def process_data(self, data):
         LOG.debug('process_data: event: %s, payload: %s' % (data[0], data[1]))

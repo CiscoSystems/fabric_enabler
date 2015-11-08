@@ -1520,11 +1520,15 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         if dcnm_status is None and os_status is not None:
             dcnm_status = fw_const.DCNM_INIT_STATE
         if os_status != fw_const.OS_CREATE_SUCCESS:
-            state = os_status
+            state_str = os_status
         else:
-            state = dcnm_status
-        state_fn = self.fabric_state_map.get(state)
-        return state_fn
+            state_str = dcnm_status
+        state = self.fabric_state_map.get(state_str)
+        if state is None:
+            # This happens when delete was going on. Process restarted during
+            # which time create was issued.
+            state = self.fabric_state_del_map.get(state_str)
+        return state
 
     def pop_del_fw_state(self, os_status, dcnm_status):
         '''
@@ -1539,11 +1543,15 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         if dcnm_status is None and os_status is not None:
             dcnm_status = fw_const.DCNM_INIT_STATE
         if dcnm_status != fw_const.DCNM_DELETE_SUCCESS:
-            state = dcnm_status
+            state_str = dcnm_status
         else:
-            state = os_status
-        state_fn = self.fabric_state_del_map.get(state)
-        return state_fn
+            state_str = os_status
+        state = self.fabric_state_del_map.get(state_str)
+        if state is None:
+            # This happens when create was going on. Process restarted during
+            # which time delete was issued.
+            state = self.fabric_state_map.get(state_str)
+        return state
 
     def pop_fw_local(self, tenant_id, net_id, direc, node_ip):
         '''

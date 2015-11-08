@@ -45,7 +45,7 @@ class MaxSched(object):
             self.res[cnt]['quota'] = drvr_obj.get_max_quota()
             self.res[cnt]['obj_dict'] = obj_elem_dict
             self.res[cnt]['used'] = 0
-            self.res[cnt]['fw_id'] = None
+            self.res[cnt]['fw_id_lst'] = []
             cnt = cnt + 1
 
     def allocate_fw_dev(self, fw_id, new):
@@ -57,7 +57,7 @@ class MaxSched(object):
             if used < self.res.get(cnt).get('quota'):
                 if new:
                     self.res[cnt]['used'] = used + 1
-                self.res[cnt]['fw_id'] = fw_id
+                self.res[cnt]['fw_id_lst'].append(fw_id)
                 return self.res[cnt].get('obj_dict'), (
                     self.res[cnt].get('mgmt_ip'))
         return None, None
@@ -65,7 +65,7 @@ class MaxSched(object):
     def get_fw_dev_map(self, fw_id):
         ''' Return the object dict and mgmt ip for a firewall '''
         for cnt in self.res:
-            if self.res.get(cnt).get('fw_id') == fw_id:
+            if fw_id in self.res.get(cnt).get('fw_id_lst'):
                 return self.res[cnt].get('obj_dict'), (
                     self.res[cnt].get('mgmt_ip'))
         return None, None
@@ -73,8 +73,10 @@ class MaxSched(object):
     def deallocate_fw_dev(self, fw_id):
         ''' Release the firewall resource '''
         for cnt in self.res:
-            if self.res.get(cnt).get('fw_id') == fw_id:
+            if fw_id in self.res.get(cnt).get('fw_id_lst'):
                 self.res[cnt]['used'] = self.res[cnt]['used'] - 1
+                self.res.get(cnt).get('fw_id_lst').remove(fw_id)
+                return
 
 
 class DeviceMgr(object):

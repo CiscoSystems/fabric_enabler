@@ -71,7 +71,7 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
         Returns the maximum number of FW instance that a single FW can
         support
         '''
-        return 1
+        return 50
 
     def create_router(self, tenant_id, tenant_name):
         ''' Routine to create a Openstack router for the FW '''
@@ -264,8 +264,8 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
 
         # Send message for router port auto config for in service nwk
         in_net = self.get_in_net_id(tenant_id)
-        ret = self.send_rout_port_msg(tenant_id, tenant_name, rout_id, in_net,
-                                      in_sub, in_seg, 'up')
+        ret = self.send_rout_port_msg(tenant_id, tenant_name + '_in', rout_id,
+                                      in_net, in_sub, in_seg, 'up')
         if not ret:
             LOG.error("Sending rout port message failed for in network "
                       "tenant %(tenant)s subnet %(seg)s",
@@ -275,14 +275,15 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
 
         # Send message for router port auto config for out service nwk
         out_net = self.get_out_net_id(tenant_id)
-        ret = self.send_rout_port_msg(tenant_id, tenant_name, rout_id, out_net,
-                                      out_sub, out_seg, 'up')
+        ret = self.send_rout_port_msg(tenant_id, tenant_name + '_out', rout_id,
+                                      out_net, out_sub, out_seg, 'up')
         if not ret:
             LOG.error("Sending rout port message failed for out network "
                       "tenant %(tenant)s subnet %(seg)s",
                       {'tenant': tenant_id, 'seg': out_seg})
-            ret = self.send_rout_port_msg(tenant_id, tenant_name, rout_id,
-                                          in_net, in_sub, in_seg, 'down')
+            ret = self.send_rout_port_msg(tenant_id, tenant_name + '_in',
+                                          rout_id, in_net, in_sub, in_seg,
+                                          'down')
             if not ret:
                 LOG.error("Error case, sending rout port message for in nwk"
                           " tenant %(tenant)s subnet %(seg)s",
@@ -322,14 +323,14 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
 
         if tenant_id not in self.tenant_dict:
             self.create_tenant_dict(tenant_id, rout_id)
-        ret = self.send_rout_port_msg(tenant_id, tenant_name, rout_id, in_net,
-                                      in_sub, in_seg, 'down')
+        ret = self.send_rout_port_msg(tenant_id, tenant_name + '_in', rout_id,
+                                      in_net, in_sub, in_seg, 'down')
         if not ret:
             LOG.error("Error case, sending rout port message for in nwk"
                       " tenant %(tenant)s subnet %(seg)s",
                       {'tenant': tenant_id, 'seg': in_seg})
-        ret = self.send_rout_port_msg(tenant_id, tenant_name, rout_id, out_net,
-                                      out_sub, out_seg, 'down')
+        ret = self.send_rout_port_msg(tenant_id, tenant_name + '_out', rout_id,
+                                      out_net, out_sub, out_seg, 'down')
         if not ret:
             LOG.error("Sending rout port message failed for out network "
                       "tenant %(tenant)s subnet %(seg)s",

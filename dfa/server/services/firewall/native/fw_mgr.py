@@ -825,7 +825,7 @@ class FwMgr(dev_mgr.DeviceMgr):
                         self.retry_failure_fab_dev_delete(tenant_id, fw_data,
                                                           fw_dict)
             except Exception as exc:
-                LOG.error("Exception in retry failure %s", str(exc))
+                LOG.error("Exception in retry failure delete %s", str(exc))
 
     def fw_retry_failures(self):
         ''' Top level retry routine called '''
