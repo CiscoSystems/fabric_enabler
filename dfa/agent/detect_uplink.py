@@ -62,8 +62,8 @@ def find_uplink(root_helper):
     intf_cmd_list = ("ip link |grep 'state UP' | awk '{print $2}' "
                      "| sed 's/://'|grep ^[epb]")
     intf_net_addr = "ifconfig %s | grep 'inet addr'"
-    lldptoolbin = root_helper + ' /usr/sbin/lldptool' if root_helper else (
-        '/usr/sbin/lldptool')
+    lldptoolbin = root_helper + ' lldptool' if root_helper else (
+        'lldptool')
     en_rxtx = (lldptoolbin + ' -i %s -g "ncb" -L adminStatus=rxtx')
     dis_rxtx = (lldptoolbin + ' -i %s -g "ncb" -L adminStatus=disabled')
     mod_brdg = (lldptoolbin + ' -i %s -g "ncb" -t -n -V evb | '
@@ -92,8 +92,8 @@ def detect_uplink_auto(input_string, root_helper):
     if input_string is None:
         return_str = find_uplink(root_helper)
     else:
-        lldptoolbin = root_helper + ' /usr/sbin/lldptool' if root_helper else (
-            '/usr/sbin/lldptool')
+        lldptoolbin = root_helper + ' lldptool' if root_helper else (
+            'lldptool')
         cmd_str = (lldptoolbin + ' -i %s -g "ncb" -t -n -V evb | '
                    'grep "mode:bridge"') % input_string
         (output, returncode) = run_cmd_line(cmd_str,
