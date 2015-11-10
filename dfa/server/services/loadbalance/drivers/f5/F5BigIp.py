@@ -126,7 +126,7 @@ class F5Device(object):
             return False
         else:
             self.error_log('folder', response.text)
-            raise exceptions.SystemException(response.text)
+            raise SystemException(response.text)
         return False
 
 
@@ -178,7 +178,7 @@ class F5Device(object):
             return True
         else:
             self.error_log('folder', response.text)
-            raise exceptions.SystemException(response.text)
+            raise SystemException(response.text)
 
 
     def deleteFolder(self, folder):
@@ -199,7 +199,7 @@ class F5Device(object):
                 return True
             else:
                 self.error_log('folder', response.text)
-                raise exceptions.SystemException(response.text)
+                raise SystemException(response.text)
         return False
 
 class Network(object):
@@ -226,7 +226,7 @@ class Network(object):
                 return True
             else:
                 self.bigip.error_log('route', response.text)
-                raise exceptions.RouteCreationException(response.text)
+                raise RouteCreationException(response.text)
         return False
 
     def routeDel(self, name=None, folder='Common'):
@@ -243,7 +243,7 @@ class Network(object):
             return True
         else:
             self.bigip.error_log('route', response.text)
-            raise exceptions.RouteDeleteException(response.text)
+            raise RouteDeleteException(response.text)
         return False
 
 
@@ -262,7 +262,7 @@ class Network(object):
                 return int(response_obj['id'])
         elif response.status_code != 404:
             self.bigip.error_log('route-domain', response.text)
-            raise exceptions.RouteQueryException(response.text)
+            raise RouteQueryException(response.text)
         return 0
 
     def routeDomainPresent(self, folder='Common'):
@@ -279,7 +279,7 @@ class Network(object):
             return True
         elif response.status_code != 404:
             self.bigip.error_log('route', response.text)
-            raise exceptions.RouteQueryException(response.text)
+            raise RouteQueryException(response.text)
         return False
 
 
@@ -382,7 +382,7 @@ class Network(object):
             pass
         else:
             self.bigip.error_log('route-domain', response.text)
-            raise exceptions.RouteAddException(response.text)
+            raise RouteAddException(response.text)
 
         rid = -1
         for retryCnt in range (0, 10):
@@ -407,7 +407,7 @@ class Network(object):
                 all_identifiers = sorted(all_identifiers)
                 all_identifiers.remove(0)
         else:
-            raise exceptions.RouteQueryException(response.text)
+            raise RouteQueryException(response.text)
 
         lowest_available_index = 1
         for i in range(len(all_identifiers)):
@@ -434,7 +434,7 @@ class Network(object):
             return True
         elif response.status_code != 404:
             self.bigip.error_log('route-domain', response.text)
-            raise exceptions.RouteDeleteException(response.text)
+            raise RouteDeleteException(response.text)
         return False
 
     def getDomainVlanList(self, folder='Common'):
@@ -462,7 +462,7 @@ class Network(object):
         else:
             if response.status_code != 404:
                 self.bigip.error_log('route-domain', response.text)
-                raise exceptions.RouteQueryException(response.text)
+                raise RouteQueryException(response.text)
         return []
 
 
@@ -482,7 +482,7 @@ class Network(object):
                 return True
             else:
                 self.bigip.error_log('route-domain', response.text)
-                raise exceptions.RouteDomainUpdateException(response.text)
+                raise RouteDomainUpdateException(response.text)
         return False
 
     def createVlan(self, name=None, vlanid=None, interface=None,
@@ -512,7 +512,7 @@ class Network(object):
                 return True
             else:
                 self.bigip.error_log('VLAN', response.text)
-                raise exceptions.VLANCreateException(response.text)
+                raise VLANCreateException(response.text)
         return False
 
     def deleteVlan(self, name=None, folder='Common'):
@@ -527,7 +527,7 @@ class Network(object):
             return True
         elif response.status_code != 404:
             self.bigip.error_log('VLAN', response.text)
-            raise exceptions.VLANDeleteException(response.text)
+            raise VLANDeleteException(response.text)
         else:
             return True
 
@@ -549,7 +549,7 @@ class Network(object):
                             self.bigip.stripToOnlyName(vlan['name']))
         elif response.status_code != 404:
             self.bigip.error_log('VLAN', response.text)
-            raise exceptions.VLANLevelException(response.text)
+            raise VLANLevelException(response.text)
         return return_list
 
     def createSelfIp(self, name=None, ip_address=None, netmask=None,
@@ -608,10 +608,10 @@ class Network(object):
                     return True
                 else:
                     self.bigip.error_log('self', response.text)
-                    raise exceptions.SelfIPCreateException(response.text)
+                    raise SelfIPCreateException(response.text)
             else:
                 self.bigip.error_log('self', response.text)
-                raise exceptions.SelfIPCreationException(response.text)
+                raise SelfIPCreationException(response.text)
         return False
 
     def deleteSelfIp(self, name=None, folder='Common'):
@@ -627,7 +627,7 @@ class Network(object):
             return True
         elif response.status_code != 404:
             self.bigip.error_log('self', response.text)
-            raise exceptions.SelfIPDeleteException(response.text)
+            raise SelfIPDeleteException(response.text)
         else:
             return True
 
@@ -690,7 +690,7 @@ class LTM(object):
             return True
         else:
             self.bigip.error_log('pool', response.text)
-            raise exceptions.PoolCreateException(response.text)
+            raise PoolCreateException(response.text)
 
     def deletePool(self, name=None, folder='Common'):
         if (name == None):
@@ -741,7 +741,7 @@ class LTM(object):
         if response.status_code < 400:
             return True
         elif response.status_code != 404:
-            raise exceptions.PoolQueryException(response.text)
+            raise PoolQueryException(response.text)
         return False
 
     def getPartitionPools(self, folder='Common'):
@@ -761,8 +761,26 @@ class LTM(object):
                                 self.bigip.stripToOnlyName(pool['name']))
         elif response.status_code != 404:
             self.bigip.error_log('pool', response.text)
-            raise exceptions.PoolQueryException(response.text)
+            raise PoolQueryException(response.text)
         return pool_names
+
+    def isMonitorInUse(self, tenant_id, monitor_id):
+        if (tenant_id == None) or (monitor_id == None):
+            return False
+        request_url = self.bigip.url + '/ltm/pool'
+        request_url += '?$select=monitor'
+        request_url += '&$filter=partition eq ' + tenant_id
+        response = self.bigip.session.get(request_url,
+                                timeout=REQUEST_TIMEOUT)
+        if response.status_code < 400:
+            return_obj = json.loads(response.text)
+            if 'items' in return_obj:
+                for thisMon in return_obj['items']:
+                    monId = json.loads(json.dumps(thisMon))
+                    if ('monitor' in monId) and \
+                       ((monId['monitor'].split('/')[2]).rstrip()== monitor_id):
+                        return True
+        return False
 
     def attachMonitor(self, name=None, monitor_name=None, folder='Common'):
         if (name == None) or (monitor_name == None):
@@ -772,8 +790,7 @@ class LTM(object):
         request_url = self.bigip.url + '/ltm/pool/'
         request_url += '~' + folder + '~' + name
         request_url += '?$select=monitor'
-        response = self.bigip.session.get(request_url,
-                             timeout=REQUEST_TIMEOUT)
+        response = self.bigip.session.get(request_url, timeout=REQUEST_TIMEOUT)
         if response.status_code < 400:
             response_obj = json.loads(response.text)
             if 'monitor' in response_obj:
@@ -807,7 +824,7 @@ class LTM(object):
                         return True
                     else:
                         self.bigip.error_log('pool', response.text)
-                        raise exceptions.PoolUpdateException(response.text)
+                        raise PoolUpdateException(response.text)
                 else:
                     return True
             else:
@@ -822,10 +839,10 @@ class LTM(object):
                     return True
                 else:
                     self.bigip.error_log('pool', response.text)
-                    raise exceptions.PoolUpdateException(response.text)
+                    raise PoolUpdateException(response.text)
         else:
             self.bigip.error_log('pool', response.text)
-            raise exceptions.PoolQueryException(response.text)
+            raise PoolQueryException(response.text)
         return False
 
     def detachMonitor(self, name=None, monitor_name=None, folder='Common'):
@@ -839,6 +856,7 @@ class LTM(object):
         request_url += '?$select=monitor'
         response = self.bigip.session.get(request_url,
                                             timeout=REQUEST_TIMEOUT)
+        print("Monitor Detach , Get status code", response.status_code)
         if response.status_code < 400:
             response_obj = json.loads(response.text)
             if 'monitor' in response_obj:
@@ -873,6 +891,8 @@ class LTM(object):
                     request_url += '~' + folder + '~' + name
                     payload = dict()
                     payload['monitor'] = monitor_string
+                    print("Monitor Detach Payload")
+                    print payload
                     response = self.bigip.session.put(request_url,
                                         data=json.dumps(payload),
                                         timeout=REQUEST_TIMEOUT)
@@ -880,12 +900,12 @@ class LTM(object):
                         return True
                     else:
                         self.bigip.error_log('pool', response.text)
-                        raise exceptions.PoolUpdateException(response.text)
+                        raise PoolUpdateException(response.text)
                 else:
                     return True
         elif response.status_code != 404:
             self.bigip.error_log('pool', response.text)
-            raise exceptions.PoolQueryException(response.text)
+            raise PoolQueryException(response.text)
         return False
 
 
@@ -913,7 +933,7 @@ class LTM(object):
                         )
             elif response.status_code != 404:
                 self.bigip.error_log('pool', response.text)
-                raise exceptions.PoolQueryException(response.text)
+                raise PoolQueryException(response.text)
             return members
         return None
 
@@ -934,7 +954,7 @@ class LTM(object):
             self.bigip.error_log('pool',
                       'tried to add member %s to non-existant pool %s.' %
                       (payload['name'], '/' + folder + '/' + name))
-            raise exceptions.PoolUpdateException(response.text)
+            raise PoolUpdateException(response.text)
             return False
         elif response.status_code == 409:
             return True
@@ -962,15 +982,16 @@ class LTM(object):
             elif response.status_code > 399 and \
                (not response.status_code == 404):
                 self.bigip.error_log('node', response.text)
-                raise exceptions.PoolUpdateException(response.text)
+                raise PoolUpdateException(response.text)
         else:
             self.bigip.error_log('pool', response.text)
-            raise exceptions.PoolUpdateException(response.text)
+            raise PoolUpdateException(response.text)
 
     def createMonitor(self, name=None, mon_type=None, interval=5, timeout=16,
-               url_path=None, expect_codes = None,
-               send_text=None, recv_text=None, folder='Common'):
+                      url_path=None, expect_codes = None,
+                      send_text=None, recv_text=None, folder='Common'):
         folder = str(folder).replace('/', '')
+        print("Mon type is ", mon_type)
         mon_type = self._getMonitorRestType(mon_type)
         payload = dict()
         payload['name'] = name
@@ -993,7 +1014,7 @@ class LTM(object):
             return True
         else:
             self.bigip.error_log('monitor', response.text)
-            raise exceptions.MonitorCreateException(response.text)
+            raise MonitorCreateException(response.text)
         return False
 
 
@@ -1017,20 +1038,19 @@ class LTM(object):
         if (mon_type == None):
             print ("Monitor Not found")
             return False
-        folder = str(folder).replace('/', '')
         mon_type = self._getMonitorRestType(mon_type)
         request_url = self.bigip.url + '/ltm/monitor/' + mon_type + '/'
         request_url += '~' + folder + '~' + name
         print (request_url)
         response = self.bigip.session.delete(request_url,
-                                          timeout=REQUEST_TIMEOUT)
+                                             timeout=REQUEST_TIMEOUT)
         if response.status_code < 400:
             return True
         elif response.status_code == 404:
             return True
         else:
             self.bigip.error_log('monitor', response.text)
-            raise exceptions.MonitorDeleteException(response.text)
+            raise MonitorDeleteException(response.text)
         return False
 
     def _getMonitorRestType(self, type_str):
@@ -1038,7 +1058,7 @@ class LTM(object):
         if type_str in self.monitor_type:
             return self.monitor_type[type_str]['name']
         else:
-            raise exceptions.MonitorUnknownException('Invalid Modnitor %s' % type_str)
+            raise MonitorUnknownException('Invalid Monitor %s' % type_str)
 
     def createVirtualServer(self, name=None, ip_address=None, mask=None,
                port=None, protocol=None, vlan_name=None,
@@ -1094,10 +1114,10 @@ class LTM(object):
                 return True
             else:
                 self.bigip.error_log('virtual-address', response.text)
-                raise exceptions.VirtualServerCreateException(response.text)
+                raise VirtualServerCreateException(response.text)
         else:
             self.bigip.error_log('virtual', response.text)
-            raise exceptions.VirtualServerException(response.text)
+            raise VirtualServerException(response.text)
         return False
 
     def deleteVirtualServer(self, name=None, folder='Common'):
@@ -1114,7 +1134,7 @@ class LTM(object):
             return True
         else:
             self.bigip.error_log('virtual', response.text)
-            raise exceptions.VirtualServerDeleteException(response.text)
+            raise VirtualServerDeleteException(response.text)
         return False
 
     def vipEnableAdvertise(self, partition, vipAddress):
@@ -1129,7 +1149,7 @@ class LTM(object):
             return True
         else:
             self.bigip.error_log('virtual-address', response.text)
-            raise exceptions.VirtualServerUpdateException(response.text)
+            raise VirtualServerUpdateException(response.text)
         return False
 
     def setVirtualServerPool(self, name=None, pool_name=None, folder='Common'):
@@ -1147,7 +1167,7 @@ class LTM(object):
             return True
         else:
             self.bigip.error_log('virtual', response.text)
-            raise exceptions.VirtualServerUpdateException(response.text)
+            raise VirtualServerUpdateException(response.text)
         return False
 
 

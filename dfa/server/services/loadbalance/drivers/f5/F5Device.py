@@ -5,13 +5,16 @@ import struct
 import pexpect
 import json
 import time
+from dfa.common import dfa_logger as logging
+
+LOG = logging.getLogger(__name__)
 
 class F5Device(object):
-    def __init__(self, f5IpAddr, username, password, interface):
+    def __init__(self, f5IpAddr, username, password, fabricIf):
         self.username = username
         self.password = password
         self.f5IpAddr = f5IpAddr
-        self.f5Interface = interface
+        self.fabricIf = fabricIf
         self.initF5Connection(f5IpAddr, username, password)
 
     def initF5Connection(self, f5hostname, username, password):
@@ -48,7 +51,6 @@ class F5Device(object):
         big.network.routeDel("defaultRoute_" + str(vlanid), context)
         big.network.deleteSelfIp('selfIp'+str(vlanid), folder=context)
         big.network.deleteVlan(vlanName, context)
-        big.ltm.deleteMonitor("monitor_icmp", folder=context)
         big.network.deleteRouteDomain(context) 
         big.deleteFolder(context) 
 
@@ -80,7 +82,7 @@ class F5Device(object):
             return False
 
         try:
-            if (big.network.createVlan(vlanName, vlanid, self.f5Interface,  \
+            if (big.network.createVlan(vlanName, vlanid, self.fabricIf,  \
                               context, "Vlan for Tenant" + context) == False):
                 return False
         except F5BigIp.VLANCreateException as vexc:
@@ -100,7 +102,6 @@ class F5Device(object):
 
         ospfNet = self.getSubnet(gateway_ip, mask)
         big.network.startOspf(rid, ospfNet, mask)
-        big.ltm.createMonitor("monitor_icmp", "ping", folder=context)
         print("Called Apply F5 Netowrk config")
         return True
 
@@ -118,7 +119,6 @@ class F5Device(object):
         lbMethod = pool.get('lb_method')
         description=pool.get('description')
         self.big.ltm.createPool(poolName, lbMethod, description, partition)
-        self.big.ltm.attachMonitor(poolName, "monitor_icmp", partition)
         members = pool.get('members')
         """
             TBD decide on Members addition, during pool creation
@@ -268,7 +268,7 @@ class F5Device(object):
     TCP:  u'health_monitor': {u'admin_state_up': True, u'tenant_id': u'e8cd656c845246bf8074d1e920077dc2', u'delay': 1, u'max_retries': 1, u'timeout': 1, u'pools': [], u'type': u'TCP', u'id': u'521e777f-85cc-4079-950a-3bbf3400fef6'}
     PING  u'health_monitor': {u'admin_state_up': True, u'tenant_id': u'e8cd656c845246bf8074d1e920077dc2', u'delay': 12, u'max_retries': 2, u'timeout': 1, u'pools': [], u'type': u'PING', u'id': u'77801f6a-42e2-47da-abe6-cec313c05287'}
     """
-    def monitorCreate(self, jsMsg):
+    def monitorAttach(self, jsMsg):
         big = self.big
         tenant_id = "uuid_" + jsMsg.get('tenant_id')
         monitor_name = "uuid_" + jsMsg.get('id')
@@ -281,18 +281,62 @@ class F5Device(object):
         http_method = None
         send_string = None
         
-        if ((monitor_type == HTTP_MONITOR_TYPE) or \
-            (monitor_type == HTTPS_MONITOR_TYPE)):
+        if ((monitor_type == 'HTTP') or \
+            (monitor_type == 'HTTPS')):
             url_path = jsMsg.get('url_path')
             expected_codes = jsMsg.get('expected_Codes')
             http_method = jsMsg.get('http_method')
         if (http_method == 'GET'):
             send_string = 'GET /\r\n'
             
-        big.ltm.monitorCreate(self, monitor_name, monitor_type, interval=interval,
-                           timeout=timeout, url_path=url_path, 
-                           send_text=send_string, folder=tenant_id)
+        big.ltm.createMonitor(monitor_name, monitor_type, 
+                              interval, timeout, url_path, send_text=send_string, 
+                              folder=tenant_id)
+
+        for pool in pools:
+            poolName = "uuid_" + pool['pool_id']
+            if (pool['status'] == 'PENDING_CREATE'):
+                self.big.ltm.attachMonitor(poolName, monitor_name, tenant_id)
+
+    def monitorDetach(self, jsMsg):
+        big = self.big
+        tenant_id = "uuid_" + jsMsg.get('tenant_id')
+        monitor_name = "uuid_" + jsMsg.get('id')
+        monitor_type = jsMsg.get('type')
+        interval = jsMsg.get('delay')
+        timeout = jsMsg.get('timeout')
+        pools = jsMsg.get('pools')
+        url_path = None
+        expected_codes = None
+        http_method = None
+        send_string = None
         
+        if ((monitor_type == 'HTTP') or (monitor_type == 'HTTPS')):
+            url_path = jsMsg.get('url_path')
+            expected_codes = jsMsg.get('expected_Codes')
+            http_method = jsMsg.get('http_method')
+
+        if (http_method == 'GET'):
+            send_string = 'GET /\r\n'
+
+        for pool in pools:
+            poolName = "uuid_" + pool['pool_id']
+            print("Detaching Monitor from Pool", monitor_name, poolName)
+            if (pool['status'] == 'PENDING_DELETE'):
+                big.ltm.detachMonitor(poolName, monitor_name, tenant_id)
+
+        """
+            Check if after removing this Monitor from the Pool if th Monitor
+            is in further use. If Not delete the monitor as well
+        """
+        print("Check to see if Monitor can be deleted");
+        if (big.ltm.isMonitorInUse(tenant_id, monitor_name)):
+            print("Monitor cannot be deleted: Still in use")
+            return
+        else:
+            print("Monitor can be deleted")
+            big.ltm.deleteMonitor(monitor_name, tenant_id);
+
     """
     {'tenant_id': u'14ed59c459c74299b7287029bffdfe76', u'health_monitor_id': u'85a29bc2-436c-431e-aade-24a8d3b4e4fe'}
     """
@@ -302,6 +346,17 @@ class F5Device(object):
         monitor_name = "uuid_" + jsMsg.get('health_monitor_id')
         big.ltm.deleteMonitor(monitor_name, tenant_id)
 
+    """
+    {'tenant_id': u'578ec47638654a3da65106cf52d69325', u'health_monitor': {u'admin_state_up': True, u'tenant_id': u'578ec47638654a3da65106cf52d69325', u'delay': 3, u'max_retries': 5, u'timeout': 3, u'pools': [{u'status': u'PENDING_DELETE', u'status_description': None, u'pool_id': u'31830a61-725d-47a3-8440-23f858f4a507'}], u'type': u'PING', u'id': u'a6b7f0ee-dfb0-4edd-963a-669cff45b127'}}
+    """
+    def monitorUpdate(self, jsMsg):
+        big = self.big
+        tenant_id =  "uuid_" + jsMsg.get('tenant_id')
+        monMsg = jsMsg.get('health_monitor')
+        monitor_name = monMsg.get('id')
+        big.ltm.updateMonitor(monitor_name, tenant_id)
+    
+
     def processLbMessage(self, event_type, message):
         lbEventList = { 'pool_create_event':self.createPool, 
                         'pool_delete_event':self.deletePool,
@@ -309,12 +364,14 @@ class F5Device(object):
                         'member_delete_event':self.memberDelete,
                         'vip_create_event':self.vipCreate,
                         'vip_delete_event':self.vipDelete,
-                        'monitor_create_event': self.monitorCreate,
-                        'monitor_delete_event': self.monitorDelete
+                        'pool_hm_create_event': self.monitorAttach,
+                        'pool_hm_delete_event': self.monitorDetach,
                       }
         if (event_type in lbEventList.keys()):
-            print("Processing Event type ", event_type)
+            LOG.info("Processing Event type %s message %s", event_type, message)
             lbEventList[event_type](message)
         else:
             print("Unkown event ", event_type)
         
+
+
