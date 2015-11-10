@@ -350,7 +350,7 @@ class FabricApi(object):
         ''' Retrieves the IN Seg, VLAN, mob domain '''
         if tenant_id not in cls.serv_obj_dict:
             LOG.error("Fabric not prepared for tenant %s", tenant_id)
-            return None, None, None
+            return None, None
         tenant_obj = cls.serv_obj_dict.get(tenant_id)
         return tenant_obj.get_in_seg_vlan()
 
@@ -359,7 +359,7 @@ class FabricApi(object):
         ''' Retrieves the OUT Seg, VLAN, mob domain '''
         if tenant_id not in cls.serv_obj_dict:
             LOG.error("Fabric not prepared for tenant %s", tenant_id)
-            return None, None, None
+            return None, None
         tenant_obj = cls.serv_obj_dict.get(tenant_id)
         return tenant_obj.get_out_seg_vlan()
 
@@ -1772,7 +1772,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         try:
             # More than 1 FW per tenant not supported fixme(padkrish)
             if tenant_id in self.service_attr and (
-               result == fw_constants.RESULT_FW_CREATE_DONE):
+               result == fw_const.RESULT_FW_CREATE_DONE):
                 LOG.error("Fabric already prepared for tenant %(tenant)s,"
                           " %(name)s",
                           {'tenant': tenant_id, 'name': tenant_name})
