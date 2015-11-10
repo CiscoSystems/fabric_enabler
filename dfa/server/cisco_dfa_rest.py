@@ -543,7 +543,7 @@ class DFARESTClient(object):
             LOG.error("Failed to create %s network in DCNM.", network_info)
             raise dexc.DfaClientRequestFailed(reason=res)
 
-    def delete_network(self, tenant_name, network):
+    def delete_network(self, tenant_name, network, part_name=None):
         """Delete network on the DCNM.
 
         :param tenant_name: name of tenant the network belongs to
@@ -551,9 +551,13 @@ class DFARESTClient(object):
         """
         network_info = {}
         seg_id = network.segmentation_id
+        if part_name is None:
+            part = self._part_name
+        else:
+            part = part_name
         network_info = {
             'organizationName': tenant_name,
-            'partitionName': self._part_name,
+            'partitionName': part,
             'segmentId': seg_id,
         }
         LOG.debug("Deleting %s network in DCNM.", network_info)

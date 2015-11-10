@@ -775,7 +775,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             return
 
         try:
-            self.dcnm_client.delete_network(tenant_name, net)
+            part = self.network[net_id].get('partition')
+            self.dcnm_client.delete_network(tenant_name, net, part_name=part)
             # Put back the segmentation id into the pool.
             self.seg_drvr.release_segmentation_id(segid)
 
@@ -978,6 +979,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                      'exist.' % ({'segid': seg_id}))
             return
         # Send network delete request to neutron
+        del_net = None
         try:
             del_net = self.network.pop(query_net.network_id)
             self.neutronclient.delete_network(query_net.network_id)
