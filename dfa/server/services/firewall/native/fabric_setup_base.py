@@ -260,9 +260,8 @@ class ServiceIpSegTenantMap(dfa_dbm.DfaDBMixin):
             return dcnm_stat
 
     def is_cur_state_delete(self):
-        os_stat = 'CREATE' in self.fw_dict['os_status']
-        dcnm_stat = 'CREATE' in self.fw_dict['dcnm_status'] or (
-                    'UPDATE' in self.fw_dict['dcnm_status'])
+        os_stat = 'DEL' in self.fw_dict['os_status']
+        dcnm_stat = 'DEL' in self.fw_dict['dcnm_status']
         if os_stat and dcnm_stat:
             return True
         if not os_stat and not dcnm_stat:
