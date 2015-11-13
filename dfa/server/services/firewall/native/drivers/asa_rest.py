@@ -91,6 +91,7 @@ class Asa5585():
         cmds.append("allocate-interface " + inside_int)
         cmds.append("allocate-interface " + outside_int)
         cmds.append("config-url disk0:/" + context + ".cfg")
+        cmds.append("write memory")
         cmds.append("changeto context " + context)
         cmds.append("int " + inside_int)
         cmds.append("nameif Inside")
@@ -107,7 +108,8 @@ class Asa5585():
         cmds.append("area 0")
         cmds.append("route Outside 0.0.0.0 0.0.0.0 " + outside_gw + " 1")
         cmds.append("end")
-
+        cmds.append("write memory")
+        
         data = {"commands": cmds}
         return self.rest_send_cli(data)
 
@@ -128,6 +130,8 @@ class Asa5585():
         outside_int = interface_out + '.' + outside_vlan
         cmds.append("no interface " + inside_int)
         cmds.append("no interface " + outside_int)
+        cmds.append("write memory")
+        
         data = {"commands": cmds}
         return self.rest_send_cli(data)
 
@@ -247,7 +251,8 @@ class Asa5585():
             self.rule_tbl[rule_id] = acl
             cmds.append(acl)
         cmds.append("access-group " + tenant_name + " global")
-
+        cmds.append("write memory")
+        
         LOG.debug(cmds)
         data = {"commands": cmds}
         return self.rest_send_cli(data)
