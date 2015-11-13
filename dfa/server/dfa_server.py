@@ -382,6 +382,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
     def _load_network_info(self):
         nets = self.get_all_networks()
         for net in nets:
+            if self.fw_api.is_network_source_fw(net, net.name):
+                continue
             self.network[net.network_id] = {}
             self.network[net.network_id]['segmentation_id'] = (
                 net.segmentation_id)
@@ -977,6 +979,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         if not query_net:
             LOG.info('dcnm_network_delete_event: network %(segid)s does not '
                      'exist.' % ({'segid': seg_id}))
+            return
+        if self.fw_api.is_network_source_fw(query_net, query_net.name):
+            LOG.info("Service network %s, returning", query_net.name)
             return
         # Send network delete request to neutron
         del_net = None

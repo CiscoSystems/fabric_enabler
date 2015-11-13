@@ -659,10 +659,10 @@ class FwMgr(dev_mgr.DeviceMgr):
 
     def convert_fwdb_event_msg(self, rule, tenant_id, rule_id, policy_id):
         '''
-            From inputs from DB, this will create a FW rule dictionary that
-            resembles the actual data from Openstack when a rule is created.
-            This is usually called after restart, in order to populate local
-            cache.
+        From inputs from DB, this will create a FW rule dictionary that
+        resembles the actual data from Openstack when a rule is created.
+        This is usually called after restart, in order to populate local
+        cache.
         '''
         fw_rule_data = {}
         rule['tenant_id'] = tenant_id
@@ -670,6 +670,21 @@ class FwMgr(dev_mgr.DeviceMgr):
         rule['firewall_policy_id'] = policy_id
         fw_rule_data['firewall_rule'] = rule
         return fw_rule_data
+
+    def convert_fwdb(self, tenant_id, name, policy_id, fw_id):
+        '''
+        From FWDB inputs, this will create a FW message that resembles the
+        actual data from Openstack, when a query for FW is done
+        '''
+        fw_data = {}
+        fw_dict = {}
+        fw_dict['tenant_id'] = tenant_id
+        fw_dict['name'] = name
+        fw_dict['id'] = fw_id
+        fw_dict['firewall_policy_id'] = policy_id
+        fw_dict['admin_state_up'] = True
+        fw_data['firewall'] = fw_dict
+        return fw_data
 
     def pop_local_cache(self):
         '''
@@ -692,9 +707,13 @@ class FwMgr(dev_mgr.DeviceMgr):
                 LOG.info("Populating Rules for tenant %s", tenant_id)
                 self.fw_rule_create(fw_evt_data, cache=True)
             fw_os_data = self.os_helper.get_fw(fw_id)
-            if fw_os_data is not None:
-                LOG.info("Populating FW for tenant %s", tenant_id)
-                self.fw_create(fw_os_data, cache=True)
+            # If enabler is stopped and FW is deleted, then the above routine
+            # will fail.
+            if fw_os_data is None:
+                fw_os_data = self.convert_fwdb(tenant_id, fw_data.get('name'),
+                                               policy_id, fw_id)
+            LOG.info("Populating FW for tenant %s", tenant_id)
+            self.fw_create(fw_os_data, cache=True)
             if fw_data.get('device_status') == 'SUCCESS':
                 self.fwid_attr[tenant_id].fw_drvr_created(True)
             else:
