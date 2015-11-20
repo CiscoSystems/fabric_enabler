@@ -29,6 +29,8 @@ from dfa.common import dfa_logger as logging
 
 
 LOG = logging.getLogger(__name__)
+UNKNOWN_SRVN_NODE_IP = '0.0.0.0'
+UNKNOWN_DCI_ID = -1
 
 
 class DFARESTClient(object):
@@ -181,7 +183,8 @@ class DFARESTClient(object):
 
     def _create_or_update_partition(self, org_name, part_name, dci_id,
                                     desc, vrf_prof=None,
-                                    service_node_ip=None, operation='POST'):
+                                    service_node_ip=UNKNOWN_SRVN_NODE_IP,
+                                    operation='POST'):
         """Send create or update partition request to the DCNM.
 
         :param org_name: name of organization
@@ -191,7 +194,10 @@ class DFARESTClient(object):
         if part_name is None:
             part_name = self._part_name
         if vrf_prof is None:
-            vrf_prof = self.default_vrf_profile
+            vrf_prof = self.get_partition_vrfProf(org_name, part_name)
+        if service_node_ip == UNKNOWN_SRVN_NODE_IP:
+            service_node_ip = self.get_partition_serviceNodeIp(org_name,
+                                                               part_name)
         url = ((self._create_part_url % (org_name)) if operation == 'POST' else
                self._update_part_url % (org_name, part_name))
 
@@ -200,7 +206,6 @@ class DFARESTClient(object):
             "description": part_name if len(desc) == 0 else desc,
             "serviceNodeIpAddress": service_node_ip,
             "organizationName": org_name}
-
         # Check the DCNM version and find out whether it is need to have
         # extra payload for the new version when creating/updating a partition.
         if self.is_iplus:
@@ -660,7 +665,8 @@ class DFARESTClient(object):
         self.create_partition(org_name, part_name, dci_id,
                               self.default_vrf_profile, desc=desc)
 
-    def update_project(self, org_name, part_name, dci_id, service_node_ip=None,
+    def update_project(self, org_name, part_name, dci_id=UNKNOWN_DCI_ID,
+                       service_node_ip=UNKNOWN_SRVN_NODE_IP,
                        vrf_prof=None, desc=None):
         """Update project on the DCNM.
 
@@ -681,7 +687,7 @@ class DFARESTClient(object):
             raise dexc.DfaClientRequestFailed(reason=res)
 
     def create_partition(self, org_name, part_name, dci_id, vrf_prof,
-                         service_node_ip=None, desc=None):
+                         service_node_ip=UNKNOWN_SRVN_NODE_IP, desc=None):
         """Create partition on the DCNM.
 
         :param org_name: name of organization to be created
@@ -714,6 +720,17 @@ class DFARESTClient(object):
         if ("vrfProfileName" in part_info):
             vrf_profile = part_info.get("vrfProfileName")
         return vrf_profile
+
+    def get_partition_serviceNodeIp(self, org_name, part_name):
+        """get partition on the DCNM.
+
+        :param org_name: name of organization
+        :param part_name: name of partition
+        """
+        part_info = self._get_partition(org_name, part_name)
+        LOG.info("query result from dcnm for partition info is %s", part_info)
+        if part_info is not None and "serviceNodeIpAddress" in part_info:
+            return part_info.get("serviceNodeIpAddress")
 
     def list_networks(self, org, part):
         """Return list of networks from DCNM."""
