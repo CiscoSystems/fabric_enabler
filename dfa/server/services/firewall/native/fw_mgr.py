@@ -726,7 +726,7 @@ class FwMgr(dev_mgr.DeviceMgr):
         If device is not successfully cfg/uncfg, it calls the device manager
         routine to cfg/uncfg the device.
         '''
-        result = fw_data.get('result')
+        result = fw_data.get('result').split('(')[0]
         is_fw_virt = self.is_device_virtual()
         # Fabric portion
         if result == fw_constants.RESULT_FW_CREATE_INIT:
@@ -759,7 +759,7 @@ class FwMgr(dev_mgr.DeviceMgr):
         If device is not successfully cfg/uncfg, it calls the device manager
         routine to cfg/uncfg the device.
         '''
-        result = fw_data.get('result')
+        result = fw_data.get('result').split('(')[0]
         name = dfa_dbm.DfaDBMixin.get_project_name(self, tenant_id)
         fw_dict['tenant_name'] = name
         is_fw_virt = self.is_device_virtual()
@@ -833,7 +833,7 @@ class FwMgr(dev_mgr.DeviceMgr):
                     if fw_data is None:
                         LOG.info("No FW for tenant %s", tenant_id)
                         continue
-                    result = fw_data.get('result')
+                    result = fw_data.get('result').split('(')[0]
                     if result == fw_constants.RESULT_FW_DELETE_INIT:
                         fw_dict = self.fwid_attr[tenant_id].get_fw_dict()
                         # This means a restart has happened before the FW is

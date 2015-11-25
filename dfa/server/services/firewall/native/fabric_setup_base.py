@@ -228,71 +228,28 @@ class ServiceIpSegTenantMap(dfa_dbm.DfaDBMixin):
         ''' Retrieve the final reult for FW create/delete '''
         return self.result
 
-    def store_state(self, state):
+    def store_state(self, state, popl_db=True):
         ''' Store the state of FW create/del operation '''
         self.state = state
-
-    # Following is the logic for the two functions below:
-    # OS_Status      DCNM_Status
-    #  CR              CR or UPD  => Create in Both (done or ongoing)
-    #  DEL             DEL        => Delete in both (done or ongoing)
-    #  CR              DEL        => Create happened in OS, DEL ongoing in DCNM
-    #  DEL             CR or UPD  => Invalid state
-    # Only if both OS and DCNM status is create, current state is create
-    # Only if both OS and DCNM status is delete, current state is delete
-    # If OS and DCNM have different status, one create and another delete, then
-    # Get the current state (number)
-    # See if that is in the OS range or DCNM range and return the CREATE or
-    # DELETE status in that range
-
-    def is_cur_state_create(self):
-        os_stat = 'CREATE' in self.fw_dict['os_status']
-        dcnm_stat = 'CREATE' in self.fw_dict['dcnm_status'] or (
-                    'UPDATE' in self.fw_dict['dcnm_status'])
-        if os_stat and dcnm_stat:
-            return True
-        if not os_stat and not dcnm_stat:
-            return False
-        # One is create and one is delete
-        if self.fw_dict['dcnm_status'] == fw_const.DCNM_DELETE_SUCCESS:
-            return os_stat
-        else:
-            return dcnm_stat
-
-    def is_cur_state_delete(self):
-        os_stat = 'DEL' in self.fw_dict['os_status']
-        dcnm_stat = 'DEL' in self.fw_dict['dcnm_status']
-        if os_stat and dcnm_stat:
-            return True
-        if not os_stat and not dcnm_stat:
-            return False
-        # One is create and one is delete
-        if self.fw_dict['os_status'] == fw_const.OS_CREATE_SUCCESS:
-            return dcnm_stat
-        else:
-            return os_stat
+        if popl_db:
+            fw_dict = self.get_fw_dict()
+            self.append_state_final_result(fw_dict.get('fw_id'),
+                                           self.get_local_final_result(),
+                                           state)
 
     def fixup_state(self, from_str, state):
-        ''' Retrieve the state of FW create/del operation '''
-        # IF create is done completely, just return that state.
-        # IF delete is done completely, there's nothing in DB, so no need to
-        # check that condition
-        if 'os_status' not in self.fw_dict or \
-           'dcnm_status' not in self.fw_dict or \
-           self.fw_dict['dcnm_status'] == fw_const.DCNM_CREATE_SUCCESS:
-            return state
-        if from_str == 'DELETE':
-            ret = self.is_cur_state_create()
-            if ret:
-                return state - 1
-            else:
-                return state
-        else:
-            ret = self.is_cur_state_delete()
-            if ret:
+        '''
+        Fixup the state, if Delete is called when create SM is half-way
+        through
+        '''
+        result = self.get_local_final_result()
+        if from_str == 'CREATE':
+            if result == fw_const.RESULT_FW_DELETE_INIT:
                 return state + 1
-            else:
-                return state
+        if from_str == 'DELETE':
+            if result == fw_const.RESULT_FW_CREATE_INIT:
+                return state - 1
+        return state
 
     def get_state(self):
         ''' Return the current state '''
@@ -1476,8 +1433,13 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         '''
         ret = True
         serv_obj = self.get_service_obj(tenant_id)
-        serv_obj.get_store_local_final_result()
         state = serv_obj.get_state()
+        # Preserve the ordering of the next lines till while
+        new_state = serv_obj.fixup_state('CREATE', state)
+        serv_obj.store_local_final_result(fw_const.RESULT_FW_CREATE_INIT)
+        if state != new_state:
+            state = new_state
+            serv_obj.store_state(state)
         while ret:
             try:
                 ret = self.fabric_fsm[state][0](tenant_id, tenant_name,
@@ -1494,6 +1456,8 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             serv_obj.store_state(state)
             if state == fw_const.FABRIC_PREPARE_DONE_STATE:
                 break
+        if ret:
+            serv_obj.store_local_final_result(fw_const.RESULT_FW_CREATE_DONE)
         return ret
 
     def run_delete_sm(self, fw_id, fw_name, tenant_id, tenant_name,
@@ -1505,8 +1469,13 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         # Read the current state from the DB
         ret = True
         serv_obj = self.get_service_obj(tenant_id)
-        serv_obj.get_store_local_final_result()
         state = serv_obj.get_state()
+        # Preserve the ordering of the next lines till while
+        new_state = serv_obj.fixup_state('DELETE', state)
+        serv_obj.store_local_final_result(fw_const.RESULT_FW_DELETE_INIT)
+        if state != new_state:
+            state = new_state
+            serv_obj.store_state(state)
         while ret:
             try:
                 ret = self.fabric_fsm[state][1](tenant_id, tenant_name,
@@ -1531,49 +1500,32 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             if val == status:
                 return key
 
-    def pop_create_fw_state(self, os_status, dcnm_status):
+    def pop_fw_state(self, compl_result, os_status, dcnm_status):
         '''
-        Populate the state information in the cache based on the Openstack
-        and DCNM create result status.
+        Populate the state information in the cache.
+        Check if state information is embedded in result
+        If not:
+        a. It's still in Init state and no SM is called yet
+        b. The SM has completely run
+        c. Delete has started and before any SM is run, it restarted.
         '''
-        if os_status is None:
-            os_status = fw_const.OS_INIT_STATE
-        # First state in DCNM
-        if dcnm_status is None and os_status is not None:
-            dcnm_status = fw_const.DCNM_INIT_STATE
-        if os_status != fw_const.OS_CREATE_SUCCESS:
-            state_str = os_status
+        res_list = compl_result.split('(')
+        state_num = None
+        if len(res_list) > 1:
+            state_num = int(res_list[1].split(')')[0])
         else:
-            state_str = dcnm_status
-        state = self.fabric_state_map.get(state_str)
-        if state is None:
-            # This happens when delete was going on. Process restarted during
-            # which time create was issued.
-            state = self.fabric_state_del_map.get(state_str)
-        return state
-
-    def pop_del_fw_state(self, os_status, dcnm_status):
-        '''
-        Populate the state information in the cache based on the Openstack
-        and DCNM delete result status.
-        '''
-        # This means even the first state of OS create is not successful
-        if os_status is None:
-            os_status = fw_const.OS_INIT_STATE
-        # This means create happened till Openstack state and a delete was
-        # issued and a restart happened.
-        if dcnm_status is None and os_status is not None:
-            dcnm_status = fw_const.DCNM_INIT_STATE
-        if dcnm_status != fw_const.DCNM_DELETE_SUCCESS:
-            state_str = dcnm_status
-        else:
-            state_str = os_status
-        state = self.fabric_state_del_map.get(state_str)
-        if state is None:
-            # This happens when create was going on. Process restarted during
-            # which time delete was issued.
-            state = self.fabric_state_map.get(state_str)
-        return state
+            if res_list[0] == fw_const.RESULT_FW_CREATE_INIT:
+                if os_status is None:
+                    state_num = fw_const.INIT_STATE
+            else:
+                if res_list[0] == fw_const.RESULT_FW_CREATE_DONE:
+                    state_num = fw_const.FABRIC_PREPARE_DONE_STATE
+                else:
+                    if res_list[0] == fw_const.RESULT_FW_DELETE_INIT:
+                        if os_status == fw_const.OS_CREATE_SUCCESS and (
+                           dcnm_status == fw_const.DCNM_CREATE_SUCCESS):
+                            state_num = fw_const.FABRIC_PREPARE_DONE_STATE
+        return state_num
 
     def pop_fw_local(self, tenant_id, net_id, direc, node_ip):
         '''
@@ -1621,18 +1573,18 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         serv_obj.update_fw_local_result_str(fw_data.get('os_status'),
                                             fw_data.get('dcnm_status'),
                                             fw_data.get('device_status'))
-        serv_obj.store_local_final_result(fw_data.get('result'))
-        if fw_data.get('result') == fw_const.RESULT_FW_CREATE_INIT or \
-                fw_data.get('result') == fw_const.RESULT_FW_CREATE_DONE:
-            state = self.pop_create_fw_state(fw_data.get('os_status'),
-                                             fw_data.get('dcnm_status'))
-            new_state = serv_obj.fixup_state('CREATE', state)
-        else:
-            state = self.pop_del_fw_state(fw_data.get('os_status'),
-                                          fw_data.get('dcnm_status'))
-            new_state = serv_obj.fixup_state('DELETE', state)
-        serv_obj.store_state(new_state)
-        if new_state == fw_const.FABRIC_PREPARE_DONE_STATE:
+        compl_res = fw_data.get('result')
+        result = compl_res.split('(')[0]
+        serv_obj.store_local_final_result(result)
+        state = self.pop_fw_state(compl_res, fw_data.get('os_status'),
+                                  fw_data.get('dcnm_status'))
+        if state is None:
+            LOG.error("Unable to get state complete result %(res)s"
+                      " OS status %(os)s, dcnm status %(dcnm)s",
+                      {'res': compl_res, 'os': fw_data.get('os_status'),
+                       'dcnm': fw_data.get('dcnm_status')})
+        serv_obj.store_state(state, popl_db=False)
+        if state == fw_const.FABRIC_PREPARE_DONE_STATE:
             serv_obj.set_fabric_create(True)
         router_id = fw_data.get('router_id')
         rout_net_id = fw_data.get('router_net_id')

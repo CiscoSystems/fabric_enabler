@@ -371,7 +371,7 @@ class DfaFwInfo(db.Base):
     dcnm_provision_status = sa.Column(sa.String(38))
     device_provision_status = sa.Column(sa.String(30))
     rules = sa.Column(sa.String(RULE_LEN))
-    result = sa.Column(sa.String(16))
+    result = sa.Column(sa.String(32))
 
 
 class DfaLbaaSMapping(db.Base):
@@ -700,6 +700,11 @@ class DfaDBMixin(object):
         with session.begin(subtransactions=True):
             session.query(DfaFwInfo).filter_by(fw_id=fw_id).update(
                 {'result': result})
+
+    def append_state_final_result(self, fw_id, cur_res, state):
+        session = db.get_session()
+        final_res = cur_res + '(' + str(state) + ')'
+        self.update_fw_db_final_result(fw_id, final_res)
 
     # Pass
     def update_fw_db_dev_status(self, fw_id, status):

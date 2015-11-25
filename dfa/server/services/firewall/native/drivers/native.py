@@ -197,7 +197,7 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
 
     def _create_fw(self, tenant_id, data):
         ''' Internal routine that gets called when a FW is created '''
-        LOG.debug("In creating phy ASA FW data is %s", data)
+        LOG.debug("In creating Native FW data is %s", data)
         tenant_name = data.get('tenant_name')
         in_seg, in_vlan = self.get_in_seg_vlan(tenant_id)
         out_seg, out_vlan = self.get_out_seg_vlan(tenant_id)
