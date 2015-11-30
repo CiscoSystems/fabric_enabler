@@ -243,10 +243,10 @@ class ServiceIpSegTenantMap(dfa_dbm.DfaDBMixin):
         through
         '''
         result = self.get_local_final_result()
-        if from_str == 'CREATE':
+        if from_str == fw_const.FW_CR_OP:
             if result == fw_const.RESULT_FW_DELETE_INIT:
                 return state + 1
-        if from_str == 'DELETE':
+        if from_str == fw_const.FW_DEL_OP:
             if result == fw_const.RESULT_FW_CREATE_INIT:
                 return state - 1
         return state
@@ -679,20 +679,10 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         If yes, it retries until it finds a free subnet not used by
         Openstack.
         '''
-        flag = True
-        while flag:
-            ip_next = obj.allocate_subnet()
-            if ip_next is None:
-                LOG.error("Unable to allocate a subnet for direc %s", direc)
-                return None
-            # Check if a subnet is already allocated in Openstack with this
-            # address
-            sub_next = str(ip_next) + '/' + str(self.mask)
-            ret = self.os_helper.is_subnet_present(sub_next)
-            if ret:
-                self.release_subnet(ip_next, direc)
-            else:
-                flag = False
+        subnet_lst = self.os_helper.get_all_subnets_cidr(no_mask=True)
+        ip_next = obj.allocate_subnet(subnet_lst)
+        if ip_next is None:
+            LOG.error("Unable to allocate a subnet for direction %s", direc)
         return ip_next
 
     def get_next_ip(self, tenant_id, direc):
@@ -1420,7 +1410,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
 
     def get_next_state(self, state, ret, oper):
         ''' Returns the next state for a create or delete operation '''
-        if oper == 'CREATE':
+        if oper == fw_const.FW_CR_OP:
             return self.get_next_create_state(state, ret)
         else:
             return self.get_next_del_state(state, ret)
@@ -1435,7 +1425,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         serv_obj = self.get_service_obj(tenant_id)
         state = serv_obj.get_state()
         # Preserve the ordering of the next lines till while
-        new_state = serv_obj.fixup_state('CREATE', state)
+        new_state = serv_obj.fixup_state(fw_const.FW_CR_OP, state)
         serv_obj.store_local_final_result(fw_const.RESULT_FW_CREATE_INIT)
         if state != new_state:
             state = new_state
@@ -1452,7 +1442,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             if ret:
                 LOG.info("State %s return successfully",
                          fw_const.fw_state_fn_dict.get(state))
-            state = self.get_next_state(state, ret, 'CREATE')
+            state = self.get_next_state(state, ret, fw_const.FW_CR_OP)
             serv_obj.store_state(state)
             if state == fw_const.FABRIC_PREPARE_DONE_STATE:
                 break
@@ -1471,7 +1461,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         serv_obj = self.get_service_obj(tenant_id)
         state = serv_obj.get_state()
         # Preserve the ordering of the next lines till while
-        new_state = serv_obj.fixup_state('DELETE', state)
+        new_state = serv_obj.fixup_state(fw_const.FW_DEL_OP, state)
         serv_obj.store_local_final_result(fw_const.RESULT_FW_DELETE_INIT)
         if state != new_state:
             state = new_state
@@ -1490,7 +1480,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
                          fw_const.fw_state_fn_del_dict.get(state))
             if state == fw_const.INIT_STATE:
                 break
-            state = self.get_next_state(state, ret, 'DELETE')
+            state = self.get_next_state(state, ret, fw_const.FW_DEL_OP)
             serv_obj.store_state(state)
         return ret
 

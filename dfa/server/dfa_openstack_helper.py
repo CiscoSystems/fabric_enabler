@@ -132,6 +132,22 @@ class DfaNeutronHelper(object):
                       {'sub': subnet_addr, 'exc': str(exc)})
             return False
 
+    def get_all_subnets_cidr(self, no_mask=False):
+        ''' Returns all the subnets '''
+        body = {}
+        subnet_lst = []
+        try:
+            subnet_list = self.neutronclient.list_subnets(body=body)
+            subnet_dat = subnet_list.get('subnets')
+            for sub in subnet_dat:
+                if no_mask:
+                    subnet_lst.append(sub.get('cidr').split('/')[0])
+                else:
+                    subnet_lst.append(sub.get('cidr'))
+        except Exception as exc:
+            LOG.error("Failed to list subnet Exc %s", str(exc))
+        return subnet_lst
+
     def get_subnets_for_net(self, net):
         ''' Returns the subnets in a network '''
         try:

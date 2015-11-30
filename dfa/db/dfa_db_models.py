@@ -702,7 +702,6 @@ class DfaDBMixin(object):
                 {'result': result})
 
     def append_state_final_result(self, fw_id, cur_res, state):
-        session = db.get_session()
         final_res = cur_res + '(' + str(state) + ')'
         self.update_fw_db_final_result(fw_id, final_res)
 
@@ -918,16 +917,23 @@ class DfasubnetDriver(object):
                 session.add(alloc)
 
     # Tested
-    def allocate_subnet(self, net_id=None):
+    def allocate_subnet(self, subnet_lst, net_id=None):
         """Allocate subnet from pool.
 
         Return allocated db object or None.
         """
 
         session = db.get_session()
+        query_str = None
+        for sub in subnet_lst:
+            sub_que = (self.model.subnet_address != sub)
+            if query_str is not None:
+                query_str = query_str & sub_que
+            else:
+                query_str = sub_que
         with session.begin(subtransactions=True):
-            select = (session.query(self.model).filter_by(
-                allocated=False))
+            select = (session.query(self.model).filter(
+                (self.model.allocated == 0) & query_str))
 
             # Selected segment can be allocated before update by someone else,
             # We retry until update success or DB_MAX_RETRIES retries
@@ -936,7 +942,6 @@ class DfasubnetDriver(object):
                 if not alloc:
                     # No resource available
                     return
-
                 count = (session.query(self.model).
                          filter_by(subnet_address=alloc.subnet_address,
                          allocated=False).update({"allocated": True,
