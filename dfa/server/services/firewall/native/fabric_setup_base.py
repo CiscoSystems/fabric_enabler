@@ -882,9 +882,9 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         ''' Function to create the service in network in DCNM'''
 
         net_dict = self.retrieve_dcnm_net_info(tenant_id, direc)
-        net = utils.dict_to_obj(net_dict)
+        net = utils.Dict2Obj(net_dict)
         subnet_dict = self.retrieve_dcnm_subnet_info(tenant_id, direc)
-        subnet = utils.dict_to_obj(subnet_dict)
+        subnet = utils.Dict2Obj(subnet_dict)
         try:
             self.dcnm_obj.create_service_network(tenant_name, net, subnet)
         except dexc.DfaClientRequestFailed:
@@ -905,7 +905,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             net_dict['part_name'] = fw_const.SERV_PART_NAME
         net_dict['segmentation_id'] = seg
         net_dict['vlan_id'] = vlan
-        net = utils.dict_to_obj(net_dict)
+        net = utils.Dict2Obj(net_dict)
         ret = True
         try:
             self.dcnm_obj.delete_service_network(tenant_name, net)

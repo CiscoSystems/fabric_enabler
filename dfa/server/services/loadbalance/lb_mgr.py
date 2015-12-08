@@ -173,8 +173,8 @@ class LbMgr(object):
         vlan_id = int(net_name_list[1])
         net["vlan_id"] = vlan_id
         net["config_profile"] = self._lb_service_net_profile
-        subnet = utils.dict_to_obj(snet)
-        dcnm_net = utils.dict_to_obj(net)
+        subnet = utils.Dict2Obj(snet)
+        dcnm_net = utils.Dict2Obj(net)
         self.dfa_server.dcnm_client.create_service_network(
                             tenant_name, dcnm_net, subnet, dhcp_range=False)
 

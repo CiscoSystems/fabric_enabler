@@ -18,11 +18,9 @@
 """This module provides APIs for communicating with DCNM."""
 
 
-try:
-    import json
-except ImportError:
-    import simplejson as json
+import json
 import requests
+import sys
 
 from dfa.common import dfa_exceptions as dexc
 from dfa.common import dfa_logger as logging
@@ -54,7 +52,8 @@ class DFARESTClient(object):
         self.default_cfg_profile = cfg.dcnm.default_cfg_profile
         self.default_vrf_profile = cfg.dcnm.default_vrf_profile
         # url timeout: 10 seconds
-        self.timeout_resp = 10
+        self.timeout_resp = (10 if not cfg.dcnm.timeout_resp else
+                             cfg.dcnm.timeout_resp)
 
         # urls
         self._org_url = 'http://%s/rest/auto-config/organizations' % self._ip
@@ -107,12 +106,14 @@ class DFARESTClient(object):
         try:
             cfgplist = self.config_profile_list()
             if self.default_cfg_profile not in cfgplist:
-                self.default_cfg_profile = ('defaultNetworkUniversalEfProfile'
-                                            if self.is_iplus else
-                                            'defaultNetworkIpv4EfProfile')
+                LOG.error("Invalid config profile %s.",
+                          self.default_cfg_profile)
+                sys.exit(_("ERROR: Unable to validate %s" %
+                           self.default_cfg_profile))
         except dexc.DfaClientRequestFailed:
             LOG.error("Failed to send requst to DCNM.")
-            self.default_cfg_profile = 'defaultNetworkIpv4EfProfile'
+            sys.exit(_("ERROR: Unable to validate %s" %
+                       self.default_cfg_profile))
 
     def _create_network(self, network_info):
         """Send create network request to DCNM.
@@ -144,9 +145,12 @@ class DFARESTClient(object):
         url = self._cfg_profile_list_url
         payload = {}
 
-        res = self._send_request('GET', url, payload, 'config-profile')
-        if res and res.status_code in self._resp_ok:
-            return res.json()
+        try:
+            res = self._send_request('GET', url, payload, 'config-profile')
+            if res and res.status_code in self._resp_ok:
+                return res.json()
+        except dexc.DfaClientRequestFailed:
+            LOG.error("Failed to send request to DCNM.")
 
     def _get_settings(self):
         """Get global mobility domain from DCNM."""
@@ -206,6 +210,7 @@ class DFARESTClient(object):
             "description": part_name if len(desc) == 0 else desc,
             "serviceNodeIpAddress": service_node_ip,
             "organizationName": org_name}
+
         # Check the DCNM version and find out whether it is need to have
         # extra payload for the new version when creating/updating a partition.
         if self.is_iplus:
@@ -282,7 +287,8 @@ class DFARESTClient(object):
     def _delete_partition(self, org_name, partition_name):
         """Send partition delete request to DCNM.
 
-        :param partition_name: name of partition to be deleted
+        :param org_name: name of organization
+        :param partition_name: name of partition
         """
         url = self._del_part % (org_name, partition_name)
         return self._send_request('DELETE', url, '', 'partition')
@@ -317,6 +323,7 @@ class DFARESTClient(object):
 
     def _login(self):
         """Login request to DCNM."""
+
         url_login = self._login_url
         expiration_time = self._exp_time
 
@@ -333,6 +340,7 @@ class DFARESTClient(object):
 
     def _logout(self):
         """Logout request to DCNM."""
+
         url_logout = self._logout_url
         requests.post(url_logout,
                       headers=self._req_headers,
@@ -367,15 +375,15 @@ class DFARESTClient(object):
 
     def config_profile_list(self):
         """Return config profile list from DCNM."""
-        profile_list = []
-        these_profiles = []
-        these_profiles = self._config_profile_list()
+
+        these_profiles = self._config_profile_list() or []
         profile_list = [q for p in these_profiles for q in
                         [p.get('profileName')]]
         return profile_list
 
     def config_profile_fwding_mode_get(self, profile_name):
         """Return forwarding mode of given config profile."""
+
         profile_params = self._config_profile_get(profile_name)
         fwd_cli = 'fabric forwarding mode proxy-gateway'
         if profile_params and fwd_cli in profile_params['configCommands']:
@@ -412,7 +420,6 @@ class DFARESTClient(object):
         :param network: network parameters
         :param subnet: subnet parameters of the network
         """
-        network_info = {}
         seg_id = str(network.segmentation_id)
         subnet_ip_mask = subnet.cidr.split('/')
         gw_ip = subnet.gateway_ip
@@ -453,7 +460,7 @@ class DFARESTClient(object):
             # Need to add the vrf name to the network info
             prof = self._config_profile_get(network.config_profile)
             if prof and prof.get('profileSubType') == 'network:universal':
-                # For universal profile vrf has to e organization:partition
+                # For universal profile vrf has to be organization:partition
                 network_info["vrfName"] = ':'.join((tenant_name,
                                                     part))
             else:
@@ -554,7 +561,6 @@ class DFARESTClient(object):
         :param tenant_name: name of tenant the network belongs to
         :param network: object that contains network parameters
         """
-        network_info = {}
         seg_id = network.segmentation_id
         if part_name is None:
             part = self._part_name
@@ -613,7 +619,8 @@ class DFARESTClient(object):
     def delete_project(self, tenant_name, part_name):
         """Delete project on the DCNM.
 
-        :param tenant_name: name of project to be deleted.
+        :param tenant_name: name of project.
+        :param part_name: name of partition.
         """
         res = self._delete_partition(tenant_name, part_name)
         if res and res.status_code in self._resp_ok:
@@ -628,9 +635,7 @@ class DFARESTClient(object):
             LOG.debug("Deleted %s organization in DCNM.", tenant_name)
         else:
             LOG.error("Failed to delete %(org)s organization in DCNM."
-                      "Response: %(res)s", (
-                          {'org': tenant_name,
-                           'res': res}))
+                      "Response: %(res)s", {'org': tenant_name, 'res': res})
             raise dexc.DfaClientRequestFailed(reason=res)
 
     def delete_partition(self, org_name, partition_name):
@@ -650,8 +655,10 @@ class DFARESTClient(object):
     def create_project(self, org_name, part_name, dci_id, desc=None):
         """Create project on the DCNM.
 
-        :param org_name: name of organization to be created
-        :param desc: string that describes organization
+        :param org_name: name of organization.
+        :param part_name: name of partition.
+        :param dci_id: Data Center interconnect id.
+        :param desc: description of project.
         """
         desc = desc or org_name
         res = self._create_org(org_name, desc)
@@ -670,8 +677,10 @@ class DFARESTClient(object):
                        vrf_prof=None, desc=None):
         """Update project on the DCNM.
 
-        :param org_name: name of organization to be created
-        :param desc: string that describes organization
+        :param org_name: name of organization.
+        :param part_name: name of partition.
+        :param dci_id: Data Center interconnect id.
+        :param desc: description of project.
         """
         desc = desc or org_name
         res = self._create_or_update_partition(org_name, part_name, dci_id,
@@ -683,7 +692,7 @@ class DFARESTClient(object):
             LOG.debug("Update %s partition in DCNM.", part_name)
         else:
             LOG.error("Failed to update %(part)s partition in DCNM."
-                      "Response: %(res)s", ({'part': part_name, 'res': res}))
+                      "Response: %(res)s", {'part': part_name, 'res': res})
             raise dexc.DfaClientRequestFailed(reason=res)
 
     def create_partition(self, org_name, part_name, dci_id, vrf_prof,
@@ -733,8 +742,11 @@ class DFARESTClient(object):
             return part_info.get("serviceNodeIpAddress")
 
     def list_networks(self, org, part):
-        """Return list of networks from DCNM."""
+        """Return list of networks from DCNM.
 
+        :param org: name of organization.
+        :param part: name of partition.
+        """
         if org and part:
             list_url = self._del_part + '/networks'
             list_url = list_url % (org, part)
@@ -753,9 +765,11 @@ class DFARESTClient(object):
             LOG.error("Failed to send request to DCNM.")
 
     def get_network(self, org, segid):
-        """Return given network from DCNM."""
+        """Return given network from DCNM.
 
-        network_info = {}
+        :param org: name of organization.
+        :param segid: segmentation id of the network.
+        """
         network_info = {
             'organizationName': org,
             'partitionName': self._part_name,
@@ -775,5 +789,6 @@ class DFARESTClient(object):
             res = self._send_request('GET', url, payload, 'dcnm-version')
             if res and res.status_code in self._resp_ok:
                 return res.json().get('Dcnm-Version')
-        except dexc.DfaClientRequestFailed:
+        except dexc.DfaClientRequestFailed as exc:
             LOG.error("Failed to get DCNM version.")
+            sys.exit(_("ERROR: Failed to connect to DCNM: %s" % exc))

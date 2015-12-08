@@ -352,8 +352,7 @@ class VdpMgr(object):
         '''
         try:
             if (ovs_vdp.is_bridge_present(self.br_ex, self.root_helper) and
-                    ovs_vdp.is_bridge_present(self.br_integ,
-                                              self.root_helper)):
+               ovs_vdp.is_bridge_present(self.br_integ, self.root_helper)):
                 return True
             else:
                 return False
@@ -451,7 +450,8 @@ class VdpMgr(object):
         if self.static_uplink:
             ret = self.static_uplink_detect(self.veth_intf)
         else:
-            ret = uplink_det.detect_uplink(self.veth_intf)
+            ret = uplink_det.detect_uplink(self.veth_intf,
+                                           self.root_helper)
         if ret is 'down':
             if self.phy_uplink is None:
                 LOG.error("Wrong status down")

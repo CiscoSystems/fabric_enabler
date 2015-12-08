@@ -25,11 +25,12 @@ DFA_db_session = None
 
 Base = declarative_base()
 
+
 def configure_db(cfg):
     global DFA_db_session
 
     if DFA_db_session:
-        return 
+        return
 
 #    engine = create_engine(connection, echo=True)
     connection = cfg.dfa_mysql.connection

@@ -24,6 +24,7 @@ import dfa.server.services.constants as const
 import dfa.server.services.firewall.native.fw_constants as fw_const
 from dfa.common import utils
 
+
 default_neutron_opts = {
     'DEFAULT': {
         'admin_port': 35357,
@@ -89,7 +90,7 @@ default_sys_opts = {
 
 default_dcnm_opts = {
     'dcnm': {
-        'default_cfg_profile': 'defaultNetworkIpv4EfProfile',
+        'default_cfg_profile': 'defaultNetworkUniversalTfProfile',
         'default_vrf_profile': 'vrf-common-universal',
         'default_partition_name': 'CTX',
         'dcnm_net_ext': '(DCNM)',
@@ -97,7 +98,8 @@ default_dcnm_opts = {
         'dcnm_dhcp_leases': '/var/lib/dhcpd/dhcpd.leases',
         'vlan_id_min': const.VLAN_ID_MIN,
         'vlan_id_max': const.VLAN_ID_MAX,
-        'dcnm_dhcp': 'true',
+        'dcnm_dhcp': True,
+        'dcnm_net_create': False,
     },
 }
 
@@ -114,7 +116,8 @@ default_loadbalance_opts = {
         'lb_svc_net_profile': 'serviceNetworkUniversalDynamicRoutingLBProfile',
         'lb_svc_net': '199.199.1.0/24',
         'lb_svc_net_name_prefix': 'lbaasinternal',
-        'lb_driver': 'dfa.server.services.loadbalance.drivers.f5.F5Device.F5Device',
+        'lb_driver': ('dfa.server.services.loadbalance.drivers.f5.'
+                      'F5Device.F5Device'),
     },
 }
 
@@ -138,7 +141,11 @@ class CiscoDFAConfig(object):
         self.dfa_cfg = {}
         self._load_default_opts()
         args = sys.argv[1:]
-        opts = [(args[i], args[i+1]) for i in range(0, len(args), 2)]
+        try:
+            opts = [(args[i], args[i + 1]) for i in range(0, len(args), 2)]
+        except IndexError:
+            opts = []
+
         cfgfile = cfg.find_config_files(service_name)
         for k, v in opts:
             if k == '--config-file':
@@ -147,18 +154,26 @@ class CiscoDFAConfig(object):
         read_ok = multi_parser.read(cfgfile)
 
         if len(read_ok) != len(cfgfile):
-            raise cfg.Error(("Failed to read config files %(cfgf)s"),
-                            {'cfgf': cfgfile})
+            raise cfg.Error(("Failed to read config files read_ok = %s "
+                             "cfgfile = %s" % (read_ok, cfgfile)))
 
         for parsed_file in multi_parser.parsed:
             for parsed_item in parsed_file.keys():
                 if parsed_item not in self.dfa_cfg:
                     self.dfa_cfg[parsed_item] = {}
                 for key, value in parsed_file[parsed_item].items():
-                    self.dfa_cfg[parsed_item][key] = value[0]
+                    self.dfa_cfg[parsed_item][key] = (
+                        self._inspect_val(value[0]))
 
         # Convert it to object.
-        self._cfg = utils.dict_to_obj(self.dfa_cfg)
+        self._cfg = utils.Dict2Obj(self.dfa_cfg)
+
+    def _inspect_val(self, val):
+
+        if isinstance(val, str):
+            return True if val.lower() == 'true' else False if (
+                val.lower() == 'false') else val
+        return val
 
     def _load_default_opts(self):
         """Load default options."""

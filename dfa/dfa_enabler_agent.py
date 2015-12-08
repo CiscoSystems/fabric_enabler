@@ -1,8 +1,7 @@
 #!/usr/bin/python
 
-import sys 
+import sys
 
-from oslo.config import cfg
 from dfa.agent import dfa_agent as dfa
 
 

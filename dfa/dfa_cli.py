@@ -17,14 +17,16 @@
 
 """CLI module for fabric enabler."""
 
+from __future__ import print_function
 
 import cmd
 import itertools
 import json
-import pbr.version
+import pkg_resources
 import platform
+from prettytable import PrettyTable
+import six
 import sys
-from tabulate import tabulate
 
 from dfa.common import config
 from dfa.common import constants
@@ -47,6 +49,7 @@ class DfaCli(cmd.Cmd):
         self._cfg = config.CiscoDFAConfig().cfg
         self.dcnm_client = cdr.DFARESTClient(self._cfg)
         self.setup_client_rpc()
+        self.clnt = None
 
     def setup_client_rpc(self):
         url = self._cfg.dfa_rpc.transport_url % (
@@ -63,7 +66,7 @@ class DfaCli(cmd.Cmd):
     def do_set_static_ip(self, line):
         args = line.split()
         ip_mac = dict(itertools.izip_longest(args[::2], args[1::2],
-                      fillvalue=''))
+                                             fillvalue=''))
         ipaddr = ip_mac.get('--ip')
         macaddr = ip_mac.get('--mac')
         # Some sanity check.
@@ -81,14 +84,13 @@ class DfaCli(cmd.Cmd):
         try:
             cfgp_list = self.dcnm_client.config_profile_list()
             if not cfgp_list:
-                print 'No config profile found.'
+                print('No config profile found.')
                 return
         except dexc.DfaClientRequestFailed:
-            print 'Failed to access DCNM.'
+            print('Failed to access DCNM.')
             return
 
-        columns = ['Config Profile Name', 'Alias']
-        rows = []
+        cfg_table = PrettyTable(['Config Profile Name', 'Alias'])
         for cfg in cfgp_list:
             if cfg.startswith('defaultNetwork'):
                 cfg_alias = cfg.split('defaultNetwork')[1].split('Profile')[0]
@@ -96,105 +98,107 @@ class DfaCli(cmd.Cmd):
                 cfg_alias = cfg.split('Profile')[0]
             else:
                 cfg_alias = cfg
-            rows.append([cfg, cfg_alias])
+            cfg_table.add_row([cfg, cfg_alias])
 
-        print tabulate(rows, columns, tablefmt='grid')
+        print(cfg_table)
 
     def do_list_networks(self, line):
         tenant_name = line
         if not tenant_name:
-            print 'Tenant name is required.'
+            print('Tenant name is required.')
             return
 
         try:
-            net_list = self.dcnm_client.list_networks(tenant_name, tenant_name)
+            part_name = self._cfg.dcnm.default_partition_name
+            net_list = self.dcnm_client.list_networks(tenant_name, part_name)
             if not net_list:
-                print 'No network found.'
+                print('No network found.')
                 return
         except dexc.DfaClientRequestFailed:
-            print 'Failed to access DCNM.'
+            print('Failed to access DCNM.')
             return
 
-        rows = []
+        list_table = None
         for net in net_list:
-            rows.append(net.values())
-        columns = net.keys()
+            columns = net.keys()
+            if list_table is None:
+                list_table = PrettyTable(columns)
+            if list_table:
+                list_table.add_row(net.values())
 
-        print tabulate(rows, columns, tablefmt='grid')
+        print(list_table)
 
     def do_get_network(self, line):
         args = line.split()
         if len(args) < 2:
-            print 'Invalid parameters'
+            print('Invalid parameters')
             return
 
         if not args[1].isdigit():
-            print 'Invalid segmentation id %s.' % args[1]
+            print('Invalid segmentation id %s.' % args[1])
             return
 
         try:
             net = self.dcnm_client.get_network(args[0], args[1])
             if not net:
-                print 'No network found.'
+                print('No network found.')
                 return
         except dexc.DfaClientRequestFailed:
-            print 'Failed to access DCNM.'
+            print('Failed to access DCNM.')
             return
 
-        rows = []
-        columns = []
-        for key, val in net.iteritems():
+        net_table = PrettyTable(net.keys())
+        row = []
+        for key, val in six.iteritems(net):
             if key == 'configArg' or key == 'dhcpScope':
                 val = str(val)
-            rows.append(val)
+            row.append(val)
+        net_table.add_row(row)
 
-        columns = net.keys()
-        print tabulate([rows], columns, tablefmt='grid')
+        print(net_table)
 
     def do_list_organizations(self, line):
         '''Get list of organization on DCNM.'''
 
         org_list = self.dcnm_client.list_organizations()
         if not org_list:
-            print 'No organization found.'
+            print('No organization found.')
             return
 
-        columns = ['Organization Name']
-        rows = []
+        org_table = PrettyTable(['Organization Name'])
         for org in org_list:
-            rows.append([org['organizationName']])
+            org_table.add_row([org['organizationName']])
 
-        print tabulate(rows, columns, tablefmt='grid')
+        print(org_table)
 
     def do_get_dcnm_version(self, line):
         '''Get current version of DCNM.'''
 
         ver = self.dcnm_client.get_version()
 
-        print ver
+        print(ver)
 
     def do_get_enabler_version(self, line):
         '''Get current fabric enabler's package version.'''
 
-        version_info = pbr.version.VersionInfo('openstack_fabric_enabler')
-        print 'Release: %s' % version_info.release_string()
-        print 'Version: %s' % version_info.version_string()
+        print('Version: %s' % pkg_resources.get_distribution(
+            "openstack_fabric_enabler").version)
 
     def help_get_config_profile(self):
-        print '\n'.join(['get_config_profile',
-                         'Display supported configuration profile in DCNM'])
+        print('\n'.join(['get_config_profile',
+                         'Display supported configuration profile in DCNM']))
 
     def help_list_networks(self):
-        print '\n'.join(['list_networks tenant-name',
-                         'Display list of network for given tenant.'])
+        print('\n'.join(['list_networks tenant-name',
+                         'Display list of network for given tenant.']))
 
     def help_get_network(self):
-        print '\n'.join(['get_network tenant-name segmentation_id',
-                         'Display network details.'])
+        print('\n'.join(['get_network tenant-name segmentation_id',
+                         'Display network details.']))
 
     def help_set_static_ip(self):
-        print '\n'.join(['set_static_ip --mac <mac address> --ip <ip address>',
-                         'Set static ip address for an instance.'])
+        print('\n'.join(['set_static_ip --mac <mac address> --ip <ip address>',
+                         'Set static ip address for an instance.']))
 
     def emptyline(self):
         return
@@ -223,7 +227,7 @@ def dfa_cli():
     if len(sys.argv[1:]) % 2:
         sys.argv.append("")
     sys.argv.append('--config-file')
-    sys.argv.append('/etc/enabler_conf.ini')
+    sys.argv.append('/etc/saf/enabler_conf.ini')
     DfaCli().cmdloop()
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-import sys 
+import sys
 from server import dfa_server as dfa
 
 

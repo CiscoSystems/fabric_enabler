@@ -18,9 +18,9 @@
 """DFA logging helper module."""
 
 
-import os
 import logging
 import logging.handlers as log_hdlr
+import os
 import sys
 
 # Rotating file size limit.
@@ -52,6 +52,7 @@ def getLogger(name):
 
     return logger
 
+
 def setup_logger(project, cfg):
 
     if _loggers.get(project):
@@ -81,9 +82,9 @@ def setup_logger(project, cfg):
             pass
         else:
             log_file_path = os.path.join(log_dir, log_file)
-            handler = log_hdlr.TimedRotatingFileHandler(log_file_path,
-                                                        when=DAYS,
-                                                        interval=1)
+            handler = log_hdlr.RotatingFileHandler(log_file_path,
+                                                   maxBytes=MAX_BYTES,
+                                                   backupCount=BACKUP_COUNT)
     else:
         handler = logging.StreamHandler(sys.stdout)
 

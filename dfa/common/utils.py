@@ -16,6 +16,7 @@
 
 
 import datetime
+import six
 import socket
 import struct
 import sys
@@ -48,9 +49,8 @@ class PeriodicTask(object):
             self._fn(**self._kwargs)
             end = time.time()
             delta = end - start
-            thrd = threading.Timer(self._interval - delta, self.run)
-            self.thrd = thrd
-            thrd.start()
+            self.thrd = threading.Timer(self._interval - delta, self.run)
+            self.thrd.start()
         except Exception as e:
             if self._excq:
                 emsg = ('%(name)s : %(excp)s' % {'name': self._fn.__name__,
@@ -97,24 +97,20 @@ class EventProcessingThread(threading.Thread):
         return self._thread_name
 
 
-class dict_to_obj(object):
+class Dict2Obj(object):
 
     """Convert a dictionary to an object."""
 
     def __init__(self, d):
-        for key, val in d.iteritems():
+        for key, val in six.iteritems(d):
             # Check if it is nested dictionary
             if isinstance(val, dict):
-                setattr(self, key, dict_to_obj(val))
+                setattr(self, key, Dict2Obj(val))
             else:
                 setattr(self, key, val)
 
     def __getattr__(self, val):
         return self.__dict__.get(val)
-
-    def __repr__(self):
-        return '{%s}' % str(', '.join('%s : %s' % (k, repr(v)) for
-                                      (k, v) in self.__dict__.iteritems()))
 
 
 def get_uuid():
@@ -165,5 +161,5 @@ def make_cidr(gw, mask):
         gw_addr_int = struct.unpack('>L', socket.inet_aton(gw))[0] & int_mask
         return (socket.inet_ntoa(struct.pack("!I", gw_addr_int)) +
                 '/' + str(mask))
-    except (socket.error, struct.error, ValueError):
+    except (socket.error, struct.error, ValueError, TypeError):
         return

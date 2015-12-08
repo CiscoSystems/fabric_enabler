@@ -478,7 +478,6 @@ class DfaDBMixin(object):
         return nets
 
     def get_network(self, net_id):
-        net = None
         session = db.get_session()
         try:
             with session.begin(subtransactions=True):
@@ -490,7 +489,6 @@ class DfaDBMixin(object):
         except orm_exc.MultipleResultsFound:
             LOG.error('More than one enty found for network %(id)s.' % (
                 {'id': net_id}))
-        return net
 
     def get_network_by_name(self, name):
         session = db.get_session()

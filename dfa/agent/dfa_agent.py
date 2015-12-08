@@ -70,7 +70,7 @@ class RpcCallBacks(object):
 
     def update_ip_rule(self, context, msg):
         rule_info = eval(msg)
-        LOG.debug('RX Info : %s' % rule_info)
+        LOG.debug('RX Info : %s', rule_info)
         # Update the iptables for this rule
         if self._iptd:
             self._iptd.enqueue_event(rule_info)
@@ -78,10 +78,10 @@ class RpcCallBacks(object):
     def send_msg_to_agent(self, context, msg):
         msg_type = context.get('type')
         uplink = json.loads(msg)
-        LOG.debug("Received %(context)s and %(msg)s" % (
+        LOG.debug("Received %(context)s and %(msg)s", (
             {'context': context, 'msg': uplink}))
         if msg_type == constants.UPLINK_NAME:
-            LOG.debug("uplink is %(uplink)s" % uplink)
+            LOG.debug("uplink is %(uplink)s", uplink)
             self._vdpd.dfa_uplink_restart(uplink)
 
 
@@ -90,10 +90,11 @@ class DfaAgent(object):
     """DFA agent."""
 
     def __init__(self, host, rpc_qn):
-        self._my_host = host
-        self._qn = rpc_qn
         self._cfg = config.CiscoDFAConfig('neutron').cfg
-        LOG.debug('Starting DFA Agent on %s' % self._my_host)
+        self._my_host = self._cfg.DEFAULT.host if self._cfg.DEFAULT.host else (
+            host)
+        self._qn = '_'.join((rpc_qn, self._my_host))
+        LOG.debug('Starting DFA Agent on %s', self._my_host)
 
         # List of task in the agent
         self.agent_task_list = []
@@ -104,13 +105,14 @@ class DfaAgent(object):
         # Initialize iptables driver. This will be used to update the ip
         # rules in iptables, after launching an instance.
 
-        if (self._cfg.dcnm.dcnm_dhcp.lower() == 'true'):
+        if self._cfg.dcnm.dcnm_dhcp:
             self._iptd = iptd.IptablesDriver(self._cfg)
         else:
             self._iptd = None
             LOG.info("Using native dhcp, iptable driver is not needed")
 
         # Setup RPC client for sending heartbeat to controller
+        self._url = self._cfg.dfa_rpc.transport_url
         self.setup_client_rpc()
 
         # Initialize VPD manager.
@@ -119,28 +121,27 @@ class DfaAgent(object):
         br_ext = 'br-ethd'
         root_helper = self._cfg.sys.root_helper
         self._vdpm = vdpm.VdpMgr(br_int, br_ext, root_helper, self.clnt,
-                                 thishost)
+                                 self._my_host)
         self.pool = eventlet.GreenPool()
         self.setup_rpc()
 
     def setup_client_rpc(self):
         """Setup RPC client for dfa agent."""
         # Setup RPC client.
-        url = self._cfg.dfa_rpc.transport_url % (
-            {'ip': self._cfg.DEFAULT.rabbit_hosts})
-        self.clnt = rpc.DfaRpcClient(url, constants.DFA_SERVER_QUEUE)
+        self.clnt = rpc.DfaRpcClient(self._url, constants.DFA_SERVER_QUEUE,
+                                     exchange=constants.DFA_EXCHANGE)
 
     def send_heartbeat(self):
         context = {}
-        args = json.dumps(dict(when=time.ctime(), agent=thishost))
+        args = json.dumps(dict(when=time.ctime(), agent=self._my_host))
         msg = self.clnt.make_msg('heartbeat', context, msg=args)
         resp = self.clnt.cast(msg)
-        LOG.debug("send_heartbeat: resp = %s" % resp)
+        LOG.debug("send_heartbeat: resp = %s", resp)
 
     def request_uplink_info(self):
         context = {}
-        msg = self.clnt.make_msg('request_uplink_info', context,
-                                 agent=thishost)
+        msg = self.clnt.make_msg('request_uplink_info',
+                                 context, agent=self._my_host)
         try:
             resp = self.clnt.call(msg)
             LOG.debug("request_uplink_info: resp = %s" % resp)
@@ -152,7 +153,9 @@ class DfaAgent(object):
         """Setup RPC server for dfa agent."""
 
         endpoints = RpcCallBacks(self._vdpm, self._iptd)
-        self.server = rpc.DfaRpcServer(self._qn, self._my_host, endpoints)
+        self.server = rpc.DfaRpcServer(self._qn, self._my_host, self._url,
+                                       endpoints,
+                                       exchange=constants.DFA_EXCHANGE)
 
     def start_rpc(self):
         self.server.start()
@@ -192,11 +195,12 @@ def save_my_pid(cfg):
             if not os.path.exists(pid_path):
                 os.makedirs(pid_path)
         except OSError:
-            pass
-        else:
-            pid_file_path = os.path.join(pid_path, pid_file)
+            LOG.error(('Fail to create %s'), pid_path)
+            return
 
-        LOG.debug('dfa_agent pid=%s' % mypid)
+        pid_file_path = os.path.join(pid_path, pid_file)
+
+        LOG.debug('dfa_agent pid=%s', mypid)
         with open(pid_file_path, 'w') as fn:
             fn.write(str(mypid))
 

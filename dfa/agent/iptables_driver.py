@@ -29,7 +29,7 @@ class IpMacPort(object):
 
     def __init__(self, ip, mac, port):
         self.ip = ip
-        self.mac = mac
+        self.mac = mac and mac.lower()
         self.port = port
         self.chain = 'neutron-openvswi-s' + port[:10]
 
@@ -59,7 +59,7 @@ class IptablesDriver(object):
 
         new_rule = IpMacPort(rule_info.get('ip'), rule_info.get('mac'),
                              rule_info.get('port'))
-        LOG.debug('Added rule info %s to the list' % rule_info)
+        LOG.debug('Added rule info %s to the list', rule_info)
         self.rule_info.append(new_rule)
 
     def remove_rule_entry(self, rule_info):
@@ -70,7 +70,7 @@ class IptablesDriver(object):
             if (rule.ip == rule_info.get('ip') and
                 rule.mac == rule_info.get('mac') and
                     rule.port == rule_info.get('port')):
-                LOG.debug('Removed rule info %s from the list' % rule_info)
+                LOG.debug('Removed rule info %s from the list', rule_info)
                 self.rule_info.remove(rule)
 
     def _find_chain_name(self, mac):
@@ -82,8 +82,8 @@ class IptablesDriver(object):
         for o in cmdo.split('\n'):
             if mac in o.lower():
                 chain = o.split()[1]
-                LOG.info('Find %(chain)s for %(mac)s.' % ({'chain': chain,
-                                                           'mac': mac}))
+                LOG.info('Find %(chain)s for %(mac)s.', {'chain': chain,
+                                                         'mac': mac})
                 return chain
 
     def _find_rule_no(self, mac):
@@ -94,8 +94,8 @@ class IptablesDriver(object):
         for o in cmdo.split('\n'):
             if mac in o.lower():
                 rule_no = o.split()[0]
-                LOG.info('Found rule %(rule)s for %(mac)s.' % (
-                    {'rule': rule_no, 'mac': mac}))
+                LOG.info('Found rule %(rule)s for %(mac)s.',
+                         {'rule': rule_no, 'mac': mac})
                 return rule_no
 
     def update_ip_rule(self, ip, mac):
@@ -104,14 +104,14 @@ class IptablesDriver(object):
         rule_no = self._find_rule_no(mac)
         chain = self._find_chain_name(mac)
         if not rule_no or not chain:
-            LOG.error('Failed to update ip rule for %(ip)s %(mac)s' % (
-                {'ip': ip, 'mac': mac}))
+            LOG.error('Failed to update ip rule for %(ip)s %(mac)s',
+                      {'ip': ip, 'mac': mac})
             return
 
         update_cmd = ['iptables', '-R', '%s' % chain, '%s' % rule_no,
                       '-s', '%s/32' % ip, '-m', 'mac', '--mac-source',
                       '%s' % mac, '-j', 'RETURN']
-        LOG.debug('Execute command: %s' % (update_cmd))
+        LOG.debug('Execute command: %s', update_cmd)
         dsl.execute(update_cmd, self._root_helper, log_output=False)
 
     def enqueue_event(self, event):
@@ -121,14 +121,19 @@ class IptablesDriver(object):
         update the spoofing rule for the host in the iptables.
         """
 
-        LOG.debug('Enqueue iptable event %s.' % event)
+        LOG.debug('Enqueue iptable event %s.', event)
         if event.get('status') == 'up':
             for rule in self.rule_info:
-                if (rule.mac == event.get('mac') and
-                    rule.ip == event.get('ip') and
+                if (rule.mac == event.get('mac').lower() and
                         rule.port == event.get('port')):
                     # Entry already exist in the list.
-                    return
+                    if rule.ip != event.get('ip'):
+                        LOG.debug('enqueue_event: Only updating IP from %s'
+                                  ' to %s.' % (rule.ip, event.get('ip')))
+                        # Only update the IP address if it is different.
+                        rule.ip = event.get('ip')
+                        return
+
         self._iptq.put(event)
 
     def create_thread(self):
@@ -137,6 +142,14 @@ class IptablesDriver(object):
         ipt_thrd = utils.EventProcessingThread('iptables', self,
                                                'process_rule_info')
         return ipt_thrd
+
+    def _is_ip_in_rule(self, ip, rule):
+        try:
+            ip_loc = rule.index('-s') + 1
+            rule_ip = rule[ip_loc].split('/')[0]
+            return ip == rule_ip
+        except Exception:
+            return False
 
     def update_iptables(self):
         """Update iptables based on information in the rule_info."""
@@ -152,15 +165,16 @@ class IptablesDriver(object):
         for line in all_rules.split('\n'):
             new_line = line
             line_content = line.split()
-            # The spoofing rule which includes mac and ip should have 11
-            # entries, and also -s option for ip address. Otherwise no rule
+            # The spoofing rule which includes mac and ip should have
+            # -s cidr/32  option for ip address. Otherwise no rule
             # will be modified.
-            if len(line_content) == 11 and '-s' in line_content:
-                for rule in self.rule_info:
+            if '-s' in line_content:
+                tmp_rule_info = list(self.rule_info)
+                for rule in tmp_rule_info:
                     if (rule.mac in line.lower() and
-                        rule.chain in line.lower() and
-                            rule.ip not in line.lower()):
-                        ip_loc = line_content.index('-s')+1
+                        rule.chain.lower() in line.lower() and
+                            not self._is_ip_in_rule(rule.ip, line_content)):
+                        ip_loc = line_content.index('-s') + 1
                         line_content[ip_loc] = rule.ip + '/32'
                         new_line = ' '.join(line_content)
                         LOG.debug('Modified %(old_rule)s. '
@@ -182,7 +196,7 @@ class IptablesDriver(object):
         while True:
             try:
                 event = self._iptq.get(block=False)
-                LOG.debug('Dequeue event: %s.' % (event))
+                LOG.debug('Dequeue event: %s.', event)
                 self.update_rule_entry(event)
             except Queue.Empty:
                 self.update_iptables()

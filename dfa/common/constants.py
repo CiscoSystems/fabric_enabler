@@ -26,6 +26,7 @@ DFA_AGENT_QUEUE = 'dfa_agent'
 
 # RPC queue name on server side.
 DFA_SERVER_QUEUE = 'dfa_server_q'
+DFA_EXCHANGE = 'dfa'
 
 RESULT_FAIL = 'FAIL'
 RESULT_SUCCESS = 'SUCCESS'

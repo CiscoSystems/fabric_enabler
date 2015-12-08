@@ -87,12 +87,12 @@ class DfaFailureRecovery(object):
                                                name=proj.name,
                                                opcode='update')
                 LOG.debug('Success on failure recovery for '
-                          'project %(name)s' % ({'name': proj.name}))
+                          'project %(name)s', {'name': proj.name})
 
         # 1.1 Try failure recovery for update project.
         projs = self.get_fialed_projects_entries(constants.UPDATE_FAIL)
         for proj in projs:
-            LOG.debug("Failure recovery for project %(name)s." % (
+            LOG.debug("Failure recovery for project %(name)s.",  (
                 {'name': proj.name}))
             # This was failure of updating DCI id of the project in DCNM.
             try:
@@ -102,8 +102,8 @@ class DfaFailureRecovery(object):
                                                 proj.dci_id)
             except dexc.DfaClientRequestFailed as exc:
                 LOG.error("failure_recovery: Failed to update %(proj)s on "
-                          "DCNM : %(reason)s" % (
-                              {'proj': proj.name, 'reason': str(exc)}))
+                          "DCNM : %(reason)s",
+                          {'proj': proj.name, 'reason': str(exc)})
             else:
                 # Request is sent successfully, update the database.
                 self.update_project_info_cache(proj.id,
@@ -111,19 +111,24 @@ class DfaFailureRecovery(object):
                                                name=proj.name,
                                                opcode='update')
                 LOG.debug('Success on failure recovery update for '
-                          'project %(name)s' % ({'name': proj.name}))
+                          'project %(name)s', {'name': proj.name})
 
         # 2. Try failure recovery for create network.
         nets = self.get_all_networks()
         for net in nets:
-            if (net.result == constants.CREATE_FAIL and
-                    net.source.lower() == 'openstack'):
+            if (net.result == constants.CREATE_FAIL
+                    and net.source.lower() == 'openstack'):
                 net_id = net.network_id
-                subnets = self.neutron_event.nclient.list_subnets(
-                    network_id=net_id).get('subnets')
+                try:
+                    subnets = self.neutron_event.nclient.list_subnets(
+                        network_id=net_id).get('subnets')
+                except dexc.ConnectionFailed:
+                    LOG.exception('Failed to get subnets list.')
+                    continue
+
                 for subnet in subnets:
                     tenant_name = self.get_project_name(subnet['tenant_id'])
-                    snet = utils.dict_to_obj(subnet)
+                    snet = utils.Dict2Obj(subnet)
                     try:
                         # Check if config_profile is not NULL.
                         if not net.config_profile:
@@ -145,8 +150,8 @@ class DfaFailureRecovery(object):
                                                             self.dcnm_dhcp)
                     except dexc.DfaClientRequestFailed:
                         # Still is failure, only log the error.
-                        emsg = 'Failed to create network %(net)s.'
-                        LOG.error(emsg % {'net': net.name})
+                        LOG.error('Failed to create network %(net)s.',
+                                  {'net': net.name})
                     else:
                         # Request is sent to DCNM, update the database
                         params = dict(
@@ -155,7 +160,7 @@ class DfaFailureRecovery(object):
                                          result=constants.RESULT_SUCCESS))
                         self.update_network(net_id, **params)
                         LOG.debug("Success on failure recovery to create "
-                                  "%(net)s" % ({'net': net.name}))
+                                  "%(net)s", {'net': net.name})
 
         # 3. Try Failure recovery for VM create and delete.
         instances = self.get_vms()
@@ -184,7 +189,7 @@ class DfaFailureRecovery(object):
                     params = dict(columns=dict(
                         result=constants.RESULT_SUCCESS))
                     self.update_vm_db(vm.port_id, **params)
-                    LOG.info('Created VM %(vm)s.' % {'vm': vm.name})
+                    LOG.info('Created VM %(vm)s.', {'vm': vm.name})
 
             if vm.result == constants.DELETE_FAIL:
                 try:
@@ -198,8 +203,8 @@ class DfaFailureRecovery(object):
 
         # 4. Try failure recovery for delete network.
         for net in nets:
-            if (net.result == constants.DELETE_FAIL and
-                    net.source.lower() == 'openstack'):
+            if (net.result == constants.DELETE_FAIL
+                    and net.source.lower() == 'openstack'):
                 net_id = net.network_id
                 segid = net.segmentation_id
                 tenant_name = self.get_project_name(net.tenant_id)
@@ -207,8 +212,8 @@ class DfaFailureRecovery(object):
                     self.dcnm_client.delete_network(tenant_name, net)
                 except dexc.DfaClientRequestFailed:
                     # Still is failure, only log the error.
-                    emsg = 'Failed to delete network %(net)s.'
-                    LOG.error(emsg % {'net': net.name})
+                    LOG.error('Failed to delete network %(net)s.',
+                              {'net': net.name})
                 else:
                     # Request is sent to DCNM, delete the entry
                     # from database and return the segmentation id to the
@@ -216,12 +221,12 @@ class DfaFailureRecovery(object):
                     self.delete_network_db(net_id)
                     self.seg_drvr.release_segmentation_id(segid)
                     LOG.debug("Success on failure recovery to deleted "
-                              "%(net)s" % ({'net': net.name}))
+                              "%(net)s", {'net': net.name})
 
         # 5. Try failure recovery for delete project.
         projs = self.get_fialed_projects_entries(constants.DELETE_FAIL)
         for proj in projs:
-            LOG.debug("Failure recovery for project %(name)s." % (
+            LOG.debug("Failure recovery for project %(name)s.", (
                 {'name': proj.name}))
             # Try to delete the project in DCNM
             try:
@@ -232,13 +237,13 @@ class DfaFailureRecovery(object):
                 # Failed to delete project in DCNM.
                 # Save the info and mark it as failure and retry it later.
                 LOG.error("Failure recovery is failed to delete "
-                          " %(project)s on DCNM : %(reason)s" % (
-                              {'project': proj.name, 'reason': str(e)}))
+                          " %(project)s on DCNM : %(reason)s",
+                          {'project': proj.name, 'reason': str(e)})
             else:
                 # Delete was successful, now update the database.
                 self.update_project_info_cache(proj.id, opcode='delete')
                 LOG.debug("Success on failure recovery to deleted "
-                          "%(project)s" % ({'project': proj.name}))
+                          "%(project)s", {'project': proj.name})
 
         # 6. Do failure recovery for Firewall service
         self.fw_retry_failures()

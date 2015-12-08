@@ -27,11 +27,12 @@ setup(
     packages=find_packages(exclude=['tests']),
     include_package_data=True,
     install_requires=requires,
+    data_files=[('/etc/saf', ['enabler_conf.ini'])],
     entry_points={
         'console_scripts': [
-            'fabric_enabler_server = dfa.dfa_enabler_server:dfa_server',
-            'fabric_enabler_agent = dfa.dfa_enabler_agent:dfa_agent',
-            'fabric_enabler_cli = dfa.dfa_cli:dfa_cli',
+            'fabric-enabler-server = dfa.dfa_enabler_server:dfa_server',
+            'fabric-enabler-agent = dfa.dfa_enabler_agent:dfa_agent',
+            'fabric-enabler-cli = dfa.dfa_cli:dfa_cli',
         ],
         'services.firewall.native.drivers': [
             'phy_asa = dfa.server.services.firewall.native.drivers.phy_asa:PhyAsa',

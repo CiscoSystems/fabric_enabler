@@ -319,7 +319,7 @@ def _build_flow_expr_str(flow_dict, cmd):
         flow_expr_arr.append("priority=%s" %
                              flow_dict.pop('priority', '1'))
     elif 'priority' in flow_dict:
-        msg = "Cannot match priority on flow deletion or modification"
+        msg = _("Cannot match priority on flow deletion or modification")
         raise InvalidInput(error_message=msg)
 
     if cmd != 'del':
