@@ -394,5 +394,8 @@ if __name__ == '__main__':
 
         find_conf_and_modify(options.dir_path.lower(), root_helper)
         prepare_db(options.mysql_user, options.mysql_pass, options.mysql_host)
+    if node == 'ha-control':
+        find_conf_and_modify(options.dir_path.lower(), root_helper)
+	node = 'control'
 
     copy_init_conf_files(node, root_helper)
