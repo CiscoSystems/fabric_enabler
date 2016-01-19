@@ -15,6 +15,8 @@
 #
 # @author: Nader Lahouti, Cisco Systems, Inc.
 
+
+import six
 import time
 
 from dfa.common import constants
@@ -55,6 +57,114 @@ class DfaFailureRecovery(object):
         except Exception as exc:
             LOG.exception('Error: %s for event %s' % (str(exc), event_type))
             raise exc
+
+    def _failure_vms_migration(self, vm, vm_info):
+        """Processes failure recovery for VM migration case."""
+
+        vmr = eval(vm.result)
+        params = None
+
+        # Go through the result field of this instance. There are two cases
+        # which needs to be covered:
+        # 1. Processing the info in 'src' field - which means the VM was
+        #    migrated from the hosts saved in the result. If there is failure,
+        #    it is because of failing in delete request. So, try to send
+        #    delete request to agents on those hosts.
+        # 2. Processing the info in the 'dst' field - which means the VM was
+        #    migrated to the hosts saved in the result. If there is a failure,
+        #    it is because of creation failure. Then send create request to the
+        #    agent on that host.
+        for to_host, to_val in six.iteritems(vmr.get(constants.MIG_TO)):
+            to_res = to_val.get('res')
+            if to_res == constants.CREATE_FAIL:
+                try:
+                    vm_info.update({'host': to_host, 'status': 'up'})
+                    self.neutron_event.send_vm_info(str(to_host), str(vm_info))
+                    vmr.get(constants.MIG_TO).get(to_host).update(
+                        {'res': constants.RESULT_SUCCESS})
+                    params = dict(columns=dict(result=str(vmr)))
+                    to_res = constants.RESULT_SUCCESS
+                except Exception as e:
+                    # Failed to send info to the agent. Keep the data in the
+                    # database as failure to send it later.
+                    to_res = constants.CREATE_FAIL
+                    LOG.error('Failed to send VM info to agent. Reason %s' % (
+                        str(e)))
+
+        res_list = []
+        for from_host, from_val in six.iteritems(vmr.get(constants.MIG_FROM)):
+            if from_val.get('res') == constants.DELETE_FAIL:
+                if self.is_agent_alive(from_host):
+                    try:
+                        vm_info.update({'host': from_host,
+                                        'status': 'down'})
+                        self.neutron_event.send_vm_info(str(from_host),
+                                                        str(vm_info))
+                        vmr.get(constants.MIG_FROM).get(from_host).update(
+                            {'res': constants.DELETE_PENDING})
+                        res_list.append(False)
+                        params = dict(columns=dict(result=str(vmr)))
+                    except Exception as e:
+                        # Failed to send info to agent. Keep the data in the
+                        # database as failure to send it later.
+                        LOG.error('Failed to send VM info to agent. '
+                                  'Reason %s' % (str(e)))
+                        res_list.append(False)
+                else:
+                    # The compute node or agent is not responsive, mark the
+                    # result as success and consider the delete is completed.
+                    if from_val.get('res') in constants.DELETE_LIST:
+                        vmr.get(constants.MIG_FROM).get(from_host).update(
+                            {'res': constants.RESULT_SUCCESS})
+                        res_list.append(True)
+                        params = dict(columns=dict(result=str(vmr)))
+                        LOG.debug('Agent %(agent)s is not responsive. '
+                                  'Setting status to success. %(result)s',
+                                  {'agent': from_host, 'result': str(vmr)})
+
+        if all(res_list):
+            # The delete on source host was successfull. Now VM exist on the
+            # destination host. Mark result field to success and status to 'up'
+            params = dict(columns=dict(status='up',
+                                       result=to_res))
+
+        if params:
+            self.update_vm_db(vm.port_id, **params)
+            LOG.info('Processing migration %(port)s %(params)s.',
+                     {'port': vm.port_id, 'params': params})
+
+    def _failure_vms(self, vm, vm_info):
+        if vm.result == constants.CREATE_FAIL:
+            try:
+                self.neutron_event.send_vm_info(str(vm.host), str(vm_info))
+            except Exception as e:
+                # Failed to send info to the agent. Keep the data in the
+                # database as failure to send it later.
+                LOG.error('Failed to send VM info to agent. Reason %s' % (
+                    str(e)))
+            else:
+                params = dict(columns=dict(
+                    result=constants.RESULT_SUCCESS))
+                self.update_vm_db(vm.port_id, **params)
+                LOG.info('Created VM %(vm)s.', {'vm': vm.name})
+
+        if vm.result == constants.DELETE_FAIL:
+            try:
+                self.neutron_event.send_vm_info(str(vm.host), str(vm_info))
+            except Exception as e:
+                LOG.error('Failed to send VM info to agent. Reason %s' % (
+                    str(e)))
+            else:
+                # Do not delete the vm from database, as it may not be
+                # deleted in the agent side. Keep it in the database till
+                # agent sends success on deleting the VM, then delete it
+                # from database.
+                # Updating the result to delete pending state.
+                params = dict(columns=dict(
+                    status='down', result=constants.DELETE_PENDING))
+                self.update_vm_db(vm.port_id, **params)
+                LOG.info('VM %(vm)s is in delete pending state.',
+                         {'vm': vm.port_id})
 
     def failure_recovery(self, fail_info):
         """Failure recovery task.
@@ -167,29 +277,10 @@ class DfaFailureRecovery(object):
                                     gw_mac=vm.gw_mac,
                                     fwd_mod=vm.fwd_mod,
                                     oui_id='cisco'))
-            if vm.result == constants.CREATE_FAIL:
-                try:
-                    self.neutron_event.send_vm_info(str(vm.host), str(vm_info))
-                except Exception as e:
-                    # Failed to send info to the agent. Keep the data in the
-                    # database as failure to send it later.
-                    LOG.error('Failed to send VM info to agent. Reason %s' % (
-                        str(e)))
-                else:
-                    params = dict(columns=dict(
-                        result=constants.RESULT_SUCCESS))
-                    self.update_vm_db(vm.port_id, **params)
-                    LOG.info('Created VM %(vm)s.', {'vm': vm.name})
-
-            if vm.result == constants.DELETE_FAIL:
-                try:
-                    self.neutron_event.send_vm_info(str(vm.host), str(vm_info))
-                except Exception as e:
-                    LOG.error('Failed to send VM info to agent. Reason %s' % (
-                        str(e)))
-                # Do not delete the vm from database, as it may not be deleted
-                # in the agent side. Keep it in the database till agent sends
-                # success on deleteing the VM, then delete it from database.
+            if vm.status == constants.MIGRATE:
+                self._failure_vms_migration(vm, vm_info)
+            else:
+                self._failure_vms(vm, vm_info)
 
         # 4. Try failure recovery for delete network.
         for net in nets:
@@ -236,7 +327,7 @@ class DfaFailureRecovery(object):
                           "%(project)s", {'project': proj.name})
 
         # 6. DHCP port consistency check for HA.
-        if self.need_dhcp_check():
+        if not self.cfg.dcnm.dcnm_dhcp and self.need_dhcp_check():
             nets = self.get_all_networks()
             for net in nets:
                 net_id = net.network_id

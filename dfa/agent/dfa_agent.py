@@ -178,7 +178,7 @@ class DfaAgent(object):
     def start_tasks(self):
         rpc_thrd = self.start_rpc_task()
         self.agent_task_list.append(rpc_thrd)
-        if (self._iptd):
+        if self._iptd:
             ipt_thrd = self.start_iptables_task()
             self.agent_task_list.append(ipt_thrd)
 

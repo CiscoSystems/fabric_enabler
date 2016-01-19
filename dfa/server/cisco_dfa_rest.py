@@ -142,7 +142,7 @@ class DFARESTClient(object):
             if res and res.status_code in self._resp_ok:
                 return res.json()
         except dexc.DfaClientRequestFailed:
-            LOG.error("Failed to send requst to DCNM.")
+            LOG.error("Failed to send request to DCNM.")
 
     def _create_org(self, name, desc):
         """Create organization on the DCNM.

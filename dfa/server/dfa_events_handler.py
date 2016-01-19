@@ -43,6 +43,7 @@ class EventsHandler(object):
         self._cfg = config.CiscoDFAConfig(ser_name).cfg
         self._q_agent = constants.DFA_AGENT_QUEUE
         self._url = self._cfg.dfa_rpc.transport_url
+        self._events_to_ignore = constants.EVENTS_FILTER_LIST
         dfaq = self._cfg.dfa_notify.cisco_dfa_notify_queue % (
             {'service_name': ser_name})
         notify_queue = self._cfg.DEFAULT.notification_topics.split(',')
@@ -120,6 +121,9 @@ class EventsHandler(object):
         """
         try:
             data = (event_type, payload)
+            if event_type in self._events_to_ignore:
+                return
+
             LOG.debug('RX NOTIFICATION ==>\nevent_type: %(event)s, '
                       'payload: %(payload)s\n', (
                           {'event': event_type, 'payload': payload}))

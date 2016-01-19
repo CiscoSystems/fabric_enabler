@@ -13,6 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
+
+
 # RPC message type exchange between server and agent.
 VM_INFO = 1000
 UPDATE_IP_RULE = 1001
@@ -25,18 +27,39 @@ DFA_AGENT_QUEUE = 'dfa_agent'
 DFA_SERVER_QUEUE = 'dfa_server_q'
 DFA_EXCHANGE = 'dfa'
 
+# Operation results
 RESULT_FAIL = 'FAIL'
 RESULT_SUCCESS = 'SUCCESS'
 CREATE_FAIL = 'CREATE:FAIL'
 DELETE_FAIL = 'DELETE:FAIL'
 DELETE_PENDING = 'DELETE:PENDING'
 UPDATE_FAIL = 'UPDATE:FAIL'
+MIGRATE = 'migrate'
+
+MIG_TO = 'dst'
+MIG_FROM = 'src'
+
 
 DELETE_LIST = [DELETE_FAIL, DELETE_PENDING]
 
+RESULTS_MAP = {
+    (RESULT_SUCCESS, CREATE_FAIL): RESULT_SUCCESS,
+    (RESULT_SUCCESS, DELETE_FAIL): RESULT_SUCCESS,
+    (RESULT_SUCCESS, DELETE_PENDING): RESULT_SUCCESS,
+    (DELETE_FAIL, DELETE_PENDING): DELETE_FAIL,
+    (DELETE_FAIL, DELETE_FAIL): DELETE_FAIL,
+    (CREATE_FAIL, RESULT_SUCCESS): CREATE_FAIL,
+    (CREATE_FAIL, CREATE_FAIL): CREATE_FAIL,
+}
+
 IP_DHCP_WAIT = "W"
 
-MAIN_INTERVAL = 5
+MAIN_INTERVAL = 5  # 5 sec.
+AGENT_TIMEOUT_THR = (MAIN_INTERVAL * 180)  # 15 min.
+
+# List of events to filter
+EVENTS_FILTER_LIST = ['identity.authenticate']
+
 
 # Process queues interval
 PROCESS_QUE_INTERVAL = 1

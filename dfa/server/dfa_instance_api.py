@@ -1,4 +1,3 @@
-# -*- encoding: utf8 -*-
 # Copyright 2014 Cisco Systems, Inc.
 # All Rights Reserved.
 #
@@ -17,7 +16,7 @@
 # @author: Nader Lahouti, Cisco Systems, Inc.
 
 """
-This file provides a wrapper to novaclient API, for getting the instacne's
+This file provides a wrapper to novaclient API, for getting the instance's
 information such as display_name.
 """
 
@@ -90,7 +89,7 @@ class DFAInstanceAPI(object):
                         self._auth_url = endp['adminURL']
             LOG.info('_create_token: token = %s' % token)
 
-            # Create nova clinet.
+            # Create nova client.
             self._novaclnt = self._create_nova_client()
 
             return token
