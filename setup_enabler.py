@@ -245,9 +245,9 @@ class NexusFabricEnablerInstaller(object):
             ssh_stdin.write(compute_passwd)
             ssh_stdin.write('\n')
             for line in ssh_stdout:
-                print(line)
+                print(line.encode('utf-8'))
             for line in ssh_stderr:
-                print(line)
+                print(line.encode('utf-8'))
         client.close()
 
     def generate_uplink_file(self, compute_uplink):

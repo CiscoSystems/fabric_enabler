@@ -27,6 +27,7 @@ from dfa.common import constants
 from dfa.common import dfa_logger as logging
 from dfa.common import rpc
 from dfa.agent import detect_uplink as uplink_det
+from dfa.agent.fi_evb_emul import evb_emulator
 
 LOG = logging.getLogger(__name__)
 
@@ -142,6 +143,7 @@ class VdpMgr(object):
         self.err_que = VdpMsgPriQue()
         self.phy_uplink = None
         self.veth_intf = None
+        self.veth_ovs_intf = None
         self.restart_uplink_called = False
         self.ovs_vdp_obj_dict = {}
         self.rpc_clnt = rpc_client
@@ -154,6 +156,9 @@ class VdpMgr(object):
         self.static_uplink = False
         self.static_uplink_port = None
         self.static_uplink_first = True
+        self.is_ucs_fi = False
+        self.ucs_fi_evb_dmac = None
+        self.evb_emulator = None
         self.read_static_uplink()
         self.start()
         self.topo_disc = topo_disc.TopoDisc(self.topo_disc_cb, root_helper)
@@ -168,6 +173,11 @@ class VdpMgr(object):
                 self.static_uplink = True
                 self.static_uplink_port = self._cfg.general.node_uplink.\
                     split(',')[cnt].strip()
+                if self._cfg.general.ucs_fi is not None and\
+                        self._cfg.general.ucs_fi is True:
+                    self.is_ucs_fi = True
+                    self.ucs_fi_evb_dmac = \
+                        self._cfg.general.ucs_fi_evb_dmac
                 return
             cnt = cnt + 1
 
@@ -270,7 +280,8 @@ class VdpMgr(object):
             try:
                 self.ovs_vdp_obj_dict[phy_uplink] = ovs_vdp.OVSNeutronVdp(
                     phy_uplink, msg.get_integ_br(), msg.get_ext_br(),
-                    msg.get_root_helper(), self.vdp_vlan_change_cb)
+                    msg.get_root_helper(), self.vdp_vlan_change_cb,
+                    fi_evb_dmac=self.ucs_fi_evb_dmac)
             except Exception as exc:
                 LOG.error("OVS VDP Object creation failed %s" % str(exc))
                 ovs_exc_raised = True
@@ -282,7 +293,7 @@ class VdpMgr(object):
             else:
                 self.uplink_det_compl = True
                 veth_intf = (self.ovs_vdp_obj_dict[self.phy_uplink].
-                             get_lldp_bridge_port())
+                             get_lldp_local_bridge_port())
                 LOG.info("UP Event Processing Complete Saving uplink %s and "
                          "veth %s" % (self.phy_uplink, veth_intf))
                 self.save_uplink(uplink=self.phy_uplink, veth_intf=veth_intf)
@@ -294,7 +305,7 @@ class VdpMgr(object):
                 self.ovs_vdp_obj_dict[phy_uplink].clear_obj_params()
             else:
                 ovs_vdp.delete_uplink_and_flows(self.root_helper, self.br_ex,
-                                                phy_uplink)
+                                                phy_uplink, self.is_ucs_fi)
             self.save_uplink()
             self.topo_disc.uncfg_intf(self.veth_intf)
             self.topo_disc.cfg_intf(phy_uplink)
@@ -401,11 +412,25 @@ class VdpMgr(object):
 
     def static_uplink_detect(self, veth):
         ''' Return the static uplink based on argument passed '''
+        LOG.info("In static_uplink_detect")
         if self.static_uplink_first:
             self.static_uplink_first = False
             if self.phy_uplink is not None and (
                self.phy_uplink != self.static_uplink_port):
                 return 'down'
+            if self.is_ucs_fi is True:
+                self.evb_emulator = evb_emulator.EvbEmulator(
+                    self.root_helper,
+                    self.static_uplink_port,
+                    self.veth_intf,
+                    self.veth_ovs_intf)
+
+        if self.evb_emulator is not None:
+            self.evb_emulator.emulate_on_interface(
+                self.static_uplink_port,
+                self.veth_intf,
+                self.veth_ovs_intf)
+
         if veth is None:
             return self.static_uplink_port
         else:
@@ -440,7 +465,9 @@ class VdpMgr(object):
                 return
             if self.phy_uplink in self.ovs_vdp_obj_dict:
                 self.veth_intf = (self.ovs_vdp_obj_dict[self.phy_uplink].
-                                  get_lldp_bridge_port())
+                                  get_lldp_local_bridge_port())
+                self.veth_ovs_intf = (self.ovs_vdp_obj_dict[self.phy_uplink].
+                                      get_lldp_ovs_bridge_port())
             # The below logic has a bug when agent is started
             # and openstack is not running fixme(padkrish)
             else:
@@ -572,5 +599,6 @@ class VdpMgr(object):
             self.restart_uplink_called = True
             return
         LOG.info("Error case removing the uplink %s from bridge" % uplink)
-        ovs_vdp.delete_uplink_and_flows(self.root_helper, self.br_ex, uplink)
+        ovs_vdp.delete_uplink_and_flows(self.root_helper, self.br_ex, uplink,
+                                        self.is_ucs_fi)
         self.restart_uplink_called = True

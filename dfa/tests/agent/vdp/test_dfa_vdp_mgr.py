@@ -105,7 +105,8 @@ class DfaVdpMgrTest(base.BaseTestCase):
         ovs_vdp_fn.assert_called_with(self.uplink, self.br_integ, self.br_ex,
                                       self.root_helper)
         save_uplink_fn.assert_called_with(
-            uplink=self.uplink, veth_intf=ovs_vdp_obj.get_lldp_bridge_port())
+            uplink=self.uplink,
+            veth_intf=ovs_vdp_obj.get_lldp_local_bridge_port())
 
     def _test_process_down_uplink_event(self):
         '''Test routine when a uplink goes down '''

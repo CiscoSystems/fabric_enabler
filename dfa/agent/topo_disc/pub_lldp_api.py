@@ -183,3 +183,17 @@ class LldpApi(object):
             return None
         mac = mac_list[1].split('\n')
         return mac[0].strip()
+
+    def get_remote_port_id_local(self, tlv_data):
+        ''' Returns Remote Port ID Local from the TLV '''
+        if tlv_data is None:
+            return None
+        port_local_set = tlv_data.split("Port ID TLV")
+        if len(port_local_set) < 2:
+            return None
+        next_tlv_list = port_local_set[1].split('TLV')[0]
+        local_list = next_tlv_list.split('Local:')
+        if len(local_list) < 2:
+            return None
+        local = local_list[1].split('\n')
+        return local[0].strip()

@@ -354,15 +354,9 @@ def get_all_run_phy_intf():
         dev_dir = base_dir + '/' + subdir + '/' + 'device'
         dev_exist = os.path.exists(dev_dir)
         if dev_exist:
-            try:
-                oper_file = base_dir + '/' + subdir + '/' + 'operstate'
-                fd = open(oper_file, 'r')
-                oper_state = fd.read().strip('\n')
-                if oper_state == 'up':
+            oper_state = is_intf_up(subdir)
+            if oper_state is True:
                     intf_list.append(subdir)
-            except Exception as e:
-                LOG.error("Exception in reading %s", str(e))
-                break
         else:
             LOG.info("Dev dir %s does not exist, not physical intf", dev_dir)
     return intf_list
@@ -380,3 +374,27 @@ def is_phy_intf_ipv4_cfgd(intf):
         return False
     else:
         return True
+
+
+def is_intf_up(intf):
+
+    """Function to check if a interface is up."""
+
+    intf_path = '/sys/class/net' + '/' + intf
+    intf_exist = os.path.exists(intf_path)
+    if not intf_exist:
+        LOG.error(
+            "Unable to get interface %s : Interface dir %s does not exist",
+            intif,
+            intf_path)
+        return False
+    try:
+        oper_file = intf_path + '/' + 'operstate'
+        fd = open(oper_file, 'r')
+        oper_state = fd.read().strip('\n')
+        if oper_state == 'up':
+            return True
+    except Exception as e:
+        LOG.error("Exception in reading %s", str(e))
+
+    return False

@@ -46,8 +46,8 @@ def is_uplink_already_added(root_helper, br_ex, port_name):
             return False
 
 
-def delete_uplink_and_flows(root_helper, br_ex, port_name):
-    glob_delete_vdp_flows(br_ex, root_helper)
+def delete_uplink_and_flows(root_helper, br_ex, port_name, ucs_fi):
+    glob_delete_vdp_flows(br_ex, root_helper, ucs_fi)
     port_exist = is_uplink_already_added(root_helper, br_ex, port_name)
     if port_exist:
         ovs_lib.delete_port_glob(root_helper, br_ex, port_name)
@@ -55,12 +55,11 @@ def delete_uplink_and_flows(root_helper, br_ex, port_name):
         ovs_lib.delete_port_glob(root_helper, br_ex, lldp_ovs_veth_str)
 
 
-def glob_delete_vdp_flows(br_ex, root_helper):
+def glob_delete_vdp_flows(br_ex, root_helper, ucs_fi):
     br = ovs_lib.OVSBridge(br_ex, root_helper=root_helper)
+    if ucs_fi:
+        br.delete_flows(dl_dst=constants.NB_DMAC, dl_type=constants.LLDP_ETYPE)
     br.delete_flows(dl_dst=constants.NCB_DMAC, dl_type=constants.LLDP_ETYPE)
-    br.delete_flows(dl_dst=constants.NCB_DMAC, dl_type=constants.LLDP_ETYPE)
-    br.delete_flows(dl_dst=constants.NCB_DMAC,
-                    dl_type=constants.VDP22_ETYPE)
     br.delete_flows(dl_dst=constants.NCB_DMAC,
                     dl_type=constants.VDP22_ETYPE)
 
@@ -150,7 +149,8 @@ class OVSNeutronVdp(object):
     '''
 
     def __init__(self, uplink, integ_br, ext_br, root_helper,
-                 vdp_vlan_cb, vdp_mode=constants.VDP_SEGMENT_MODE):
+                 vdp_vlan_cb, vdp_mode=constants.VDP_SEGMENT_MODE,
+                 fi_evb_dmac=None):
         # self.root_helper = 'sudo'
         self.root_helper = root_helper
         self.uplink = uplink
@@ -159,7 +159,8 @@ class OVSNeutronVdp(object):
         self.vdp_mode = vdp_mode
         self.local_vlan_map = {}
         self.lldpad_info = {}
-        self.lldp_veth_port = None
+        self.lldp_local_veth_port = None
+        self.lldp_ovs_veth_port = None
         self.ovs_vdp_lock = sys_utils.lock()
         self.phy_peer_port_num = cconstants.INVALID_OFPORT
         self.int_peer_port_num = cconstants.INVALID_OFPORT
@@ -168,6 +169,11 @@ class OVSNeutronVdp(object):
         self.ext_br_obj = None
         self.integ_br_obj = None
         self.vdp_vlan_cb = vdp_vlan_cb
+        self.fi_evb_dmac = fi_evb_dmac
+        if fi_evb_dmac is not None:
+            self.ucs_fi = True
+        else:
+            self.ucs_fi = False
         self.setup_lldpad = self.setup_lldpad_ports()
 
     def is_lldpad_setup_done(self):
@@ -176,21 +182,46 @@ class OVSNeutronVdp(object):
     def program_vdp_flows(self, lldp_ovs_portnum, phy_port_num):
         br = self.ext_br_obj
         high_prio = constants.VDP_FLOW_PRIO
-        br.add_flow(priority=high_prio, in_port=lldp_ovs_portnum,
-                    dl_dst=constants.NCB_DMAC, dl_type=constants.LLDP_ETYPE,
-                    actions="output:%s" % phy_port_num)
-        br.add_flow(priority=high_prio, in_port=phy_port_num,
-                    dl_dst=constants.NCB_DMAC, dl_type=constants.LLDP_ETYPE,
-                    actions="output:%s" % lldp_ovs_portnum)
-        br.add_flow(priority=high_prio, in_port=lldp_ovs_portnum,
-                    dl_dst=constants.NCB_DMAC, dl_type=constants.VDP22_ETYPE,
-                    actions="output:%s" % phy_port_num)
-        br.add_flow(priority=high_prio, in_port=phy_port_num,
-                    dl_dst=constants.NCB_DMAC, dl_type=constants.VDP22_ETYPE,
-                    actions="output:%s" % lldp_ovs_portnum)
+        if self.ucs_fi:
+            br.add_flow(priority=high_prio, in_port=lldp_ovs_portnum,
+                        dl_dst=constants.NB_DMAC, dl_type=constants.LLDP_ETYPE,
+                        actions="output:%s" % phy_port_num)
+            br.add_flow(priority=high_prio, in_port=phy_port_num,
+                        dl_dst=constants.NB_DMAC, dl_type=constants.LLDP_ETYPE,
+                        actions="output:%s" % lldp_ovs_portnum)
+            br.add_flow(priority=high_prio, in_port=lldp_ovs_portnum,
+                        dl_dst=constants.NCB_DMAC,
+                        dl_type=constants.VDP22_ETYPE,
+                        actions="mod_dl_dst:%s,output:%s" %
+                        (self.fi_evb_dmac, phy_port_num))
+            br.add_flow(priority=high_prio, in_port=phy_port_num,
+                        dl_dst=constants.NCB_DMAC,
+                        dl_type=constants.VDP22_ETYPE,
+                        actions="mod_dl_dst:%s,output:%s" %
+                        (self.fi_evb_dmac, lldp_ovs_portnum))
+        else:
+            br.add_flow(priority=high_prio, in_port=lldp_ovs_portnum,
+                        dl_dst=constants.NCB_DMAC,
+                        dl_type=constants.VDP22_ETYPE,
+                        actions="output:%s" % phy_port_num)
+            br.add_flow(priority=high_prio, in_port=phy_port_num,
+                        dl_dst=constants.NCB_DMAC,
+                        dl_type=constants.VDP22_ETYPE,
+                        actions="output:%s" % lldp_ovs_portnum)
+            br.add_flow(priority=high_prio, in_port=lldp_ovs_portnum,
+                        dl_dst=constants.NCB_DMAC,
+                        dl_type=constants.LLDP_ETYPE,
+                        actions="output:%s" % phy_port_num)
+            br.add_flow(priority=high_prio, in_port=phy_port_num,
+                        dl_dst=constants.NCB_DMAC,
+                        dl_type=constants.LLDP_ETYPE,
+                        actions="output:%s" % lldp_ovs_portnum)
 
     def delete_vdp_flows(self):
         br = self.ext_br_obj
+        if self.ucs_fi:
+            br.delete_flows(dl_dst=constants.NB_DMAC,
+                            dl_type=constants.LLDP_ETYPE)
         br.delete_flows(dl_dst=constants.NCB_DMAC,
                         dl_type=constants.LLDP_ETYPE)
         br.delete_flows(dl_dst=constants.NCB_DMAC,
@@ -335,12 +366,16 @@ class OVSNeutronVdp(object):
         if not ret:
             LOG.error("Unable to cfg EVB")
             return False
-        self.lldp_veth_port = lldp_loc_veth_str
+        self.lldp_local_veth_port = lldp_loc_veth_str
+        self.lldp_ovs_veth_port = lldp_ovs_veth_str
         LOG.info("Setting up lldpad ports complete")
         return True
 
-    def get_lldp_bridge_port(self):
-        return self.lldp_veth_port
+    def get_lldp_local_bridge_port(self):
+        return self.lldp_local_veth_port
+
+    def get_lldp_ovs_bridge_port(self):
+        return self.lldp_ovs_veth_port
 
     def find_interconnect_ports(self):
         '''Find the internal veth or patch ports'''
