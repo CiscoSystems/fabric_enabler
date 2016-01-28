@@ -82,6 +82,13 @@ class NexusFabricEnablerInstaller(object):
                 '--mysql-user=' + mysql_user if mysql_user else '',
                 '--mysql-password=' + mysql_passwd if mysql_passwd else '',
                 '--mysql-host=' + mysql_host if mysql_host else ''))
+        self.run_dfa_prep_on_hacontrol = (
+            '%s python %s/dfa_prepare_setup.py --node-function=ha-control '
+            '%s %s %s' % (
+                self.root_helper, self.script_dir,
+                '--mysql-user=' + mysql_user if mysql_user else '',
+                '--mysql-password=' + mysql_passwd if mysql_passwd else '',
+                '--mysql-host=' + mysql_host if mysql_host else ''))
         self.run_dfa_prep_on_compute = ('%s python %s/dfa_prepare_setup.py '
                                         '--node-function=compute' % (
                                             self.root_helper, self.script_dir))
@@ -262,10 +269,12 @@ class NexusFabricEnablerInstaller(object):
             filep.write(compute_uplink)
             filep.close()
 
-    def setup_control(self):
+    def setup_control(self, hamode):
         """Install enabler package on control node."""
 
-        output, returncode = self.run_cmd_line(self.run_dfa_prep_on_control)
+        output, returncode = self.run_cmd_line(
+            self.run_dfa_prep_on_hacontrol if hamode else
+            self.run_dfa_prep_on_control)
         print output
         output, returncode = self.run_cmd_line(self.install_pkg, shell=True)
         print output
@@ -373,6 +382,7 @@ class NexusFabricEnablerInstaller(object):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
+    parser.add_argument("--ha-mode", help="HA mode")
     parser.add_argument("--compute-name", help="compute name or ip")
     parser.add_argument("--uplink", help="compute uplink to leaf switch")
     parser.add_argument("--mysql-user",
@@ -384,6 +394,7 @@ if __name__ == '__main__':
                         "(only for control node)")
 
     args = parser.parse_args()
+    ha_mode = args.ha_mode
     input_compute_name = args.compute_name
     input_uplink = args.uplink
     if input_uplink is None:
@@ -406,10 +417,11 @@ if __name__ == '__main__':
                                               args.mysql_host)
     os.chdir("../")
 
+    hamode = True if ha_mode and ha_mode.lower() == 'true' else False
     if input_compute_name is None:
         # If no compute node is specified, enabler is installed on controller
         # node and then compute node.
-        fabric_inst.setup_control()
+        fabric_inst.setup_control(hamode)
         print "restarting keystone"
         fabric_inst.restart_keystone_process()
         time.sleep(10)
@@ -418,4 +430,5 @@ if __name__ == '__main__':
         fabric_inst.restart_fabric_enabler_server()
 
     # Setup compute node.
-    fabric_inst.setup_compute(input_compute_name, input_uplink)
+    if hamode is False:
+        fabric_inst.setup_compute(input_compute_name, input_uplink)

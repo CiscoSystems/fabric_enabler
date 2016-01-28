@@ -256,6 +256,12 @@ class FwMapAttr(object):
         fw_dict['fw_id'] = self.fw_id
         fw_dict['fw_name'] = self.fw_name
         fw_dict['firewall_policy_id'] = self.active_pol_id
+        # When Firewall and Policy are both deleted and the SM is doing a
+        # retry (maybe DCNM Out partition could not be deleted) during
+        # which without this check, it throws an exception since
+        # self.policies is empty. This is also an issue during restart.
+        if self.active_pol_id not in self.policies:
+            return fw_dict
         pol_dict = self.policies[self.active_pol_id]
         for rule in pol_dict['rule_dict']:
             fw_dict['rules'][rule] = self.rules[rule]
