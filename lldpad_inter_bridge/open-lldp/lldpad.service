@@ -6,6 +6,8 @@ After=syslog.target network.target
 Type=simple
 ExecStart=/usr/sbin/lldpad -t
 ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10s
 
 [Install]
 WantedBy=multi-user.target
