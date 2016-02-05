@@ -379,10 +379,18 @@ class NexusFabricEnablerInstaller(object):
         time.sleep(5)
         self.run_cmd_line(self.start_server)
 
+    def restart_fabric_enabler_agent(self):
+        self.run_cmd_line(self.stop_agent, check_result=False)
+        time.sleep(5)
+        self.run_cmd_line(self.start_agent)
+
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ha-mode", help="HA mode")
+    parser.add_argument("--ha-mode", default=False,
+                        help="Set this value to True, if installing ONLY on "
+                        "a controller node in an HA setup.")
     parser.add_argument("--compute-name", help="compute name or ip")
     parser.add_argument("--uplink", help="compute uplink to leaf switch")
     parser.add_argument("--mysql-user",
@@ -427,7 +435,9 @@ if __name__ == '__main__':
         time.sleep(10)
         fabric_inst.restart_neutron_processes()
         time.sleep(10)
-        fabric_inst.restart_fabric_enabler_server()
+        if hamode is False:
+            fabric_inst.restart_fabric_enabler_server()
+        fabric_inst.restart_fabric_enabler_agent()
 
     # Setup compute node.
     if hamode is False:

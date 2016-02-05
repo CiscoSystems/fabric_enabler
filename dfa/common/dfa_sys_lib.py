@@ -355,10 +355,10 @@ def get_all_run_phy_intf():
         if dev_exist:
             try:
                 oper_file = base_dir + '/' + subdir + '/' + 'operstate'
-                fd = open(oper_file, 'r')
-                oper_state = fd.read().strip('\n')
-                if oper_state == 'up':
-                    intf_list.append(subdir)
+                with open(oper_file, 'r') as fd:
+                    oper_state = fd.read().strip('\n')
+                    if oper_state == 'up':
+                        intf_list.append(subdir)
             except Exception as e:
                 LOG.error("Exception in reading %s", str(e))
                 break
@@ -379,3 +379,19 @@ def is_phy_intf_ipv4_cfgd(intf):
         return False
     else:
         return True
+
+
+def get_bond_intf(intf):
+    bond_dir = '/proc/net/bonding/'
+    dir_exist = os.path.exists(bond_dir)
+    if not dir_exist:
+        return
+    base_dir = '/sys/class/net'
+    for subdir in os.listdir(bond_dir):
+        file_name = '/'.join((base_dir, subdir, 'bonding', 'slaves'))
+        file_exist = os.path.exists(file_name)
+        if file_exist:
+            with open(file_name, 'r') as fd:
+                slave_val = fd.read().strip('\n')
+                if intf in slave_val:
+                    return subdir

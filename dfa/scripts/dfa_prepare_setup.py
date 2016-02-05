@@ -308,13 +308,14 @@ def copy_init_conf_files(node, root_helper):
         sys.exit(1)
 
     init_dir = dist_data[dist].get('init_dir')
-    conf_fn = None
+    conf_files = []
     if node == 'control':
-        conf_fn = dist_data[dist].get('server_conf')
+        conf_files.append(dist_data[dist].get('server_conf'))
+        conf_files.append(dist_data[dist].get('agent_conf'))
     if node == 'compute':
-        conf_fn = dist_data[dist].get('agent_conf')
+        conf_files.append(dist_data[dist].get('agent_conf'))
 
-    if conf_fn is not None:
+    for conf_fn in conf_files:
         cmd = root_helper + 'cp %s %s' % ((path + conf_fn), init_dir)
         print(cmd)
         get_cmd_output(cmd)
