@@ -390,11 +390,48 @@ def is_intf_up(intf):
         return False
     try:
         oper_file = intf_path + '/' + 'operstate'
-        fd = open(oper_file, 'r')
-        oper_state = fd.read().strip('\n')
-        if oper_state == 'up':
-            return True
+        with open(oper_file, 'r') as fd:
+            oper_state = fd.read().strip('\n')
+            if oper_state == 'up':
+                return True
     except Exception as e:
         LOG.error("Exception in reading %s", str(e))
 
     return False
+
+
+def get_bond_intf(intf):
+    bond_dir = '/proc/net/bonding/'
+    dir_exist = os.path.exists(bond_dir)
+    if not dir_exist:
+        return
+    base_dir = '/sys/class/net'
+    for subdir in os.listdir(bond_dir):
+        file_name = '/'.join((base_dir, subdir, 'bonding', 'slaves'))
+        file_exist = os.path.exists(file_name)
+        if file_exist:
+            with open(file_name, 'r') as fd:
+                slave_val = fd.read().strip('\n')
+                if intf in slave_val:
+                    return subdir
+
+
+def is_intf_bond(intf):
+    bond_dir = '/proc/net/bonding/'
+    dir_exist = os.path.exists(bond_dir)
+    if not dir_exist or not intf:
+        return False
+    bond_file = '/'.join((bond_dir, intf))
+    return os.path.exists(bond_file)
+
+
+def get_member_ports(intf):
+    if not is_intf_bond(intf):
+        return
+    base_dir = '/sys/class/net'
+    file_name = '/'.join((base_dir, intf, 'bonding', 'slaves'))
+    file_exist = os.path.exists(file_name)
+    if file_exist:
+        with open(file_name, 'r') as fd:
+            slave_val = fd.read().strip('\n')
+            return slave_val

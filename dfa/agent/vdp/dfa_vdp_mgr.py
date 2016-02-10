@@ -25,6 +25,7 @@ from dfa.agent.vdp import ovs_vdp
 from dfa.agent.topo_disc import topo_disc
 from dfa.common import constants
 from dfa.common import dfa_logger as logging
+from dfa.common import dfa_sys_lib as sys_utils
 from dfa.common import rpc
 from dfa.agent import detect_uplink as uplink_det
 from dfa.agent.fi_evb_emul import evb_emulator
@@ -379,8 +380,12 @@ class VdpMgr(object):
 
     def save_uplink(self, uplink="", veth_intf=""):
         context = {}
+        # If uplink physical interface is a part of bond, then this function
+        # will be called with uplink=bond0, as an example
+        memb_port_list = sys_utils.get_member_ports(uplink)
         args = json.dumps(dict(agent=self.host, uplink=uplink,
-                               veth_intf=veth_intf))
+                               veth_intf=veth_intf,
+                               memb_port_list=memb_port_list))
         msg = self.rpc_clnt.make_msg('save_uplink', context, msg=args)
         try:
             resp = self.rpc_clnt.call(msg)
@@ -401,7 +406,8 @@ class VdpMgr(object):
                 remote_system_name=topo_disc_obj.remote_system_name,
                 remote_port=topo_disc_obj.remote_port,
                 remote_chassis_id_mac=topo_disc_obj.remote_chassis_id_mac,
-                remote_port_id_mac=topo_disc_obj.remote_port_id_mac))
+                remote_port_id_mac=topo_disc_obj.remote_port_id_mac,
+                bond_intf=topo_disc_obj.bond_intf))
         msg = self.rpc_clnt.make_msg('save_topo_disc_params', context,
                                      msg=args)
         try:
@@ -509,10 +515,50 @@ class VdpMgr(object):
             if self.veth_intf is None:
                 LOG.error("Wrong status Normal")
                 return
+            bond_det = False
             # Uplink already discovered, nothing to be done here
             # Resetting it back, happens when uplink was down for a very short
             # time and no need to remove flows
             self.uplink_down_cnt = 0
+            # Looks Like the phy interface became a part of the bond. This
+            # means, a physical interface that was not a part of a bond was
+            # earlier discovered as uplink and now that interface became
+            # part of the bond. Usually, this doesn't happen as LLDP and in
+            # turn this function will first detect a 'down' followed by
+            # an 'up'. When regular interface becomes part of bond, it's
+            # rare for it to hit this 'normal' case. But, still providing
+            # the functionality if it happens.So, the following is done :
+            # a. Bring down the physical interface by sending a 'down' event
+            # b. Add the bond interface by sending an 'up' event
+            # Consquently, when bond is added that will be assigned to
+            # self.phy_uplink. Then, the below condition will be False. i.e..
+            # 'get_bond_intf' will return False, when the argument is 'bond0'.
+            bond_intf = sys_utils.get_bond_intf(self.phy_uplink)
+            if bond_intf is not None:
+                self.save_uplink()
+                self.process_uplink_ongoing = True
+                upl_msg = VdpQueMsg(constants.UPLINK_MSG_TYPE,
+                                    status='down',
+                                    phy_uplink=self.phy_uplink,
+                                    br_int=self.br_integ, br_ex=self.br_ex,
+                                    root_helper=self.root_helper)
+                self.que.enqueue(constants.Q_UPL_PRIO, upl_msg)
+                self.phy_uplink = None
+                self.veth_intf = None
+                self.uplink_det_compl = False
+
+                # No veth interface
+                self.save_uplink(uplink=bond_intf)
+                self.phy_uplink = bond_intf
+                self.process_uplink_ongoing = True
+                upl_msg = VdpQueMsg(constants.UPLINK_MSG_TYPE,
+                                    status='up',
+                                    phy_uplink=self.phy_uplink,
+                                    br_int=self.br_integ, br_ex=self.br_ex,
+                                    root_helper=self.root_helper)
+                self.que.enqueue(constants.Q_UPL_PRIO, upl_msg)
+                bond_det = True
+
             # Revisit this logic.
             # If uplink detection fails, it will be put in Error queue, which
             # will dequeue and put it back in the main queue
@@ -522,7 +568,7 @@ class VdpMgr(object):
             # eth/veth are passed to uplink script, it will return normal
             # But OVS object would not have been created for the first time,
             # so the below lines ensures it's done.
-            if not self.uplink_det_compl:
+            if not self.uplink_det_compl and not bond_det:
                 if self.phy_uplink is None:
                     LOG.error("Incorrect state, bug")
                     return
@@ -537,6 +583,11 @@ class VdpMgr(object):
                 LOG.info("Enqueued Uplink Msg from normal")
         else:
             LOG.info("In Periodic Uplink Task uplink found %s" % ret)
+            bond_intf = sys_utils.get_bond_intf(ret)
+            if bond_intf is not None:
+                ret = bond_intf
+                LOG.info("Interface %(memb)s part of bond %(bond)s" %
+                         {'memb': ret, 'bond': bond_intf})
             # Call API to set the uplink as ret
             self.save_uplink(uplink=ret, veth_intf=self.veth_intf)
             self.phy_uplink = ret

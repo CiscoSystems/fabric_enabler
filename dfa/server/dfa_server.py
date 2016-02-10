@@ -119,11 +119,13 @@ class RpcCallBacks(object):
         agent = args.get('agent')
         uplink = args.get('uplink')
         veth_intf = args.get('veth_intf')
+        memb_port_list = args.get('memb_port_list')
         configs = self.obj.get_agent_configurations(agent)
         if configs:
             # Update the agents database.
             new_config = json.loads(configs)
-            new_config.update({'uplink': uplink, 'veth_intf': veth_intf})
+            new_config.update({'uplink': uplink, 'veth_intf': veth_intf,
+                               'memb_ports': memb_port_list})
             if self.obj.update_agent_configurations(agent,
                                                     json.dumps(new_config)):
                 LOG.debug('Saved %(uplink)s %(veth)s for %(agent)s in DB.', (
@@ -157,6 +159,7 @@ class RpcCallBacks(object):
         intf_dict['remote_port'] = args.get('remote_port')
         intf_dict['remote_chassis_id_mac'] = args.get('remote_chassis_id_mac')
         intf_dict['remote_port_id_mac'] = args.get('remote_port_id_mac')
+        intf_dict['bond_intf'] = args.get('bond_intf')
         mand_arg = self.is_mand_arg_present(intf_dict)
         configs = self.obj.get_agent_configurations(agent)
         if configs:
