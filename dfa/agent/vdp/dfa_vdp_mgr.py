@@ -135,7 +135,8 @@ class VdpMgr(object):
 
     '''Responsible for Handling VM/Uplink requests'''
 
-    def __init__(self, br_integ, br_ex, root_helper, rpc_client, host):
+    def __init__(self, br_integ, br_ex, root_helper, rpc_client, hostname,
+                 hostid):
         self.br_integ = br_integ
         self.br_ex = br_ex
         self.root_helper = root_helper
@@ -148,7 +149,8 @@ class VdpMgr(object):
         self.restart_uplink_called = False
         self.ovs_vdp_obj_dict = {}
         self.rpc_clnt = rpc_client
-        self.host = host
+        self.host_name = hostname
+        self.host_id = hostid
         self.uplink_det_compl = False
         self.process_uplink_ongoing = False
         self.uplink_down_cnt = 0
@@ -170,7 +172,7 @@ class VdpMgr(object):
         if self._cfg.general.node is None:
             return
         for node in self._cfg.general.node.split(','):
-            if node.strip() == self.host:
+            if node.strip() == self.host_name:
                 self.static_uplink = True
                 self.static_uplink_port = self._cfg.general.node_uplink.\
                     split(',')[cnt].strip()
@@ -187,7 +189,7 @@ class VdpMgr(object):
 
     def update_vm_result(self, port_uuid, result, lvid=None,
                          vdp_vlan=None):
-        context = {'agent': self.host}
+        context = {'agent': self.host_id}
         if lvid is None or vdp_vlan is None:
             args = json.dumps(dict(port_uuid=port_uuid, result=result))
         else:
@@ -383,7 +385,7 @@ class VdpMgr(object):
         # If uplink physical interface is a part of bond, then this function
         # will be called with uplink=bond0, as an example
         memb_port_list = sys_utils.get_member_ports(uplink)
-        args = json.dumps(dict(agent=self.host, uplink=uplink,
+        args = json.dumps(dict(agent=self.host_id, uplink=uplink,
                                veth_intf=veth_intf,
                                memb_port_list=memb_port_list))
         msg = self.rpc_clnt.make_msg('save_uplink', context, msg=args)
@@ -397,7 +399,7 @@ class VdpMgr(object):
         context = {}
         args = json.dumps(
             dict(
-                agent=self.host,
+                agent=self.host_id,
                 intf=intf,
                 remote_evb_cfgd=topo_disc_obj.remote_evb_cfgd,
                 remote_evb_mode=topo_disc_obj.remote_evb_mode,
