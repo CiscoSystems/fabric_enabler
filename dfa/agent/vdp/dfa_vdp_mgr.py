@@ -19,7 +19,6 @@ import json
 import Queue
 import time
 
-from dfa.common import config
 from dfa.common import utils
 from dfa.agent.vdp import ovs_vdp
 from dfa.agent.topo_disc import topo_disc
@@ -135,11 +134,15 @@ class VdpMgr(object):
 
     '''Responsible for Handling VM/Uplink requests'''
 
-    def __init__(self, br_integ, br_ex, root_helper, rpc_client, hostname,
-                 hostid):
-        self.br_integ = br_integ
-        self.br_ex = br_ex
-        self.root_helper = root_helper
+    def __init__(self, config_dict, rpc_client, hostname):
+        self.br_integ = config_dict.get('integration_bridge')
+        self.br_ex = config_dict.get('external_bridge')
+        self.root_helper = config_dict.get('root_helper')
+        self.host_id = config_dict.get('host_id')
+        self.ucs_fi_cfgd = config_dict.get('ucs_fi')
+        self.ucs_fi_evb_dmac = config_dict.get('ucs_fi_evb_dmac')
+        self.node_list = config_dict['node_list']
+        self.node_uplink_list = config_dict['node_uplink_list']
         # Check for error?? fixme(padkrish)
         self.que = VdpMsgPriQue()
         self.err_que = VdpMsgPriQue()
@@ -150,12 +153,10 @@ class VdpMgr(object):
         self.ovs_vdp_obj_dict = {}
         self.rpc_clnt = rpc_client
         self.host_name = hostname
-        self.host_id = hostid
         self.uplink_det_compl = False
         self.process_uplink_ongoing = False
         self.uplink_down_cnt = 0
         self.is_os_run = False
-        self._cfg = config.CiscoDFAConfig().cfg
         self.static_uplink = False
         self.static_uplink_port = None
         self.static_uplink_first = True
@@ -164,23 +165,21 @@ class VdpMgr(object):
         self.evb_emulator = None
         self.read_static_uplink()
         self.start()
-        self.topo_disc = topo_disc.TopoDisc(self.topo_disc_cb, root_helper)
+        self.topo_disc = topo_disc.TopoDisc(self.topo_disc_cb,
+                                            self.root_helper)
 
     def read_static_uplink(self):
         ''' Read the static uplink from file, if given '''
         cnt = 0
-        if self._cfg.general.node is None:
+        if self.node_list is None:
             return
-        for node in self._cfg.general.node.split(','):
+        for node in self.node_list.split(','):
             if node.strip() == self.host_name:
                 self.static_uplink = True
-                self.static_uplink_port = self._cfg.general.node_uplink.\
-                    split(',')[cnt].strip()
-                if self._cfg.general.ucs_fi is not None and\
-                        self._cfg.general.ucs_fi is True:
+                self.static_uplink_port = (self.node_uplink_list.
+                                           split(',')[cnt].strip())
+                if self.ucs_fi_cfgd is not None and self.ucs_fi_cfgd is True:
                     self.is_ucs_fi = True
-                    self.ucs_fi_evb_dmac = \
-                        self._cfg.general.ucs_fi_evb_dmac
                 return
             cnt = cnt + 1
 

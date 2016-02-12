@@ -119,11 +119,18 @@ class DfaAgent(object):
 
         # Initialize VPD manager.
         # TODO read it from config.
-        br_int = 'br-int'
-        br_ext = 'br-ethd'
-        root_helper = self._cfg.sys.root_helper
-        self._vdpm = vdpm.VdpMgr(br_int, br_ext, root_helper, self.clnt,
-                                 self._host_name, self._my_host)
+        br_int = self._cfg.dfa_agent.integration_bridge
+        br_ext = self._cfg.dfa_agent.external_dfa_bridge
+        config_dict = {}
+        config_dict['integration_bridge'] = br_int
+        config_dict['external_bridge'] = br_ext
+        config_dict['host_id'] = self._my_host
+        config_dict['root_helper'] = self._cfg.sys.root_helper
+        config_dict['node_list'] = self._cfg.general.node
+        config_dict['node_uplink_list'] = self._cfg.general.node_uplink
+        config_dict['ucs_fi'] = self._cfg.general.ucs_fi
+        config_dict['ucs_fi_evb_dmac'] = self._cfg.general.ucs_fi_evb_dmac
+        self._vdpm = vdpm.VdpMgr(config_dict, self.clnt, self._host_name)
         self.pool = eventlet.GreenPool()
         self.setup_rpc()
 
