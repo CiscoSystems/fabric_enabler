@@ -21,7 +21,6 @@ pls visit http://www.ieee802.org/1/pages/802.1bg.html
 """
 
 from dfa.common import dfa_sys_lib as ovs_lib
-from neutron.agent.linux import ip_lib
 from dfa.agent.vdp import lldpad
 from dfa.common import constants as cconstants
 from dfa.agent.vdp import vdp_constants as constants
@@ -309,10 +308,10 @@ class OVSNeutronVdp(object):
             lldp_loc_veth_str = self.gen_veth_str(
                 constants.LLDPAD_LOC_VETH_PORT,
                 self.uplink)
-        ip_wrapper = ip_lib.IPWrapper(self.root_helper)
+        ip_wrapper = ovs_lib.IPWrapper(self.root_helper)
         self.delete_vdp_flows()
         br.delete_port(lldp_ovs_veth_str)
-        if ip_lib.device_exists(lldp_ovs_veth_str, self.root_helper):
+        if ovs_lib.device_exists(lldp_ovs_veth_str, self.root_helper):
             # What about OVS restart cases fixme(padkrish)
 
             # IMPORTANT.. The link delete should be done only for non-restart

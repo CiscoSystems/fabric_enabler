@@ -243,6 +243,138 @@ class OVSBridge(BaseOVS):
         self.destroy()
 
 
+class SubProcessBase(object):
+    def __init__(self, root_helper=None, namespace=None,
+                 log_fail_as_error=True):
+        self.root_helper = root_helper
+        self.namespace = namespace
+        self.log_fail_as_error = log_fail_as_error
+
+    def _as_root(self, options, command, args, use_root_namespace=False):
+        namespace = self.namespace if not use_root_namespace else None
+
+        return self._execute(options, command, args, self.root_helper,
+                             namespace=namespace,
+                             log_fail_as_error=self.log_fail_as_error)
+
+    @classmethod
+    def _execute(cls, options, command, args, root_helper=None,
+                 namespace=None, log_fail_as_error=True):
+        opt_list = ['-%s' % o for o in options]
+        if namespace:
+            ip_cmd = ['ip', 'netns', 'exec', namespace, 'ip']
+        else:
+            ip_cmd = ['ip']
+        return execute(ip_cmd + opt_list + [command] + list(args),
+                       root_helper=root_helper,
+                       log_fail_as_error=log_fail_as_error)
+
+    def _run(self, options, command, args):
+        if self.namespace:
+            return self._as_root(options, command, args)
+        else:
+            return self._execute(options, command, args,
+                                 log_fail_as_error=self.log_fail_as_error)
+
+    def set_log_fail_as_error(self, fail_with_error):
+        self.log_fail_as_error = fail_with_error
+
+
+class IPDevice(SubProcessBase):
+    def __init__(self, name, root_helper=None, namespace=None):
+        super(IPDevice, self).__init__(root_helper=root_helper,
+                                       namespace=namespace)
+        self.name = name
+        self.link = IpLinkCommand(self)
+
+    def __eq__(self, other):
+        return (other is not None and self.name == other.name
+                and self.namespace == other.namespace)
+
+    def __str__(self):
+        return self.name
+
+
+class IpCommandBase(object):
+    COMMAND = ''
+
+    def __init__(self, parent):
+        self._parent = parent
+
+    def _run(self, *args, **kwargs):
+        return self._parent._run(kwargs.get('options', []), self.COMMAND, args)
+
+    def _as_root(self, *args, **kwargs):
+        return self._parent._as_root(kwargs.get('options', []),
+                                     self.COMMAND,
+                                     args,
+                                     kwargs.get('use_root_namespace', False))
+
+
+class IpDeviceCommandBase(IpCommandBase):
+    @property
+    def name(self):
+        return self._parent.name
+
+
+class IpLinkCommand(IpDeviceCommandBase):
+    COMMAND = 'link'
+
+    def set_up(self):
+        self._as_root('set', self.name, 'up')
+
+    @property
+    def address(self):
+        return self.attributes.get('link/ether')
+
+    @property
+    def attributes(self):
+        return self._parse_line(self._run('show', self.name, options='o'))
+
+    def _parse_line(self, value):
+        if not value:
+            return {}
+
+        device_name, settings = value.replace("\\", '').split('>', 1)
+        tokens = settings.split()
+        keys = tokens[::2]
+        values = [int(v) if v.isdigit() else v for v in tokens[1::2]]
+
+        retval = dict(zip(keys, values))
+        return retval
+
+
+class IPWrapper(SubProcessBase):
+    def __init__(self, root_helper=None, namespace=None):
+        super(IPWrapper, self).__init__(root_helper=root_helper,
+                                        namespace=namespace)
+
+    def device(self, name):
+        return IPDevice(name, self.root_helper, self.namespace)
+
+    def add_veth(self, name1, name2, namespace2=None):
+        args = ['add', name1, 'type', 'veth', 'peer', 'name', name2]
+
+        if namespace2 is None:
+            namespace2 = self.namespace
+
+        self._as_root('', 'link', tuple(args))
+
+        return (IPDevice(name1, self.root_helper, self.namespace),
+                IPDevice(name2, self.root_helper, namespace2))
+
+
+def device_exists(device_name, root_helper=None, namespace=None):
+    """Return True if the device exists in the namespace."""
+    try:
+        dev = IPDevice(device_name, root_helper, namespace=namespace)
+        dev.set_log_fail_as_error(False)
+        address = dev.link.address
+    except RuntimeError:
+        return False
+    return bool(address)
+
+
 def _subprocess_setup():
     # Python installs a SIGPIPE handler by default. This is usually not what
     # non-Python subprocesses expect.
