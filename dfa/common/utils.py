@@ -16,6 +16,7 @@
 
 
 import datetime
+import os
 import six
 import socket
 import struct
@@ -181,3 +182,17 @@ def is_host_alive(thishost):
 
     soc.close()
     return is_alive
+
+
+def find_agent_host_id(thishost):
+    """Returns the neutron agent host id for HA setup."""
+
+    host_id = thishost
+    try:
+        for root, dirs, files in os.walk('/run/resource-agents'):
+            for fi in files:
+                if 'neutron-scale-' in fi:
+                    host_id = 'neutron-n-' + fi.split('-')[2]
+        return host_id
+    except IndexError:
+        return host_id

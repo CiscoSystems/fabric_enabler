@@ -91,8 +91,10 @@ class DfaAgent(object):
 
     def __init__(self, host, rpc_qn):
         self._cfg = config.CiscoDFAConfig('neutron').cfg
+
+        self._host_name = host
         self._my_host = self._cfg.DEFAULT.host if self._cfg.DEFAULT.host else (
-            host)
+            utils.find_agent_host_id(host))
         self._qn = '_'.join((rpc_qn, self._my_host))
         LOG.debug('Starting DFA Agent on %s', self._my_host)
 
@@ -120,7 +122,7 @@ class DfaAgent(object):
         br_ext = 'br-ethd'
         root_helper = self._cfg.sys.root_helper
         self._vdpm = vdpm.VdpMgr(br_int, br_ext, root_helper, self.clnt,
-                                 self._my_host)
+                                 self._host_name, self._my_host)
         self.pool = eventlet.GreenPool()
         self.setup_rpc()
 
