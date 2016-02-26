@@ -536,6 +536,8 @@ class DFARESTClient(object):
             network_info["segmentId"] = seg_id
         if dhcp_range:
             network_info["dhcpScope"] = dhcp_scopes
+        if hasattr(subnet, 'secondary_gw'):
+            network_info["secondaryGateway"] = subnet.secondary_gw
         if self.is_iplus:
             # Need to add the vrf name to the network info
             prof = self._config_profile_get(network.config_profile)

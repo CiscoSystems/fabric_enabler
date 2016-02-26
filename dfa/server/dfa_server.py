@@ -807,6 +807,13 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             self.update_network_db(net_id, constants.DELETE_FAIL)
         if self._lbMgr and self._lbMgr.lb_is_internal_nwk(net.name):
             self._lbMgr.lb_delete_net(net.name, tenant_id)
+        # deleting all related VMs
+        instances = self.get_vms()
+        instances_related = [(k) for k in instances
+                             if k.network_id == net_id]
+        for vm in instances_related:
+            LOG.info("deleting vm %s because network is deleted" % vm.name)
+            self.delete_vm_function(vm.port_id, vm)
         # Notification to services like FW about deletion of Nwk Event,
         # Since deletion of subnet event is not processed currently.
         # Currently, doesn't work for network created in DCNM, place the below
@@ -816,13 +823,6 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             # Network in another partition, skip
             return
         self.nwk_del_notif(tenant_id, tenant_name, net_id)
-        # deleting all related VMs
-        instances = self.get_vms()
-        instances_related = [(k) for k in instances
-                             if k.network_id == net_id]
-        for vm in instances_related:
-            LOG.info("deleting vm %s because network is deleted" % vm.name)
-            self.delete_vm_function(vm.port_id, vm)
 
     def dcnm_network_create_event(self, network_info):
         """Process network create event from DCNM."""
