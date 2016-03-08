@@ -69,8 +69,8 @@ class Asa5585():
         return (status_code in range(200, 300))
 
     def setup(self, tenant, inside_vlan_arg, outside_vlan_arg,
-              inside_ip, inside_mask, inside_gw,
-              outside_ip, outside_mask, outside_gw,
+              inside_ip, inside_mask, inside_gw, inside_sec_gw,
+              outside_ip, outside_mask, outside_gw, outside_sec_gw,
               interface_in, interface_out):
 
         """ setup ASA context for an edge tenant pair """
@@ -107,9 +107,10 @@ class Asa5585():
         cmds.append("network " + outside_ip + " " + outside_mask + " area 0")
         cmds.append("area 0")
         cmds.append("route Outside 0.0.0.0 0.0.0.0 " + outside_gw + " 1")
+        cmds.append("route Outside 0.0.0.0 0.0.0.0 " + outside_sec_gw + " 1")
         cmds.append("end")
         cmds.append("write memory")
-        
+
         data = {"commands": cmds}
         return self.rest_send_cli(data)
 
@@ -131,7 +132,7 @@ class Asa5585():
         cmds.append("no interface " + inside_int)
         cmds.append("no interface " + outside_int)
         cmds.append("write memory")
-        
+
         data = {"commands": cmds}
         return self.rest_send_cli(data)
 
@@ -252,7 +253,7 @@ class Asa5585():
             cmds.append(acl)
         cmds.append("access-group " + tenant_name + " global")
         cmds.append("write memory")
-        
+
         LOG.debug(cmds)
         data = {"commands": cmds}
         return self.rest_send_cli(data)

@@ -119,11 +119,13 @@ class RpcCallBacks(object):
         agent = args.get('agent')
         uplink = args.get('uplink')
         veth_intf = args.get('veth_intf')
+        memb_port_list = args.get('memb_port_list')
         configs = self.obj.get_agent_configurations(agent)
         if configs:
             # Update the agents database.
             new_config = json.loads(configs)
-            new_config.update({'uplink': uplink, 'veth_intf': veth_intf})
+            new_config.update({'uplink': uplink, 'veth_intf': veth_intf,
+                               'memb_ports': memb_port_list})
             if self.obj.update_agent_configurations(agent,
                                                     json.dumps(new_config)):
                 LOG.debug('Saved %(uplink)s %(veth)s for %(agent)s in DB.', (
@@ -157,6 +159,7 @@ class RpcCallBacks(object):
         intf_dict['remote_port'] = args.get('remote_port')
         intf_dict['remote_chassis_id_mac'] = args.get('remote_chassis_id_mac')
         intf_dict['remote_port_id_mac'] = args.get('remote_port_id_mac')
+        intf_dict['bond_intf'] = args.get('bond_intf')
         mand_arg = self.is_mand_arg_present(intf_dict)
         configs = self.obj.get_agent_configurations(agent)
         if configs:
@@ -804,6 +807,13 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             self.update_network_db(net_id, constants.DELETE_FAIL)
         if self._lbMgr and self._lbMgr.lb_is_internal_nwk(net.name):
             self._lbMgr.lb_delete_net(net.name, tenant_id)
+        # deleting all related VMs
+        instances = self.get_vms()
+        instances_related = [(k) for k in instances
+                             if k.network_id == net_id]
+        for vm in instances_related:
+            LOG.info("deleting vm %s because network is deleted" % vm.name)
+            self.delete_vm_function(vm.port_id, vm)
         # Notification to services like FW about deletion of Nwk Event,
         # Since deletion of subnet event is not processed currently.
         # Currently, doesn't work for network created in DCNM, place the below
@@ -813,13 +823,6 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             # Network in another partition, skip
             return
         self.nwk_del_notif(tenant_id, tenant_name, net_id)
-        # deleting all related VMs
-        instances = self.get_vms()
-        instances_related = [(k) for k in instances
-                             if k.network_id == net_id]
-        for vm in instances_related:
-            LOG.info("deleting vm %s because network is deleted" % vm.name)
-            self.delete_vm_function(vm.port_id, vm)
 
     def dcnm_network_create_event(self, network_info):
         """Process network create event from DCNM."""

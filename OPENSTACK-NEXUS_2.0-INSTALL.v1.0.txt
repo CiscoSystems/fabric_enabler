@@ -139,14 +139,14 @@ by your fabric manager.
 
 [dfa_mysql]
 # MYSQL DB connection parameter
-connection = 'mysql://<username>:<password>@<mysqlhost>/cisco_dfa?charset=utf8'
+connection = mysql://<username>:<password>@<mysqlhost>/cisco_dfa?charset=utf8
 We used username and password, and mysqlhost must be provided based on
 the setup.
  
  
 [dfa_rpc]
 # Transport URL parameter for RPC
-transport_url = 'rabbit://<userid>:<password>@%<rabbit server host>:5672//'
+transport_url = rabbit://<userid>:<password>@%<rabbit server host>:5672//
 We used userid=guest and password=guest
 This is the application level user name and password.
 
@@ -189,7 +189,7 @@ c) keystone.conf:
 [DEFAULT]
 notification_driver = messaging
 notification_topics = cisco_dfa_keystone_notify
-admin_endpoint = http://<services ip address>:%(admin_port)s/
+admin_endpoint = http://<ip address of controller>:%(admin_port)s/
 rpc_backend = rabbit
 
 

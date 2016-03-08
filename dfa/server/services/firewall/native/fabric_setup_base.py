@@ -47,6 +47,7 @@ class ServiceIpSegTenantMap(dfa_dbm.DfaDBMixin):
         self.dummy_net_id = self.out_end_ip = self.in_subnet = None
         self.in_gateway = self.out_start_ip = self.dummy_subnet_id = None
         self.in_end_ip = self.dummy_router_id = None
+        self.in_sec_gateway = self.out_sec_gateway = None
 
     def update_fw_dict(self, fw_dict):
         ''' updating the fw dict '''
@@ -93,18 +94,21 @@ class ServiceIpSegTenantMap(dfa_dbm.DfaDBMixin):
         start = alloc_pool[0].get('start')
         end = alloc_pool[0].get('end')
         gateway = subnet_dict.get('gateway_ip')
-        return subnet, start, end, gateway
+        sec_gateway = subnet_dict.get('secondary_gw')
+        return subnet, start, end, gateway, sec_gateway
 
     def store_dcnm_subnet_dict(self, subnet_dict, direc):
         ''' Store the subnet attributes and dict '''
         if direc == 'in':
             self.in_dcnm_subnet_dict = subnet_dict
             self.in_subnet, self.in_start_ip, self.in_end_ip,\
-                self.in_gateway = self.parse_subnet(subnet_dict)
+                self.in_gateway,\
+                self.in_sec_gateway = self.parse_subnet(subnet_dict)
         else:
             self.out_dcnm_subnet_dict = subnet_dict
             self.out_subnet, self.out_start_ip, self.out_end_ip,\
-                self.out_gateway = self.parse_subnet(subnet_dict)
+                self.out_gateway,\
+                self.out_sec_gateway = self.parse_subnet(subnet_dict)
 
     def get_in_seg_vlan(self):
         ''' Retrieve the seg, vlan, mod domain for IN network '''
@@ -119,16 +123,16 @@ class ServiceIpSegTenantMap(dfa_dbm.DfaDBMixin):
     def get_in_ip_addr(self):
         ''' Retrieve the subnet, start, end and gw IP address for IN Nwk '''
         if len(self.in_dcnm_subnet_dict) == 0:
-            return 0, 0, 0, 0
+            return 0, 0, 0, 0, 0
         return self.in_subnet, self.in_start_ip, self.in_end_ip,\
-            self.in_gateway
+            self.in_gateway, self.in_sec_gateway
 
     def get_out_ip_addr(self):
         ''' Retrieve the subnet, start, end and gw IP address for OUT Nwk '''
         if len(self.out_dcnm_subnet_dict) == 0:
-            return 0, 0, 0, 0
+            return 0, 0, 0, 0, 0
         return self.out_subnet, self.out_start_ip, self.out_end_ip,\
-            self.out_gateway
+            self.out_gateway, self.out_sec_gateway
 
     def get_dummy_router_net(self):
         ''' Retrieve the dummy router attributes '''
@@ -280,7 +284,7 @@ class FabricApi(object):
         ''' Retrieves the IN IP address '''
         if tenant_id not in cls.serv_obj_dict:
             LOG.error("Fabric not prepared for tenant %s", tenant_id)
-            return 0, 0, 0, 0
+            return 0, 0, 0, 0, 0
         tenant_obj = cls.serv_obj_dict.get(tenant_id)
         return tenant_obj.get_in_ip_addr()
 
@@ -289,7 +293,7 @@ class FabricApi(object):
         ''' Retrieves the OUT IP address '''
         if tenant_id not in cls.serv_obj_dict:
             LOG.error("Fabric not prepared for tenant %s", tenant_id)
-            return 0, 0, 0, 0
+            return 0, 0, 0, 0, 0
         tenant_obj = cls.serv_obj_dict.get(tenant_id)
         return tenant_obj.get_out_ip_addr()
 
@@ -298,9 +302,9 @@ class FabricApi(object):
         ''' Retrieves the IN service node IP address '''
         if tenant_id not in cls.serv_obj_dict:
             LOG.error("Fabric not prepared for tenant %s", tenant_id)
-            return 0, 0, 0, 0
+            return 0, 0, 0, 0, 0
         tenant_obj = cls.serv_obj_dict.get(tenant_id)
-        sub, start, end, gw = tenant_obj.get_in_ip_addr()
+        sub, start, end, gw, sec_gw = tenant_obj.get_in_ip_addr()
         next_hop = str(netaddr.IPAddress(sub) + 2)
         return next_hop
 
@@ -309,9 +313,9 @@ class FabricApi(object):
         ''' Retrieves the OUT service node IP address '''
         if tenant_id not in cls.serv_obj_dict:
             LOG.error("Fabric not prepared for tenant %s", tenant_id)
-            return 0, 0, 0, 0
+            return 0, 0, 0, 0, 0
         tenant_obj = cls.serv_obj_dict.get(tenant_id)
-        sub, start, end, gw = tenant_obj.get_out_ip_addr()
+        sub, start, end, gw, sec_gw = tenant_obj.get_out_ip_addr()
         next_hop = str(netaddr.IPAddress(sub) + 2)
         return next_hop
 
@@ -349,7 +353,7 @@ class FabricApi(object):
             LOG.error("Fabric not prepared for tenant %s", tenant_id)
             return None
         db_obj = cls.ip_db_obj.get('in')
-        in_subnet, in_ip_start, in_ip_end, in_gw = (
+        in_subnet, in_ip_start, in_ip_end, in_gw, in_sec_gw = (
             cls.get_in_ip_addr(tenant_id))
         sub = db_obj.get_subnet(in_subnet)
         return sub.subnet_id
@@ -361,7 +365,7 @@ class FabricApi(object):
             LOG.error("Fabric not prepared for tenant %s", tenant_id)
             return None
         db_obj = cls.ip_db_obj.get('out')
-        out_subnet, out_ip_start, out_ip_end, out_ip_gw = (
+        out_subnet, out_ip_start, out_ip_end, out_ip_gw, out_ip_sec_gw = (
             cls.get_out_ip_addr(tenant_id))
         sub = db_obj.get_subnet(out_subnet)
         return sub.subnet_id
@@ -373,7 +377,7 @@ class FabricApi(object):
             LOG.error("Fabric not prepared for tenant %s", tenant_id)
             return None
         db_obj = cls.ip_db_obj.get('in')
-        in_subnet, in_ip_start, in_ip_end, in_gw = (
+        in_subnet, in_ip_start, in_ip_end, in_gw, in_sec_gw = (
             cls.get_in_ip_addr(tenant_id))
         sub = db_obj.get_subnet(in_subnet)
         return sub.network_id
@@ -385,7 +389,7 @@ class FabricApi(object):
             LOG.error("Fabric not prepared for tenant %s", tenant_id)
             return None
         db_obj = cls.ip_db_obj.get('out')
-        out_subnet, out_ip_start, out_ip_end, out_ip_gw = (
+        out_subnet, out_ip_start, out_ip_end, out_ip_gw, out_ip_sec_gw = (
             cls.get_out_ip_addr(tenant_id))
         sub = db_obj.get_subnet(out_subnet)
         return sub.network_id
@@ -417,13 +421,13 @@ class FabricApi(object):
         ''' Check if the subnet is created as a result of any FW operation '''
         cfg = config.CiscoDFAConfig().cfg
         subnet = subnet.split('/')[0]
-        sub, start, end, gw = cls.get_in_ip_addr(tenant_id)
-        if sub == 0 or start == 0 or end == 0 or gw == 0:
+        sub, start, end, gw, sec_gw = cls.get_in_ip_addr(tenant_id)
+        if sub == 0 or start == 0 or end == 0 or gw == 0 or sec_gw == 0:
             return False
         if sub == subnet:
             return True
-        sub, start, end, gw = cls.get_out_ip_addr(tenant_id)
-        if sub == 0 or start == 0 or end == 0 or gw == 0:
+        sub, start, end, gw, sec_gw = cls.get_out_ip_addr(tenant_id)
+        if sub == 0 or start == 0 or end == 0 or gw == 0 or sec_gw == 0:
             return False
         if sub == subnet:
             return True
@@ -651,12 +655,27 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
                                  dcnm_status=dcnm_status,
                                  dev_status=dev_status)
 
+    # The GW created for the subnet created in DCNM is +1 which is also the
+    # GW address in the leaf
+    # Openstack GW address is +2, which is also the FW's IN interface address
+    # and DCNM's service node IP address
+    # The Start IP address is +3
+    # The end IP address is -2 (from the end of the subnet)
+    # The secondary GW IP address reuses the end IP address
+    # No error checking is done below for the size of CIDR fixme(padkrish)
     def get_gateway(self, subnet):
         '''
         Returns the Gateway associated with a subnet. Usually
         it's the first address of the subnet.
         '''
         return str(netaddr.IPAddress(subnet) + 1)
+
+    def get_sec_gateway(self, subnet):
+        '''
+        Returns the Secondary Gateway associated with a subnet. Usually
+        it's the third last address of the CIDR.
+        '''
+        return self.get_end_ip(subnet)
 
     def get_start_ip(self, subnet):
         '''
@@ -692,12 +711,14 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         This needs to be put in a common functionality for services
         '''
         if direc == 'in':
-            temp_store_ip, start, end, gateway = self.get_in_ip_addr(tenant_id)
+            temp_store_ip, start, end, gateway, sec_gateway = self.\
+                get_in_ip_addr(tenant_id)
         else:
-            temp_store_ip, start, end, gateway = self.\
+            temp_store_ip, start, end, gateway, sec_gateway = self.\
                 get_out_ip_addr(tenant_id)
-        if temp_store_ip != 0 and start != 0 and end != 0 and gateway != 0:
-            return temp_store_ip, start, end, gateway
+        if temp_store_ip != 0 and start != 0 and end != 0 and gateway != 0 \
+           and sec_gateway != 0:
+            return temp_store_ip, start, end, gateway, sec_gateway
         if direc == 'in':
             # ip_next = self.service_in_ip.allocate_subnet()
             ip_next = self.check_allocate_ip(self.service_in_ip, "in")
@@ -705,7 +726,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             # ip_next = self.service_out_ip.allocate_subnet()
             ip_next = self.check_allocate_ip(self.service_out_ip, "out")
         return ip_next, self.get_start_ip(ip_next), self.get_end_ip(ip_next),\
-            self.get_gateway(ip_next)
+            self.get_gateway(ip_next), self.get_sec_gateway(ip_next)
 
     def release_subnet(self, cidr, direc):
         ''' Routine to release a subnet from the DB.'''
@@ -715,7 +736,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             self.service_out_ip.release_subnet(cidr)
 
     def fill_dcnm_subnet_info(self, tenant_id, subnet, start, end, gateway,
-                              direc):
+                              sec_gateway, direc):
         '''
         Function that fills the subnet parameters for a tenant required by
         DCNM.
@@ -747,6 +768,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         subnet_dict['allocation_pools'] = []
         subnet_dict['allocation_pools'].append(alloc_pool_dict)
         subnet_dict['gateway_ip'] = gateway
+        subnet_dict['secondary_gw'] = sec_gateway
         # NWK ID and subnet ID are not filled fixme(padkrish)
         subnet_dict['ip_version'] = 4
         return subnet_dict
@@ -767,9 +789,11 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         subnet_dict = self.retrieve_dcnm_subnet_info(tenant_id, direc)
         if len(subnet_dict) != 0:
             return subnet_dict
-        subnet, start, end, gateway = self.get_next_ip(tenant_id, direc)
+        subnet, start, end, gateway, sec_gateway = self.get_next_ip(tenant_id,
+                                                                    direc)
         subnet_dict = self.fill_dcnm_subnet_info(tenant_id, subnet, start,
-                                                 end, gateway, direc)
+                                                 end, gateway, sec_gateway,
+                                                 direc)
         serv_obj.store_dcnm_subnet_dict(subnet_dict, direc)
         return subnet_dict
 
@@ -946,7 +970,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
     def _update_partition_in_create(self, tenant_id, tenant_name):
         ''' Function to update a  partition'''
 
-        sub, in_ip, in_ip_end, gw = self.get_in_ip_addr(tenant_id)
+        sub, in_ip, in_ip_end, gw, sec_gw = self.get_in_ip_addr(tenant_id)
         # self._update_partition(tenant_name, in_ip)
         # Need more generic thinking on this one TODO
         next_hop = str(netaddr.IPAddress(sub) + 2)
@@ -961,7 +985,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         ''' Function to update a  partition'''
 
         vrf_prof = self.serv_part_vrf_prof
-        sub, out_ip, out_ip_end, gw = self.get_out_ip_addr(tenant_id)
+        sub, out_ip, out_ip_end, gw, sec_gw = self.get_out_ip_addr(tenant_id)
         self._update_partition(tenant_name, out_ip, vrf_prof=vrf_prof,
                                part_name=fw_const.SERV_PART_NAME)
 
@@ -1128,11 +1152,11 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         if direc == 'in':
             net_id = fw_data.in_network_id
             seg, vlan = self.get_in_seg_vlan(tenant_id)
-            sub, ip, ip_end, gw = self.get_in_ip_addr(tenant_id)
+            sub, ip, ip_end, gw, sec_gw = self.get_in_ip_addr(tenant_id)
         else:
             net_id = fw_data.out_network_id
             seg, vlan = self.get_out_seg_vlan(tenant_id)
-            sub, ip, ip_end, gw = self.get_out_ip_addr(tenant_id)
+            sub, ip, ip_end, gw, sec_gw = self.get_out_ip_addr(tenant_id)
         # Delete the Openstack Network
         try:
             ret = self.os_helper.delete_network_all_subnets(net_id)
@@ -1536,11 +1560,10 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         else:
             subnet = self.service_out_ip.get_subnet_by_netid(net_id)
         if subnet is not None:
-            subnet_dict = self.fill_dcnm_subnet_info(tenant_id, subnet,
-                                                     self.get_start_ip(subnet),
-                                                     self.get_end_ip(subnet),
-                                                     self.get_gateway(subnet),
-                                                     direc)
+            subnet_dict = self.fill_dcnm_subnet_info(
+                tenant_id, subnet,
+                self.get_start_ip(subnet), self.get_end_ip(subnet),
+                self.get_gateway(subnet), self.get_sec_gateway(subnet), direc)
             serv_obj.store_dcnm_subnet_dict(subnet_dict, direc)
 
     # Tested for 1 FW

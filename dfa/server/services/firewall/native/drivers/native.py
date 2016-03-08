@@ -212,8 +212,10 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
             return False
         self.create_tenant_dict(tenant_id, rout_id)
 
-        in_ip, in_start, in_end, in_gw = self.get_in_ip_addr(tenant_id)
-        out_ip, out_start, out_end, out_gw = self.get_out_ip_addr(tenant_id)
+        in_ip, in_start, in_end, in_gw, in_sec_gw = \
+            self.get_in_ip_addr(tenant_id)
+        out_ip, out_start, out_end, out_gw, out_sec_gw = \
+            self.get_out_ip_addr(tenant_id)
         dummy_net, dummy_subnet, dummy_rtr = (
             self.get_dummy_router_net(tenant_id))
         dummy_cidr = self.os_helper.get_subnet_cidr(dummy_subnet)
@@ -297,10 +299,10 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
         try:
             ret = self._create_fw(tenant_id, data)
             return ret
-        except Exception as e:
+        except Exception as exc:
             LOG.error("Failed to create FW for device native, tenant "
-                      "%(tenant)s data %(data)s", {'tenant': tenant_id,
-                                                   'data': data})
+                      "%(tenant)s data %(data)s Exc %(exc)s",
+                      {'tenant': tenant_id, 'data': data, 'exc': exc})
             return False
 
     # Create exceptions for all these fixme
@@ -350,10 +352,10 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
         try:
             ret = self._delete_fw(tenant_id, data)
             return ret
-        except Exception as e:
+        except Exception as exc:
             LOG.error("Failed to delete FW for device native, tenant "
-                      "%(tenant)s data %(data)s", {'tenant': tenant_id,
-                                                   'data': data})
+                      "%(tenant)s data %(data)s Exc %(exc)s",
+                      {'tenant': tenant_id, 'data': data, 'exc': exc})
             return False
 
     def modify_fw(self, tenant_id, data):
@@ -365,11 +367,13 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
 
     def _program_dcnm_static_route(self, tenant_id, tenant_name):
         ''' Program DCNM Static Route '''
-        in_ip, in_start, in_end, in_gw = self.get_in_ip_addr(tenant_id)
+        in_ip, in_start, in_end, in_gw, in_sec_gw = \
+            self.get_in_ip_addr(tenant_id)
         if in_gw is None:
             LOG.error("No FW service GW present")
             return False
-        out_ip, out_start, out_end, out_gw = self.get_out_ip_addr(tenant_id)
+        out_ip, out_start, out_end, out_gw, out_sec_gw = \
+            self.get_out_ip_addr(tenant_id)
         dummy_net, dummy_subnet, dummy_rtr = (
             self.get_dummy_router_net(tenant_id))
         dummy_cidr = self.os_helper.get_subnet_cidr(dummy_subnet)
@@ -411,7 +415,8 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
 
         # Program router namespace to have this network to be routed
         # to IN service network
-        in_ip, in_start, in_end, in_gw = self.get_in_ip_addr(tenant_id)
+        in_ip, in_start, in_end, in_gw, in_sec_gw = \
+            self.get_in_ip_addr(tenant_id)
         if in_gw is None:
             LOG.error("No FW service GW present")
             return False
@@ -439,11 +444,13 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
 
         # Program router namespace to have this network to be routed
         # to IN service network
-        in_ip, in_start, in_end, in_gw = self.get_in_ip_addr(tenant_id)
+        in_ip, in_start, in_end, in_gw, in_sec_gw = \
+            self.get_in_ip_addr(tenant_id)
         if in_gw is None:
             LOG.error("No FW service GW present")
             return False
-        out_ip, out_start, out_end, out_gw = self.get_out_ip_addr(tenant_id)
+        out_ip, out_start, out_end, out_gw, out_sec_gw = \
+            self.get_out_ip_addr(tenant_id)
         dummy_net, dummy_subnet, dummy_rtr = (
             self.get_dummy_router_net(tenant_id))
         dummy_cidr = self.os_helper.get_subnet_cidr(dummy_subnet)

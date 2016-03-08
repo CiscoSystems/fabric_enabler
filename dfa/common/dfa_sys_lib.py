@@ -243,6 +243,138 @@ class OVSBridge(BaseOVS):
         self.destroy()
 
 
+class SubProcessBase(object):
+    def __init__(self, root_helper=None, namespace=None,
+                 log_fail_as_error=True):
+        self.root_helper = root_helper
+        self.namespace = namespace
+        self.log_fail_as_error = log_fail_as_error
+
+    def _as_root(self, options, command, args, use_root_namespace=False):
+        namespace = self.namespace if not use_root_namespace else None
+
+        return self._execute(options, command, args, self.root_helper,
+                             namespace=namespace,
+                             log_fail_as_error=self.log_fail_as_error)
+
+    @classmethod
+    def _execute(cls, options, command, args, root_helper=None,
+                 namespace=None, log_fail_as_error=True):
+        opt_list = ['-%s' % o for o in options]
+        if namespace:
+            ip_cmd = ['ip', 'netns', 'exec', namespace, 'ip']
+        else:
+            ip_cmd = ['ip']
+        return execute(ip_cmd + opt_list + [command] + list(args),
+                       root_helper=root_helper,
+                       log_fail_as_error=log_fail_as_error)
+
+    def _run(self, options, command, args):
+        if self.namespace:
+            return self._as_root(options, command, args)
+        else:
+            return self._execute(options, command, args,
+                                 log_fail_as_error=self.log_fail_as_error)
+
+    def set_log_fail_as_error(self, fail_with_error):
+        self.log_fail_as_error = fail_with_error
+
+
+class IPDevice(SubProcessBase):
+    def __init__(self, name, root_helper=None, namespace=None):
+        super(IPDevice, self).__init__(root_helper=root_helper,
+                                       namespace=namespace)
+        self.name = name
+        self.link = IpLinkCommand(self)
+
+    def __eq__(self, other):
+        return (other is not None and self.name == other.name
+                and self.namespace == other.namespace)
+
+    def __str__(self):
+        return self.name
+
+
+class IpCommandBase(object):
+    COMMAND = ''
+
+    def __init__(self, parent):
+        self._parent = parent
+
+    def _run(self, *args, **kwargs):
+        return self._parent._run(kwargs.get('options', []), self.COMMAND, args)
+
+    def _as_root(self, *args, **kwargs):
+        return self._parent._as_root(kwargs.get('options', []),
+                                     self.COMMAND,
+                                     args,
+                                     kwargs.get('use_root_namespace', False))
+
+
+class IpDeviceCommandBase(IpCommandBase):
+    @property
+    def name(self):
+        return self._parent.name
+
+
+class IpLinkCommand(IpDeviceCommandBase):
+    COMMAND = 'link'
+
+    def set_up(self):
+        self._as_root('set', self.name, 'up')
+
+    @property
+    def address(self):
+        return self.attributes.get('link/ether')
+
+    @property
+    def attributes(self):
+        return self._parse_line(self._run('show', self.name, options='o'))
+
+    def _parse_line(self, value):
+        if not value:
+            return {}
+
+        device_name, settings = value.replace("\\", '').split('>', 1)
+        tokens = settings.split()
+        keys = tokens[::2]
+        values = [int(v) if v.isdigit() else v for v in tokens[1::2]]
+
+        retval = dict(zip(keys, values))
+        return retval
+
+
+class IPWrapper(SubProcessBase):
+    def __init__(self, root_helper=None, namespace=None):
+        super(IPWrapper, self).__init__(root_helper=root_helper,
+                                        namespace=namespace)
+
+    def device(self, name):
+        return IPDevice(name, self.root_helper, self.namespace)
+
+    def add_veth(self, name1, name2, namespace2=None):
+        args = ['add', name1, 'type', 'veth', 'peer', 'name', name2]
+
+        if namespace2 is None:
+            namespace2 = self.namespace
+
+        self._as_root('', 'link', tuple(args))
+
+        return (IPDevice(name1, self.root_helper, self.namespace),
+                IPDevice(name2, self.root_helper, namespace2))
+
+
+def device_exists(device_name, root_helper=None, namespace=None):
+    """Return True if the device exists in the namespace."""
+    try:
+        dev = IPDevice(device_name, root_helper, namespace=namespace)
+        dev.set_log_fail_as_error(False)
+        address = dev.link.address
+    except RuntimeError:
+        return False
+    return bool(address)
+
+
 def _subprocess_setup():
     # Python installs a SIGPIPE handler by default. This is usually not what
     # non-Python subprocesses expect.
@@ -390,11 +522,48 @@ def is_intf_up(intf):
         return False
     try:
         oper_file = intf_path + '/' + 'operstate'
-        fd = open(oper_file, 'r')
-        oper_state = fd.read().strip('\n')
-        if oper_state == 'up':
-            return True
+        with open(oper_file, 'r') as fd:
+            oper_state = fd.read().strip('\n')
+            if oper_state == 'up':
+                return True
     except Exception as e:
         LOG.error("Exception in reading %s", str(e))
 
     return False
+
+
+def get_bond_intf(intf):
+    bond_dir = '/proc/net/bonding/'
+    dir_exist = os.path.exists(bond_dir)
+    if not dir_exist:
+        return
+    base_dir = '/sys/class/net'
+    for subdir in os.listdir(bond_dir):
+        file_name = '/'.join((base_dir, subdir, 'bonding', 'slaves'))
+        file_exist = os.path.exists(file_name)
+        if file_exist:
+            with open(file_name, 'r') as fd:
+                slave_val = fd.read().strip('\n')
+                if intf in slave_val:
+                    return subdir
+
+
+def is_intf_bond(intf):
+    bond_dir = '/proc/net/bonding/'
+    dir_exist = os.path.exists(bond_dir)
+    if not dir_exist or not intf:
+        return False
+    bond_file = '/'.join((bond_dir, intf))
+    return os.path.exists(bond_file)
+
+
+def get_member_ports(intf):
+    if not is_intf_bond(intf):
+        return
+    base_dir = '/sys/class/net'
+    file_name = '/'.join((base_dir, intf, 'bonding', 'slaves'))
+    file_exist = os.path.exists(file_name)
+    if file_exist:
+        with open(file_name, 'r') as fd:
+            slave_val = fd.read().strip('\n')
+            return slave_val

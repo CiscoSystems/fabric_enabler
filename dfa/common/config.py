@@ -32,6 +32,13 @@ default_neutron_opts = {
     },
 }
 
+default_dfa_agent_opts = {
+    'dfa_agent': {
+        'integration_bridge': 'br-int',
+        'external_dfa_bridge': 'br-ethd',
+    },
+}
+
 default_vdp_opts = {
     'vdp': {
         'mgrid2': vdp_const.VDP_MGRID,
@@ -124,6 +131,7 @@ default_loadbalance_opts = {
 default_opts_list = [
     default_log_opts,
     default_neutron_opts,
+    default_dfa_agent_opts,
     default_vdp_opts,
     default_sys_opts,
     default_dcnm_opts,

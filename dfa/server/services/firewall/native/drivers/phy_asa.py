@@ -70,10 +70,10 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
     def create_fw(self, tenant_id, data):
         LOG.debug("In creating phy ASA FW data is %s", data)
         tenant_name = data.get('tenant_name')
-        in_subnet, in_ip_start, in_ip_end, in_gw = (
+        in_subnet, in_ip_start, in_ip_end, in_gw, in_sec_gw = (
             self.get_in_ip_addr(tenant_id))
         in_serv_node = self.get_in_srvc_node_ip_addr(tenant_id)
-        out_subnet, out_ip_start, out_ip_end, out_ip_gw = (
+        out_subnet, out_ip_start, out_ip_end, out_ip_gw, out_sec_gw = (
             self.get_out_ip_addr(tenant_id))
         out_serv_node = self.get_out_srvc_node_ip_addr(tenant_id)
         in_seg, in_vlan = self.get_in_seg_vlan(tenant_id)
@@ -81,8 +81,9 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
 
         status = self.asa5585.setup(tenant_name, in_vlan, out_vlan,
                                     in_serv_node, '255.255.255.0', in_gw,
-                                    out_serv_node, '255.255.255.0', out_ip_gw,
-                                    self.interface_in, self.interface_out)
+                                    in_sec_gw, out_serv_node, '255.255.255.0',
+                                    out_ip_gw, self.interface_in,
+                                    self.interface_out)
         if status is False:
             LOG.error("Physical FW instance creation failure.")
             return False
@@ -96,10 +97,10 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
     def delete_fw(self, tenant_id, data):
         LOG.debug("In Delete fw data is %s", data)
         tenant_name = data.get('tenant_name')
-        in_subnet, in_ip_start, in_ip_end, in_gw = (
+        in_subnet, in_ip_start, in_ip_end, in_gw, in_sec_gw = (
             self.get_in_ip_addr(tenant_id))
         in_serv_node = self.get_in_srvc_node_ip_addr(tenant_id)
-        out_subnet, out_ip_start, out_ip_end, out_ip_gw = (
+        out_subnet, out_ip_start, out_ip_end, out_ip_gw, out_sec_gw = (
             self.get_out_ip_addr(tenant_id))
         out_serv_node = self.get_out_srvc_node_ip_addr(tenant_id)
         in_seg, in_vlan = self.get_in_seg_vlan(tenant_id)

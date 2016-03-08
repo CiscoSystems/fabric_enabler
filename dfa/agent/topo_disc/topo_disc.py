@@ -58,10 +58,21 @@ class TopoIntfAttr(object):
         self.local_chassis_id_mac = None
         self.local_port_id_mac = None
         self.db_retry_status = False
+        self.bond_intf = None
 
     def update_lldp_status(self, status):
         ''' Update the LLDP cfg status '''
         self.lldp_cfgd = status
+
+    def cmp_update_bond_intf(self, bond_intf):
+        '''
+        Update the bond interface, if this interface is a part of bond
+        Return True if there's a change.
+        '''
+        if bond_intf != self.bond_intf:
+            self.bond_intf = bond_intf
+            return True
+        return False
 
     def get_lldp_status(self):
         ''' Retrieve the LLDP cfg status '''
@@ -283,10 +294,13 @@ class TopoDisc(TopoDiscPubApi):
                 ret = self.pub_lldp.enable_lldp(intf)
                 attr_obj.update_lldp_status(ret)
                 continue
+            bond_intf = sys_utils.get_bond_intf(intf)
+            # This can be an addition or removal of the interface to a bond.
+            bond_intf_change = attr_obj.cmp_update_bond_intf(bond_intf)
             tlv_data = self.pub_lldp.get_lldp_tlv(intf)
             # This should take care of storing the information of interest
             if self.cmp_store_tlv_params(intf, tlv_data) or (
-               attr_obj.get_db_retry_status()):
+               attr_obj.get_db_retry_status() or bond_intf_change):
                 # Passing the interface attribute object to CB
                 ret = self.cb(intf, attr_obj)
                 status = not ret
