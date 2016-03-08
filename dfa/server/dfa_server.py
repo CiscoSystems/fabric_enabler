@@ -329,7 +329,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         self.ser_q = constants.DFA_SERVER_QUEUE
         self._setup_rpc()
         self._lbMgr = None
-        if (cfg.loadbalance.lb_enabled.lower() == 'true'):
+        if (cfg.loadbalance.lb_enabled):
             LOG.debug("LBaaS is enabled")
             lbaas_module = importlib.import_module(
                 'dfa.server.services.loadbalance.lb_mgr')

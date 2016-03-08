@@ -54,7 +54,7 @@ class F5Device(object):
         big.network.deleteRouteDomain(context) 
         big.deleteFolder(context) 
 
-    def prepareF5ForNetwork(self, vlanid, context, gateway_ip, mask):
+    def prepareF5ForNetwork(self, vlanid, context, gateway_ip,second_gw, mask):
         context = 'uuid_' + context
         big = self.big
         vlanName = 'uuid_vlan' + str(vlanid) 
