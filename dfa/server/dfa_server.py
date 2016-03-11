@@ -281,9 +281,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         # Create segmentation id pool.
         seg_id_min = int(cfg.dcnm.segmentation_id_min)
         seg_id_max = int(cfg.dcnm.segmentation_id_max)
-        self.seg_drvr = dfa_dbm.DfaSegmentTypeDriver(seg_id_min, seg_id_max,
-                                                     constants.RES_SEGMENT,
-                                                     cfg)
+        seg_reuse_timeout = int(cfg.dcnm.segmentation_reuse_timeout)
+        self.seg_drvr = dfa_dbm.DfaSegmentTypeDriver(
+            seg_id_min, seg_id_max, constants.RES_SEGMENT,
+            cfg, reuse_timeout=seg_reuse_timeout)
 
         # Create queue for exception returned by a thread.
         self._excpq = Queue.Queue()

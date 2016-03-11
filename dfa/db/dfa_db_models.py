@@ -19,12 +19,14 @@ import json
 import netaddr
 import sqlalchemy as sa
 import sqlalchemy.orm.exc as orm_exc
+import time
 
 from oslo.db import exception as db_exc
 from six import moves
 
 from dfa.common import constants as const
 from dfa.common import dfa_logger as logging
+from dfa.common import utils
 import dfa_db_api as db
 
 LOG = logging.getLogger(__name__)
@@ -43,6 +45,7 @@ class DfaSegmentationId(db.Base):
     network_id = sa.Column(sa.String(36))
     allocated = sa.Column(sa.Boolean, nullable=False, default=False)
     source = sa.Column(sa.String(16))
+    delete_time = sa.Column(sa.DateTime)
 
 
 class DfaVlanId(db.Base):
@@ -55,6 +58,7 @@ class DfaVlanId(db.Base):
     network_id = sa.Column(sa.String(36))
     allocated = sa.Column(sa.Boolean, nullable=False, default=False)
     source = sa.Column(sa.String(16))
+    delete_time = sa.Column(sa.DateTime)
 
 
 class DfaInServiceSubnet(db.Base):
@@ -121,11 +125,12 @@ class DfaVlan(DfaResource):
 class DfaSegmentTypeDriver(object):
 
     # Tested for both Segment and VLAN
-    def __init__(self, segid_min, segid_max, res_name, cfg):
+    def __init__(self, segid_min, segid_max, res_name, cfg, reuse_timeout=0):
         # Have a check here to ensure a crazy init is not called TODO(padkrish)
         db.configure_db(cfg)
         self.seg_id_ranges = []
         self.seg_id_ranges.append((segid_min, segid_max))
+        self.seg_timeout = reuse_timeout
         if res_name is const.RES_SEGMENT:
             self.model_obj = DfaSegment()
         if res_name is const.RES_VLAN:
@@ -177,8 +182,13 @@ class DfaSegmentTypeDriver(object):
         """
 
         with session.begin(subtransactions=True):
-            select = (session.query(self.model).filter_by(
-                allocated=False))
+            hour_lapse = utils.utc_time_lapse(self.seg_timeout)
+            count = (session.query(self.model).filter(
+                self.model.delete_time < hour_lapse).update(
+                {"delete_time": None}))
+
+            select = (session.query(self.model).filter_by(allocated=False,
+                                                          delete_time=None))
 
             # Selected segment can be allocated before update by someone else,
             # We retry until update success or DB_MAX_RETRIES retries
@@ -223,8 +233,10 @@ class DfaSegmentTypeDriver(object):
             query = session.query(self.model).filter_by(
                 segmentation_id=seg_id)
             if inside:
+                del_time = utils.utc_time(time.ctime())
                 count = query.update({"allocated": False, "network_id": None,
-                                      "source": None})
+                                      "source": None,
+                                      "delete_time": del_time})
                 if count:
                     LOG.debug("Releasing segmentation id %s to pool" % seg_id)
             else:
