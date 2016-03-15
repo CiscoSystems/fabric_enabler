@@ -41,6 +41,7 @@ class LbMgr(object):
         self.serv_vlan_max = int(cfg.dcnm.vlan_id_max)
         self._lb_net_obj = netaddr.IPNetwork(self._lb_net)
         self._lb_net_gw = str(netaddr.IPAddress(self._lb_net_obj.first + 1))
+        self._lb_net_gw2 = str(netaddr.IPAddress(self._lb_net_obj.first + 2))
         self._lb_net_mask = str(netaddr.IPAddress(self._lb_net_obj.netmask))
         self._vlan_db = dfa_dbm.DfaSegmentTypeDriver(self.serv_vlan_min,
                                                      self.serv_vlan_max,
@@ -173,6 +174,7 @@ class LbMgr(object):
         vlan_id = int(net_name_list[1])
         net["vlan_id"] = vlan_id
         net["config_profile"] = self._lb_service_net_profile
+        snet["secondary_gw"] = self._lb_net_gw2
         subnet = utils.Dict2Obj(snet)
         dcnm_net = utils.Dict2Obj(net)
         self.dfa_server.dcnm_client.create_service_network(
@@ -226,7 +228,7 @@ class LbMgr(object):
                      % (vlan_id, box_ip))
             lb_service.prepareF5ForNetwork(vlan_id,
                                            tenant_id,
-                                           self._lb_net_gw,
+                                           (self._lb_net_gw, self._lb_net_gw2),
                                            self._lb_net_mask)
 
         self.call_driver(function_name, pool_info)

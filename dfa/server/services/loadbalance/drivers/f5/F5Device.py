@@ -33,7 +33,7 @@ class F5Device(object):
     def allocateSelfIpAddress(self, gateway_ip, mask):
         lmask = struct.unpack('!L', socket.inet_aton(mask))[0]
         lsip = struct.unpack('!L', socket.inet_aton(gateway_ip))[0]
-        
+
         shifter = 0
         mask_len = 0
         while ((lmask & (0x1 << shifter)) == 0):
@@ -49,15 +49,19 @@ class F5Device(object):
         big = self.big
         vlanName = 'uuid_vlan' + str(vlanid)
         big.network.routeDel("defaultRoute_" + str(vlanid), context)
+        pool_id = 'gwPool' + str(vlanid)
+        big.ltm.removePoolMember(pool_id, pool_id + "_node1", 0, context)
+        big.ltm.removePoolMember(pool_id, pool_id + "_node2", 0, context)
+        big.ltm.deletePool('gwPool'+str(vlanid), context)
         big.network.deleteSelfIp('selfIp'+str(vlanid), folder=context)
         big.network.deleteVlan(vlanName, context)
-        big.network.deleteRouteDomain(context) 
-        big.deleteFolder(context) 
+        big.network.deleteRouteDomain(context)
+        big.deleteFolder(context)
 
     def prepareF5ForNetwork(self, vlanid, context, gateway_ip, mask):
         context = 'uuid_' + context
         big = self.big
-        vlanName = 'uuid_vlan' + str(vlanid) 
+        vlanName = 'uuid_vlan' + str(vlanid)
 
         try:
             if ((big.folderExists(context) == False) and  \
@@ -76,7 +80,7 @@ class F5Device(object):
         except F5BigIp.RouteAddException as rexc:
             print("Error Adding a Route Domain", rexc.message)
             big.deleteFolder(context)
-            return False 
+            return False
 
         if (rid == 0):
             return False
@@ -89,25 +93,42 @@ class F5Device(object):
             print("Error Creaing Vlan ", vlanName, vexc.message)
             big.delete_folder_and_domain(context, big)
             return False
-        
-        selfIpAddres = self.allocateSelfIpAddress(gateway_ip, mask)
+
+        selfIpAddres = self.allocateSelfIpAddress(gateway_ip[0], mask)
         selfIpAddres = selfIpAddres + "%" + str(rid)
         print("Self IP address is ", selfIpAddres)
 
-        big.network.createSelfIp('selfIp'+str(vlanid), selfIpAddres, mask, vlanName, \
-                            folder=context)
+        big.network.createSelfIp('selfIp'+str(vlanid), selfIpAddres,
+                                 mask, vlanName, folder=context)
 
-        big.network.routeAdd("defaultRoute_" + str(vlanid), "0.0.0.0%" + str(rid), 
-                           "0.0.0.0", gateway_ip + "%" + str(rid), context)
+        pool_id = 'gwPool'+str(vlanid)
+        self.big.ltm.createPool(pool_id, 'ROUND_ROBIN',
+                                "Gateway IP Pool", context)
+        i = 1
+        for gw_ip in gateway_ip:
+            member_id = pool_id + "_node" + str(i)
+            address = gw_ip + "%" + str(rid)
+            big.ltm.createPoolMember(member_id, pool_id,
+                                     address, 0, context)
+            i += 1
 
-        ospfNet = self.getSubnet(gateway_ip, mask)
+        big.network.routeAddPool("defaultRoute_" + str(vlanid),
+                                 "0.0.0.0%" + str(rid),
+                                 "0.0.0.0", pool_id, context)
+        """
+        big.network.routeAdd("defaultRoute_" + str(vlanid),
+                             "0.0.0.0%" + str(rid),
+                             "0.0.0.0",
+                             gateway_ip + "%" + str(rid), context)
+        """
+        ospfNet = self.getSubnet(gateway_ip[0], mask)
         big.network.startOspf(rid, ospfNet, mask)
         print("Called Apply F5 Netowrk config")
         return True
 
     """
     POOOL CREATION MESSAGE
-    {"pool": {"status": "pending_create", "lb_method": "round_robin", "protocol": "tcp", "description": "", "health_monitors": [], "members": [], "status_description": null, "id": "d091d1a1-2c81-4bfa-af04-a3eeee8b4f15", "vip_id": null, "name": "waxu_pool3", "admin_state_up": true, "subnet_id": "0efe5f1c-22e3-4704-9713-558372214aa3", "tenant_id": "b8560134d1c24305a06274214d7cf481", "health_monitors_status": [], "provider": "f5"}} 
+    {"pool": {"status": "pending_create", "lb_method": "round_robin", "protocol": "tcp", "description": "", "health_monitors": [], "members": [], "status_description": null, "id": "d091d1a1-2c81-4bfa-af04-a3eeee8b4f15", "vip_id": null, "name": "waxu_pool3", "admin_state_up": true, "subnet_id": "0efe5f1c-22e3-4704-9713-558372214aa3", "tenant_id": "b8560134d1c24305a06274214d7cf481", "health_monitors_status": [], "provider": "f5"}}
     """
     def createPool(self, jsMsg):
 
@@ -122,7 +143,7 @@ class F5Device(object):
         members = pool.get('members')
         """
             TBD decide on Members addition, during pool creation
-        """ 
+        """
         for member in members:
             print("Member is ", member)
 
@@ -132,14 +153,14 @@ class F5Device(object):
     def deletePool(self, pool):
         poolName = 'uuid_' + pool.get('pool_id')
         partition = 'uuid_' + pool.get('tenant_id')
-        
-        """ 
+
+        """
             Cleanup all the members in the pool
         """
         self.memberDelete(pool)
 
         self.big.ltm.deletePool(poolName, partition)
-        
+
     """
     {"member": {"status": "PENDING_CREATE", "protocol_port": 23, "weight": 1, "admin_state_up": true, "tenant_id": "b8560134d1c24305a06274214d7cf481", "pool_id": "d091d1a1-2c81-4bfa-af04-a3eeee8b4f15", "address": "1.1.201.2", "status_description": null, "id": "64c8e650-9bf8-48ff-9b96-5330b3898e59"}}
     """
@@ -176,7 +197,7 @@ class F5Device(object):
         partition = "uuid_" + jsMsg.get('tenant_id')
 
         """
-            Check if the Pool Name was passed in the Message 
+            Check if the Pool Name was passed in the Message
         """
         poolName = jsMsg.get('pool_id')
         if (poolName != None):
@@ -184,7 +205,7 @@ class F5Device(object):
 
         """
             Find all the Pools in the partition and identify which Pool has this Member
-            UUID. 
+            UUID.
             Issue a Delete using this pool.
         """
         print("Looking for Pools in the partition ", partition)
@@ -196,7 +217,7 @@ class F5Device(object):
             pool_id = "uuid_" + pool
             if (poolName != None) and (poolName != pool_id):
                 continue
-                
+
             memberList = big.ltm.getPoolMembers(pool_id, partition)
             if (memberList == None):
                 return False
@@ -210,19 +231,19 @@ class F5Device(object):
                     big.ltm.removePoolMember(pool_id, member['addr'], str(member['port']), partition)
 
         """
-            Did not find the Specified Member in any of the Pools in the partition 
+            Did not find the Specified Member in any of the Pools in the partition
         """
         if (memberName != "*"):
-            print("Did not find the Member ", memberName, 
+            print("Did not find the Member ", memberName,
                   " in any of the Pools in the Partition ", partition)
             return False
         else:
             return True
-                    
+
 
 
     """
-    {"vip": {"status": "PENDING_CREATE", "status_description": null, "protocol": "TCP", "description": "", "admin_state_up": true, "subnet_id": "9082ca27-7ed3-4b94-8f61-8e7f3ecbf106", "tenant_id": "b8560134d1c24305a06274214d7cf481", "connection_limit": -1, "pool_id": "d091d1a1-2c81-4bfa-af04-a3eeee8b4f15", "session_persistence": null, "address": "101.101.101.152", "protocol_port": 23, "port_id": "8600c488-bd83-4f38-b004-fae6e42aa705", "id": "ae381dab-343e-4eb8-8c29-473bdf8dc678", "name": "vip_pool3"}}    
+    {"vip": {"status": "PENDING_CREATE", "status_description": null, "protocol": "TCP", "description": "", "admin_state_up": true, "subnet_id": "9082ca27-7ed3-4b94-8f61-8e7f3ecbf106", "tenant_id": "b8560134d1c24305a06274214d7cf481", "connection_limit": -1, "pool_id": "d091d1a1-2c81-4bfa-af04-a3eeee8b4f15", "session_persistence": null, "address": "101.101.101.152", "protocol_port": 23, "port_id": "8600c488-bd83-4f38-b004-fae6e42aa705", "id": "ae381dab-343e-4eb8-8c29-473bdf8dc678", "name": "vip_pool3"}}
     """
     def vipCreate(self, jsMsg):
 
@@ -247,9 +268,9 @@ class F5Device(object):
 
         big.ltm.createVirtualServer(vipName, vipAddress, "255.255.255.255",
                             vipMsg.get('protocol_port'), vipMsg.get('protocol'),
-                            vlan_name = vlanName, 
+                            vlan_name = vlanName,
                             use_snat=True, folder=partition)
-        big.ltm.setVirtualServerPool(vipName, poolName, folder=partition) 
+        big.ltm.setVirtualServerPool(vipName, poolName, folder=partition)
         big.ltm.vipEnableAdvertise(partition, vipAddress)
         return True
 
@@ -280,7 +301,7 @@ class F5Device(object):
         expected_codes = None
         http_method = None
         send_string = None
-        
+
         if ((monitor_type == 'HTTP') or \
             (monitor_type == 'HTTPS')):
             url_path = jsMsg.get('url_path')
@@ -288,9 +309,9 @@ class F5Device(object):
             http_method = jsMsg.get('http_method')
         if (http_method == 'GET'):
             send_string = 'GET /\r\n'
-            
-        big.ltm.createMonitor(monitor_name, monitor_type, 
-                              interval, timeout, url_path, send_text=send_string, 
+
+        big.ltm.createMonitor(monitor_name, monitor_type,
+                              interval, timeout, url_path, send_text=send_string,
                               folder=tenant_id)
 
         for pool in pools:
@@ -310,7 +331,7 @@ class F5Device(object):
         expected_codes = None
         http_method = None
         send_string = None
-        
+
         if ((monitor_type == 'HTTP') or (monitor_type == 'HTTPS')):
             url_path = jsMsg.get('url_path')
             expected_codes = jsMsg.get('expected_Codes')
@@ -355,10 +376,10 @@ class F5Device(object):
         monMsg = jsMsg.get('health_monitor')
         monitor_name = monMsg.get('id')
         big.ltm.updateMonitor(monitor_name, tenant_id)
-    
+
 
     def processLbMessage(self, event_type, message):
-        lbEventList = { 'pool_create_event':self.createPool, 
+        lbEventList = { 'pool_create_event':self.createPool,
                         'pool_delete_event':self.deletePool,
                         'member_create_event':self.memberCreate,
                         'member_delete_event':self.memberDelete,
@@ -372,6 +393,6 @@ class F5Device(object):
             lbEventList[event_type](message)
         else:
             print("Unkown event ", event_type)
-        
+
 
 

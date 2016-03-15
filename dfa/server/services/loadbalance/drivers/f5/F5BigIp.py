@@ -69,11 +69,11 @@ class MonitorUnknownException(Exception):
 
 class F5Device(object):
     def __init__(self, f5IpAddr, username, password):
-        self.deviceIp = f5IpAddr 
+        self.deviceIp = f5IpAddr
         self.username = username
         self.password = password
         self.session = self._getBigSession()
-        self.url = 'https://%s/mgmt/tm' % f5IpAddr 
+        self.url = 'https://%s/mgmt/tm' % f5IpAddr
         self.network = Network(self)
         self.ltm = LTM(self)
         self.strict_route_isolation = False
@@ -191,7 +191,7 @@ class F5Device(object):
             # not do anything.
             folder = str(folder).replace('/', '')
             request_url = self.url + '/sys/folder/~' + folder
-            response = self.session.delete(request_url, 
+            response = self.session.delete(request_url,
                                            timeout=REQUEST_TIMEOUT)
             if response.status_code < 400:
                 return True
@@ -205,6 +205,32 @@ class F5Device(object):
 class Network(object):
     def __init__(self, bigip):
         self.bigip = bigip
+
+
+    def routeAddPool(self, name=None, dest_ip_address=None, dest_mask=None,
+               pool_id=None, folder='Common'):
+        if dest_ip_address and dest_mask and pool_id:
+            folder = str(folder).replace('/', '')
+            # self.bigip.system.set_rest_folder(folder)
+            payload = dict()
+            payload['name'] = name
+            payload['partition'] = folder
+            payload['pool'] = pool_id
+            payload['network'] = dest_ip_address + "/" + dest_mask
+            request_url = self.bigip.url + '/net/route/'
+            response = self.bigip.session.post(request_url,
+                            data=json.dumps(payload),
+                            timeout=REQUEST_TIMEOUT)
+            if response.status_code < 400:
+                return True
+            elif response.status_code == 409:
+                return True
+            else:
+                self.bigip.error_log('route', response.text)
+                raise RouteAddException(response.text)
+        return False
+
+
 
     def routeAdd(self, name=None, dest_ip_address=None, dest_mask=None,
                gw_ip_address=None, folder='Common'):
@@ -226,7 +252,7 @@ class Network(object):
                 return True
             else:
                 self.bigip.error_log('route', response.text)
-                raise RouteCreationException(response.text)
+                raise RouteAddException(response.text)
         return False
 
     def routeDel(self, name=None, folder='Common'):
@@ -284,6 +310,7 @@ class Network(object):
 
 
     def startOspf(self, rdId, network, netmask):
+        time.sleep(2)
         username = "root"
         f5IpAddr = self.bigip.deviceIp
         print("Connecting to the F5 Device for Configuring OSPF")
@@ -294,26 +321,26 @@ class Network(object):
             matchOpt = spawnid.expect("Password:.*")
         spawnid.sendline(self.bigip.password)
         spawnid.expect("config #.*")
-        
+
         ospfRetryCount = 1
         while(ospfRetryCount < 60):
             spawnid.sendline("imish -r " + str(rdId))
             matchOpt = spawnid.expect([str(rdId) + "\]>.*", "Dynamic routing is not"])
             print(spawnid.before, spawnid.after)
-            if (matchOpt == 1): 
+            if (matchOpt == 1):
                 time.sleep(2)
                 ospfRetryCount += 1
                 continue
             else:
                 break
-            
+
         if (ospfRetryCount > 60):
             print("Error Starting IMISH, Dynamic routing may not be enabled on the F5 RD")
             spawnid.close()
             return False
-        
+
         print("Started IMISH command line")
-        
+
         spawnid.sendline("ena")
         spawnid.expect("\["+str(rdId)+"\]#")
         print spawnid.before
@@ -325,14 +352,14 @@ class Network(object):
                 break
             else:
                 ospfRetryCount += 1
-        
+
         if (ospfRetryCount >= 60):
             print("OSPF Process is not started in the Routedomain " + str(rdId))
             spawnid.close()
             return False
-        
+
         print("OSPF Process is running in the Routedomain " + str(rdId))
-        
+
         spawnid.sendline("conf t")
         spawnid.expect("\["+str(rdId)+"\]\(config\)#.*")
         spawnid.sendline("router ospf")
@@ -390,9 +417,9 @@ class Network(object):
             if (rid == 0):
                 time.sleep(1)
             else:
-                return rid 
+                return rid
             rid = -1
-        return rid 
+        return rid
 
     def getFreeRouteDomainId(self):
         request_url = self.bigip.url + '/net/route-domain?$select=id'
@@ -425,7 +452,7 @@ class Network(object):
     def deleteRouteDomain(self, folder='Common'):
         folder = str(folder).replace('/', '')
         if (folder == 'Common'):
-            return True 
+            return True
         request_url = self.bigip.url + '/net/route-domain/'
         request_url += '~' + folder + '~' + folder
         response = self.bigip.session.delete(request_url,
@@ -555,7 +582,7 @@ class Network(object):
     def createSelfIp(self, name=None, ip_address=None, netmask=None,
                vlan_name=None, floating=False, traffic_group=None,
                folder='Common'):
-        if name: 
+        if name:
             folder = str(folder).replace('/', '')
             if not traffic_group:
                 if floating:
@@ -722,7 +749,7 @@ class LTM(object):
                 # we only care if this works.  Otherwise node is likely
                 # in use by another pool
                 if node_res.status_code < 400:
-                    self._del_arp_and_fdb(node_address, folder)
+                    pass
                 elif node_res.status_code == 400 and \
                      (node_res.text.find('is referenced') > 0):
                     # same node can be in multiple pools
@@ -940,7 +967,7 @@ class LTM(object):
     def createPoolMember(self, memberName, poolName, ip_address, port, folder):
         folder = str(folder).replace('/', '')
         request_url = self.bigip.url + '/ltm/pool/'
-        request_url += '~' + folder + '~' + poolName 
+        request_url += '~' + folder + '~' + poolName
         request_url += '/members'
         payload = dict()
         payload['name'] = memberName + ":" + str(port)
@@ -1030,7 +1057,7 @@ class LTM(object):
                 if (parentMonitor != None):
                     return mtype
         return None
-        
+
     def deleteMonitor(self, name=None, folder='Common'):
         if (name == None):
            return False
