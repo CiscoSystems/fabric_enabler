@@ -29,6 +29,7 @@ import uuid
 
 
 TIME_FORMAT = '%a %b %d %H:%M:%S %Y'
+RESTART_THRES = 10
 
 
 class PeriodicTask(object):
@@ -78,9 +79,11 @@ class EventProcessingThread(threading.Thread):
         self._hdlr = obj
         self._task = task
         self._excq = excq
+        self._run_cnt = 0
 
     def run(self):
         try:
+            self._run_cnt += 1
             getattr(self._hdlr, self._task)()
         except:
             if self._excq:
@@ -96,6 +99,14 @@ class EventProcessingThread(threading.Thread):
     @property
     def name(self):
         return self._thread_name
+
+    @property
+    def restart_count(self):
+        return self._run_cnt
+
+    @property
+    def restart_threshold_exceeded(self):
+        return self._run_cnt > RESTART_THRES
 
 
 class Dict2Obj(object):
@@ -125,6 +136,12 @@ def lock():
 def utc_time(ct):
     if ct:
         return datetime.datetime.strptime(ct, TIME_FORMAT)
+
+
+def utc_time_lapse(lapse):
+    current_time = utc_time(time.ctime())
+    hour_lapse = current_time - datetime.timedelta(hours=lapse)
+    return hour_lapse
 
 
 def is_valid_ipv4(addr):

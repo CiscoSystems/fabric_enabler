@@ -457,6 +457,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         self.serv_vlan_max = int(cfg.dcnm.vlan_id_max)
         self.serv_seg_min = int(cfg.dcnm.segmentation_id_min)
         self.serv_seg_max = int(cfg.dcnm.segmentation_id_max)
+        seg_to = int(cfg.dcnm.segmentation_reuse_timeout)
         self.serv_host_prof = cfg.firewall.fw_service_host_profile
         self.serv_host_mode = cfg.firewall.fw_service_host_fwd_mode
         self.serv_ext_prof = cfg.firewall.fw_service_ext_profile
@@ -471,7 +472,8 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         self.service_segs = dfa_dbm.DfaSegmentTypeDriver(self.serv_seg_min,
                                                          self.serv_seg_max,
                                                          const.RES_SEGMENT,
-                                                         cfg)
+                                                         cfg,
+                                                         reuse_timeout=seg_to)
         self.service_in_ip_start = cfg.firewall.fw_service_in_ip_start
         self.service_in_ip_end = cfg.firewall.fw_service_in_ip_end
         self.mask = int(self.service_in_ip_start.split('/')[1])

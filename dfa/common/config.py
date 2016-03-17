@@ -19,6 +19,7 @@
 from oslo.config import cfg
 import sys
 
+import dfa.common.constants as com_const
 from dfa.agent.vdp import lldpad_constants as vdp_const
 import dfa.server.services.constants as const
 import dfa.server.services.firewall.native.fw_constants as fw_const
@@ -103,8 +104,10 @@ default_dcnm_opts = {
         'dcnm_net_ext': '(DCNM)',
         'gateway_mac': '20:20:00:00:00:AA',
         'dcnm_dhcp_leases': '/var/lib/dhcpd/dhcpd.leases',
+        'segmentation_reuse_timeout': com_const.SEG_REUSE_TIMEOUT,
         'vlan_id_min': const.VLAN_ID_MIN,
         'vlan_id_max': const.VLAN_ID_MAX,
+        'vlan_reuse_timeout': const.VLAN_REUSE_TIMEOUT,
         'dcnm_dhcp': True,
         'dcnm_net_create': False,
     },
