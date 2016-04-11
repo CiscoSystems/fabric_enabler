@@ -349,7 +349,7 @@ class DfaVmInfo(db.Base):
     host = sa.Column(sa.String(255))
     vdp_vlan = sa.Column(sa.Integer)
     local_vlan = sa.Column(sa.Integer)
-    result = sa.Column(sa.String(255))
+    result = sa.Column(sa.String(4095))
 
 
 class DfaAgentsDb(db.Base):

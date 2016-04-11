@@ -29,6 +29,7 @@ import uuid
 
 
 TIME_FORMAT = '%a %b %d %H:%M:%S %Y'
+SSH_PORT = 22
 RESTART_THRES = 10
 
 
@@ -181,6 +182,23 @@ def make_cidr(gw, mask):
                 '/' + str(mask))
     except (socket.error, struct.error, ValueError, TypeError):
         return
+
+
+def is_host_alive(thishost):
+    """Check if a given host reachable."""
+
+    if not isinstance(thishost, str):
+        return False
+    soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    soc.settimeout(1)
+    try:
+        soc.connect((thishost, SSH_PORT))
+        is_alive = True
+    except Exception:
+        is_alive = False
+
+    soc.close()
+    return is_alive
 
 
 def find_agent_host_id(thishost):
