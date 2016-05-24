@@ -25,7 +25,7 @@ from socket import timeout as SocketTimeout
 DEBUG = False
 
 not_copy_dirs = ['build', 'dist', 'openstack_fabric_enabler.egg-info', '.git']
-not_copy_files = ['setup_enabler', 'cisco_scp.py', 'requirements.txt',
+not_copy_files = ['setup_enabler',
                   'enabler_neutron_svc.log', 'paramiko.log']
 not_copy_list = not_copy_files + not_copy_dirs
 # this is quote from the shlex module, added in py3.3
