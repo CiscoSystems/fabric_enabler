@@ -146,7 +146,7 @@ class EvbEmulator(Thread):
                     is_nb=True)
                 real_tlv = self._lldp_helper.get_lldp_tlv(
                     virtual_local_interface, is_ncb=False, is_nb=True)
-                if real_tlv is None:
+                if real_tlv is None or real_tlv == '':
                     LOG.error(
                         "Could not get tlv on %s, skipping evb emulation",
                         uplink_interface)
@@ -193,7 +193,7 @@ class EvbEmulator(Thread):
                 is_nb=True)
             real_tlv = self._lldp_helper.get_lldp_tlv(
                 virtual_local_interface, is_ncb=False, is_nb=True)
-            if real_tlv is None:
+            if real_tlv is None or real_tlv == '':
                 LOG.error(
                     "Could not get tlv on %s, skipping evb emulation",
                     uplink_interface)

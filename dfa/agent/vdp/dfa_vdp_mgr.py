@@ -139,7 +139,7 @@ class VdpMgr(object):
         self.br_ex = config_dict.get('external_bridge')
         self.root_helper = config_dict.get('root_helper')
         self.host_id = config_dict.get('host_id')
-        self.ucs_fi_cfgd = config_dict.get('ucs_fi')
+        self.ucs_fi_cfgd = sys_utils.is_cisco_ucs_b_series()
         self.ucs_fi_evb_dmac = config_dict.get('ucs_fi_evb_dmac')
         self.node_list = config_dict['node_list']
         self.node_uplink_list = config_dict['node_uplink_list']
@@ -161,7 +161,6 @@ class VdpMgr(object):
         self.static_uplink_port = None
         self.static_uplink_first = True
         self.is_ucs_fi = False
-        self.ucs_fi_evb_dmac = None
         self.evb_emulator = None
         self.read_static_uplink()
         self.start()
@@ -283,6 +282,7 @@ class VdpMgr(object):
                 self.ovs_vdp_obj_dict[phy_uplink] = ovs_vdp.OVSNeutronVdp(
                     phy_uplink, msg.get_integ_br(), msg.get_ext_br(),
                     msg.get_root_helper(), self.vdp_vlan_change_cb,
+                    is_ucs_fi=self.is_ucs_fi,
                     fi_evb_dmac=self.ucs_fi_evb_dmac)
             except Exception as exc:
                 LOG.error("OVS VDP Object creation failed %s" % str(exc))

@@ -567,3 +567,39 @@ def get_member_ports(intf):
         with open(file_name, 'r') as fd:
             slave_val = fd.read().strip('\n')
             return slave_val
+
+
+def get_dmi_info(id_type):
+
+    """Get DMI info for given type"""
+
+    if id_type is None:
+        return None
+    dmi_id_path = '/sys/class/dmi/id/' + id_type
+    file_exists = os.path.exists(dmi_id_path)
+    if file_exists:
+        try:
+            with open(dmi_id_path, 'r') as fd:
+                dmi_val = fd.read().strip('\n')
+                return dmi_val
+        except Exception as e:
+            LOG.error("Exception %s while reading file %s",
+                      str(e), dmi_id_path)
+            return None
+    else:
+        return None
+
+
+def is_cisco_ucs_b_series():
+
+    """Check if current system is Cisco UCS Blade server"""
+
+    vendor = get_dmi_info('sys_vendor')
+    product = get_dmi_info('product_name')
+
+    if vendor is not None and product is not None \
+            and vendor.lower().startswith('cisco') \
+            and product.lower().startswith('ucsb'):
+        return True
+    else:
+        return False
