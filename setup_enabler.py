@@ -67,6 +67,11 @@ class NexusFabricEnablerInstaller(object):
     """Represents Fabric Enabler Installation."""
 
     def __init__(self, mysql_user, mysql_passwd, mysql_host):
+        self.mysql_user = mysql_user
+        self.mysql_password = mysql_passwd
+        self.mysql_host = mysql_host
+        self.http_proxy = None
+        self.https_proxy = None
         self.root_helper = '' if os.geteuid() == 0 else 'sudo '
         self.src_dir = os.path.basename(
             os.path.dirname(os.path.realpath(__file__)))
@@ -205,7 +210,7 @@ class NexusFabricEnablerInstaller(object):
                 config.get("general", "compute_passwd"),
                 compute_name_list, compute_uplink_list)
 
-    def create_sshClient(self, host, user, passwd):
+    def create_sshClient(self, host, user, passwd=None):
         try:
             client = paramiko.SSHClient()
             client.load_system_host_keys()
@@ -216,13 +221,12 @@ class NexusFabricEnablerInstaller(object):
         except:
             print("Filed to create SSH client for %s %s" % (host, user))
 
-    def copy_dir(self, compute_host, compute_uplink, compute_user,
-                 compute_passwd):
+    def copy_dir(self, target_host, target_user, target_password=None):
         """Copy source files into compute nodes for installation."""
 
-        print("Copying dir " + self.src_dir + " to " + compute_host)
-        client = self.create_sshClient(compute_host,  compute_user,
-                                       compute_passwd)
+        print("Copying dir " + self.src_dir + " to " + target_host)
+        client = self.create_sshClient(target_host, target_user,
+                                       target_password)
         if client is None:
             print("Failed to copy source files.")
             return
@@ -278,8 +282,87 @@ class NexusFabricEnablerInstaller(object):
         print output
         output, returncode = self.run_cmd_line(self.install_pkg, shell=True)
         print output
+        print "restarting keystone"
+        self.restart_keystone_process()
+        time.sleep(10)
+        self.restart_neutron_processes()
+        time.sleep(10)
+        if hamode is False:
+            self.restart_fabric_enabler_server()
+        self.restart_fabric_enabler_agent()
+
+    def install_remote(self, command, host, user, password=None):
+        """Invoke installation script on remote node."""
+
+        print("Invoking installation on %s, please wait..." % (host))
+        c = self.create_sshClient(host, user, password)
+        if c is None:
+            print "Could not connect to remote host %s" % (host)
+            return
+        c.get_transport().open_session().set_combine_stderr(True)
+        ssh_stdin, ssh_stdout, ssh_stderr = c.exec_command(command,
+                                                           get_pty=True)
+        for i in ssh_stdout.readlines():
+            print "(%s) %s" % (host, i),
+        c.close()
+
+    def setup_control_remote(self, control_name, control_user,
+                             control_password=None, ha_mode=False):
+        """Invoke installation on remote control node."""
+
+        self.copy_dir(control_name, control_user, control_password)
+        cmd = "cd %s; yes | " % (self.src_dir)
+        if self.http_proxy is not None:
+            cmd += "http_proxy=%s " % (self.http_proxy)
+        if self.https_proxy is not None:
+            cmd += "https_proxy=%s " % (self.https_proxy)
+        cmd += "python setup_enabler.py "
+        if self.mysql_user is not None:
+            cmd += "--mysql-user=%s " % (self.mysql_user)
+        if self.mysql_password is not None:
+            cmd += "--mysql-password=\"%s\" " % (self.mysql_password)
+        if self.mysql_host is not None:
+            cmd += "--mysql-host=%s " % (self.mysql_host)
+        cmd += "--controller-only=True "
+        if ha_mode:
+            cmd += "--ha-mode=True"
+        else:
+            cmd += "--ha-mode=False"
+        self.install_remote(cmd, control_name, control_user, control_password)
+
+    def setup_compute_remote(self, compute_name, compute_uplink,
+                             compute_user, compute_password=None):
+        """Invoke installation on remote compute node"""
+
+        self.copy_dir(compute_name, compute_user, compute_password)
+        cmd = "cd %s; yes | " % (self.src_dir)
+        if self.http_proxy is not None:
+            cmd += "http_proxy=%s " % (self.http_proxy)
+        if self.https_proxy is not None:
+            cmd += "https_proxy=%s " % (self.https_proxy)
+        cmd += "python setup_enabler.py --compute-local=True "
+        if compute_uplink is not None:
+            cmd += "--uplink=%s" % (compute_uplink)
+        self.install_remote(cmd, compute_name, compute_user, compute_password)
+
+    def setup_compute_local(self, input_compute_uplink):
+        """Install Enabler on  local compute node"""
+
+        script_list = [self.rm_uplink, self.cp_uplink,
+                       self.run_dfa_prep_on_compute,
+                       self.add_req_txt, self.install_pkg,
+                       self.stop_agent, self.start_agent, self.run_lldpad]
+
+        if input_compute_uplink is None:
+            input_compute_uplink = 'auto'
+
+        self.generate_uplink_file(input_compute_uplink)
+        for script in script_list:
+            self.run_cmd_line(script, shell=True, check_result=False)
 
     def setup_compute(self, input_compute_name, input_compute_uplink):
+        """Install Enabler on computes in enabler_conf.ini or
+        provided as input"""
 
         compute_user, compute_passwd, compute_list, compute_uplinks = (
             self.parse_config())
@@ -306,11 +389,8 @@ class NexusFabricEnablerInstaller(object):
         print('Compute nodes: %s' % compute_list)
         print('Uplinks : %s' % compute_uplinks)
         for compute_host, compute_uplink in zip(compute_list, compute_uplinks):
-            self.generate_uplink_file(compute_uplink)
-            self.copy_dir(compute_host, compute_uplink, compute_user,
-                          compute_passwd)
-            self.invoke_scripts(compute_host, compute_uplink,
-                                compute_user, compute_passwd)
+            self.setup_compute_remote(compute_host, compute_uplink,
+                                      compute_user, compute_passwd)
 
     @property
     def stop_neutron_server(self):
@@ -384,6 +464,11 @@ class NexusFabricEnablerInstaller(object):
         time.sleep(5)
         self.run_cmd_line(self.start_agent)
 
+    def set_http_proxy(self, http_proxy):
+        self.http_proxy = http_proxy
+
+    def set_https_proxy(self, https_proxy):
+        self.https_proxy = https_proxy
 
 if __name__ == '__main__':
 
@@ -391,7 +476,26 @@ if __name__ == '__main__':
     parser.add_argument("--ha-mode", default=False,
                         help="Set this value to True, if installing ONLY on "
                         "a controller node in an HA setup.")
-    parser.add_argument("--compute-name", help="compute name or ip")
+    parser.add_argument("--compute-name", default=None,
+                        help="Set this value to thecontrol name or ip to "
+                        "install the Enabler on a remote compute node.")
+    parser.add_argument("--control-name", default=None,
+                        help="Set this value to the control name or ip to "
+                        "install the Enabler on a remote control node.")
+    parser.add_argument("--remote-user", default="heat-admin",
+                        help="Remote user for ssh access.")
+    parser.add_argument("--remote-password", default=None,
+                        help="Remote password for ssh access.")
+    parser.add_argument("--http-proxy", default=None,
+                        help="HTTP proxy URL.")
+    parser.add_argument("--https-proxy", default=None,
+                        help="HTTPS proxy URL.")
+    parser.add_argument("--compute-local", default=False,
+                        help="Set this value to True, if installing ONLY on "
+                        "a local compute node.")
+    parser.add_argument("--controller-only", default=False,
+                        help="Set this value to True, if installing only "
+                        "on the controller.")
     parser.add_argument("--uplink", help="compute uplink to leaf switch")
     parser.add_argument("--mysql-user",
                         help="MySQL user name (only for control node)")
@@ -405,17 +509,26 @@ if __name__ == '__main__':
     ha_mode = args.ha_mode
     input_compute_name = args.compute_name
     input_uplink = args.uplink
-    if input_uplink is None:
-        input_uplink_converted = "auto"
+    hamode = True if ha_mode and ha_mode.lower() == 'true' else False
+    local_compute = True if args.compute_local and \
+                    args.compute_local.lower() == 'true' else False
+    controller_only = True if args.controller_only and \
+                      args.controller_only.lower() == 'true' or \
+                      args.control_name is not None else False
 
-    if input_compute_name is None:
-        print("This script will setup openstack fabric enabler on control "
-              "and compute nodes.")
-    else:
-        print("This script will setup openstack fabric enabler on compute "
-              "node %s with uplink %s" % (
-                  input_compute_name, input_uplink_converted))
-
+    print("This script will install the Openstack Fabric Enabler as follows:")
+    print(" - install on control node: %s" %
+          ("no" if args.compute_local or args.compute_name is not None
+           else "yes"))
+    print(" - control node: %s" %
+          (args.control_name if args.control_name is not None else "local"))
+    print(" - control HA mode: %s" % (args.ha_mode))
+    print(" - install on compute nodes: %s" %
+          ("no" if controller_only else "yes"))
+    print(" - comput nodes: %s" %
+          ("local" if args.compute_local else args.compute_name
+           if args.compute_name is not None else "as per enabler_conf.ini"))
+    print(" - uplink: %s" % ("auto" if input_uplink is None else input_uplink))
     user_answer = raw_input("Would you like to continue(y/n)? ").lower()
     if user_answer.startswith('n'):
         sys.exit(1)
@@ -425,20 +538,30 @@ if __name__ == '__main__':
                                               args.mysql_host)
     os.chdir("../")
 
-    hamode = True if ha_mode and ha_mode.lower() == 'true' else False
+    fabric_inst.set_http_proxy(args.http_proxy)
+    fabric_inst.set_https_proxy(args.https_proxy)
+
+    if local_compute:
+        # Compute-only enabler installation
+        fabric_inst.setup_compute_local(input_uplink)
+        sys.exit(0)
+
     if input_compute_name is None:
-        # If no compute node is specified, enabler is installed on controller
-        # node and then compute node.
-        fabric_inst.setup_control(hamode)
-        print "restarting keystone"
-        fabric_inst.restart_keystone_process()
-        time.sleep(10)
-        fabric_inst.restart_neutron_processes()
-        time.sleep(10)
-        if hamode is False:
-            fabric_inst.restart_fabric_enabler_server()
-        fabric_inst.restart_fabric_enabler_agent()
+        # Enabler installation on control node
+        if args.control_name is None:
+            fabric_inst.setup_control(hamode)
+        else:
+            fabric_inst.setup_control_remote(args.control_name,
+                                             args.remote_user,
+                                             args.remote_password,
+                                             hamode)
 
     # Setup compute node.
-    if hamode is False:
-        fabric_inst.setup_compute(input_compute_name, input_uplink)
+    if not hamode and not controller_only:
+        if args.remote_user is not None:
+            fabric_inst.setup_compute_remote(input_compute_name,
+                                             input_uplink,
+                                             args.remote_user,
+                                             args.remote_password)
+        else:
+            fabric_inst.setup_compute(input_compute_name, input_uplink)

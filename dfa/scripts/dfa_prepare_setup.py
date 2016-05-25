@@ -217,8 +217,9 @@ def prepare_db(mysql_user, mysql_pass, mysql_host):
     (user, password, host, db, charset) = get_db_credentials(dfa_cfg_file)
 
     # Modify max_connections, if it is not 2000
-    mysql_cmd = ('mysql -u%s -p%s -h%s ') % (
-        mysql_user, mysql_pass, mysql_host)
+    mysql_cmd = ('mysql -u%s -h%s ') % (mysql_user, mysql_host)
+    if mysql_pass is not None:
+        mysql_cmd = mysql_cmd + '-p%s ' % (mysql_pass)
     get_var_cmd = (mysql_cmd +
                    '-e "show variables like \'max_connections\';"')
     out = get_cmd_output(get_var_cmd)
@@ -385,8 +386,7 @@ if __name__ == '__main__':
 
     node = options.node_function.lower()
     if node == 'control':
-        if options.mysql_pass is None or options.mysql_host is None or (
-                options.mysql_user is None):
+        if options.mysql_host is None or options.mysql_user is None:
             mysqlconf = os.path.join(os.path.expanduser('~'), mysqlcnf)
             print("Cannot find %s" % mysqlconf)
             print("MySQL credentials must be provided when setting up "
