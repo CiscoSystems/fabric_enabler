@@ -128,7 +128,6 @@ class DfaAgent(object):
         config_dict['root_helper'] = self._cfg.sys.root_helper
         config_dict['node_list'] = self._cfg.general.node
         config_dict['node_uplink_list'] = self._cfg.general.node_uplink
-        config_dict['ucs_fi'] = self._cfg.general.ucs_fi
         config_dict['ucs_fi_evb_dmac'] = self._cfg.general.ucs_fi_evb_dmac
         self._vdpm = vdpm.VdpMgr(config_dict, self.clnt, self._host_name)
         self.pool = eventlet.GreenPool()

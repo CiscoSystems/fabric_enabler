@@ -149,6 +149,7 @@ class OVSNeutronVdp(object):
 
     def __init__(self, uplink, integ_br, ext_br, root_helper,
                  vdp_vlan_cb, vdp_mode=constants.VDP_SEGMENT_MODE,
+                 is_ucs_fi=False,
                  fi_evb_dmac=None):
         # self.root_helper = 'sudo'
         self.root_helper = root_helper
@@ -169,10 +170,7 @@ class OVSNeutronVdp(object):
         self.integ_br_obj = None
         self.vdp_vlan_cb = vdp_vlan_cb
         self.fi_evb_dmac = fi_evb_dmac
-        if fi_evb_dmac is not None:
-            self.ucs_fi = True
-        else:
-            self.ucs_fi = False
+        self.ucs_fi = is_ucs_fi
         self.setup_lldpad = self.setup_lldpad_ports()
 
     def is_lldpad_setup_done(self):
@@ -181,6 +179,12 @@ class OVSNeutronVdp(object):
     def program_vdp_flows(self, lldp_ovs_portnum, phy_port_num):
         br = self.ext_br_obj
         high_prio = constants.VDP_FLOW_PRIO
+
+        if self.ucs_fi and (self.fi_evb_dmac is None or
+                            str.strip(self.fi_evb_dmac) == ''):
+            LOG.error("fi_evb_dmac is not configured on a UCS FI/Blade setup."
+                      " This will cause connectivity issues")
+
         if self.ucs_fi:
             br.add_flow(priority=high_prio, in_port=lldp_ovs_portnum,
                         dl_dst=constants.NB_DMAC, dl_type=constants.LLDP_ETYPE,
@@ -188,6 +192,17 @@ class OVSNeutronVdp(object):
             br.add_flow(priority=high_prio, in_port=phy_port_num,
                         dl_dst=constants.NB_DMAC, dl_type=constants.LLDP_ETYPE,
                         actions="output:%s" % lldp_ovs_portnum)
+        else:
+            br.add_flow(priority=high_prio, in_port=lldp_ovs_portnum,
+                        dl_dst=constants.NCB_DMAC,
+                        dl_type=constants.LLDP_ETYPE,
+                        actions="output:%s" % phy_port_num)
+            br.add_flow(priority=high_prio, in_port=phy_port_num,
+                        dl_dst=constants.NCB_DMAC,
+                        dl_type=constants.LLDP_ETYPE,
+                        actions="output:%s" % lldp_ovs_portnum)
+
+        if self.fi_evb_dmac is not None:
             br.add_flow(priority=high_prio, in_port=lldp_ovs_portnum,
                         dl_dst=constants.NCB_DMAC,
                         dl_type=constants.VDP22_ETYPE,
@@ -206,14 +221,6 @@ class OVSNeutronVdp(object):
             br.add_flow(priority=high_prio, in_port=phy_port_num,
                         dl_dst=constants.NCB_DMAC,
                         dl_type=constants.VDP22_ETYPE,
-                        actions="output:%s" % lldp_ovs_portnum)
-            br.add_flow(priority=high_prio, in_port=lldp_ovs_portnum,
-                        dl_dst=constants.NCB_DMAC,
-                        dl_type=constants.LLDP_ETYPE,
-                        actions="output:%s" % phy_port_num)
-            br.add_flow(priority=high_prio, in_port=phy_port_num,
-                        dl_dst=constants.NCB_DMAC,
-                        dl_type=constants.LLDP_ETYPE,
                         actions="output:%s" % lldp_ovs_portnum)
 
     def delete_vdp_flows(self):
