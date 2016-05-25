@@ -82,7 +82,7 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
         status = self.asa5585.setup(tenant_name, in_vlan, out_vlan,
                                     in_serv_node, '255.255.255.0', in_gw,
                                     in_sec_gw, out_serv_node, '255.255.255.0',
-                                    out_ip_gw, self.interface_in,
+                                    out_ip_gw, out_sec_gw, self.interface_in,
                                     self.interface_out)
         if status is False:
             LOG.error("Physical FW instance creation failure.")
