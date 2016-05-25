@@ -21,6 +21,7 @@
 import json
 import requests
 import sys
+import re
 
 from dfa.common import dfa_exceptions as dexc
 from dfa.common import dfa_logger as logging
@@ -71,7 +72,18 @@ class DFARESTClient(object):
     def is_iplus(self):
         """Check the DCNM version."""
 
-        return self._cur_ver >= self._base_ver
+        ver_expr = "([0-9]+)\.([0-9]+)\((.*)\)"
+        v1 = re.match(ver_expr, self._cur_ver)
+        v2 = re.match(ver_expr, self._base_ver)
+
+        if int(v1.group(1)) > int(v2.group(1)):
+            return True
+        elif int(v1.group(1)) == int(v2.group(1)):
+            if int(v1.group(2)) > int(v2.group(2)):
+                return True
+            elif int(v1.group(2)) == int(v2.group(2)):
+                return v1.group(3) >= v2.group(3)
+        return False
 
     def _set_default_cfg_profile(self):
         """Set default network config profile.
