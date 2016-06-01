@@ -578,7 +578,7 @@ class DFARESTClient(object):
             raise dexc.DfaClientRequestFailed(reason=res)
 
     def delete_service_network(self, tenant_name, network):
-        """Delete network on the DCNM.
+        """Delete service network on the DCNM.
 
         :param tenant_name: name of tenant the network belongs to
         :param network: object that contains network parameters
@@ -589,14 +589,23 @@ class DFARESTClient(object):
         if not part_name:
             part_name = self._part_name
         seg_id = str(network.segmentation_id)
-        if network.mob_domain_name:
-            mob_domain_name = network.mob_domain_name
+        if network.vlan_id:
             vlan_id = str(network.vlan_id)
+            if network.mob_domain_name is not None:
+                mob_domain_name = network.mob_domain_name
+            else:
+                # The current way will not work since _default_md is obtained
+                # during create_service_network. It's preferrable to get it
+                # during init TODO
+                if self._default_md is None:
+                    self._set_default_mobility_domain()
+                mob_domain_name = self._default_md
             network_info = {
                 'organizationName': tenant_name,
                 'partitionName': part_name,
                 'mobDomainName': mob_domain_name,
                 'vlanId': vlan_id,
+                'segmentId': seg_id,
             }
         else:
             network_info = {
