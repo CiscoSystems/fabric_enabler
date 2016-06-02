@@ -199,6 +199,11 @@ class LbMgr(object):
         else:
             return False
 
+    def lb_get_vlan_from_name(self, net_name):
+        net_name_list = net_name.split(self._lb_net_prefix)
+        vlan = int(net_name_list[1])
+        return vlan
+
     def call_driver(self, function_name, info):
         tenant_id = self.get_tenant_id(info)
         if tenant_id is None:

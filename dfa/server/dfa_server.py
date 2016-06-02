@@ -767,6 +767,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                 self.network[net_id]['partition'] = def_part
             self.network[net_id]['config_profile'] = cfgp
             self.network[net_id]['fwd_mod'] = fwd_mod
+            if self._lbMgr and self._lbMgr.lb_is_internal_nwk(net_name):
+                vlan = self._lbMgr.lb_get_vlan_from_name(net_name)
+                self.network[net_id]['vlan'] = vlan
+
             self.add_network_db(net_id, self.network[net_id],
                                 'openstack',
                                 constants.RESULT_SUCCESS)
@@ -801,7 +805,11 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
 
         try:
             part = self.network[net_id].get('partition')
-            self.dcnm_client.delete_network(tenant_name, net, part_name=part)
+            if self._lbMgr and self._lbMgr.lb_is_internal_nwk(net.name):
+                self.dcnm_client.delete_service_network(tenant_name, net)
+            else:
+                self.dcnm_client.delete_network(tenant_name, net,
+                                                part_name=part)
             # Put back the segmentation id into the pool.
             self.seg_drvr.release_segmentation_id(segid)
 

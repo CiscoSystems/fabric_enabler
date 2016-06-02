@@ -1,5 +1,8 @@
 from neutron.plugins.common import constants
-from neutron.db.loadbalancer import loadbalancer_db
+try:
+    from neutron.db.loadbalancer import loadbalancer_db
+except ImportError:
+    from neutron_lbaas.db.loadbalancer import loadbalancer_db
 from neutron.common import rpc as n_rpc
 
 
