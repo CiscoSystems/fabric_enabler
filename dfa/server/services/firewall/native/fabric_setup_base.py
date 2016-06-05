@@ -274,6 +274,11 @@ class FabricApi(object):
         cls.serv_obj_dict[tenant_id] = obj
 
     @classmethod
+    def del_obj(cls, tenant_id, obj):
+        ''' Delete the tenant obj '''
+        del cls.serv_obj_dict[tenant_id]
+
+    @classmethod
     def store_db_obj(cls, in_obj, out_obj):
         ''' Store the IP DB object '''
         cls.ip_db_obj['in'] = in_obj
@@ -601,6 +606,11 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         ''' Creates and stores the service object associated with a tenant '''
         self.service_attr[tenant_id] = ServiceIpSegTenantMap()
         self.store_obj(tenant_id, self.service_attr[tenant_id])
+
+    def delete_serv_obj(self, tenant_id):
+        ''' Creates and stores the service object associated with a tenant '''
+        self.del_obj(tenant_id, self.service_attr[tenant_id])
+        del self.service_attr[tenant_id]
 
     def store_net_db(self, tenant_id, net, net_dict, result):
         '''Store service network in DB'''
@@ -930,7 +940,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             seg, vlan = self.get_out_seg_vlan(tenant_id)
             net_dict['part_name'] = fw_const.SERV_PART_NAME
         net_dict['segmentation_id'] = seg
-        net_dict['vlan_id'] = vlan
+        net_dict['vlan'] = vlan
         net = utils.Dict2Obj(net_dict)
         ret = True
         try:
@@ -960,14 +970,21 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
                                        None, vrf_prof_str,
                                        desc="Service Partition")
 
-    def _update_partition(self, tenant_name, srvc_ip, vrf_prof=None,
-                          part_name=None):
-        ''' Function to update a  partition'''
+    def _update_partition_srvc_node_ip(self, tenant_name, srvc_ip,
+                                       vrf_prof=None, part_name=None):
+        ''' Function to update srvc_node address of partition'''
 
-        self.dcnm_obj.update_project(tenant_name, part_name, None,
+        self.dcnm_obj.update_project(tenant_name, part_name,
                                      service_node_ip=srvc_ip,
                                      vrf_prof=vrf_prof,
                                      desc="Service Partition")
+
+    def _update_partition_dci_id(self, tenant_name, dci_id,
+                                 vrf_prof=None, part_name=None):
+        ''' Function to update DCI ID of partition'''
+
+        self.dcnm_obj.update_project(tenant_name, part_name, dci_id=dci_id,
+                                     vrf_prof=vrf_prof)
 
     def _update_partition_in_create(self, tenant_id, tenant_name):
         ''' Function to update a  partition'''
@@ -976,20 +993,26 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         # self._update_partition(tenant_name, in_ip)
         # Need more generic thinking on this one TODO
         next_hop = str(netaddr.IPAddress(sub) + 2)
-        self._update_partition(tenant_name, next_hop)
+        self._update_partition_srvc_node_ip(tenant_name, next_hop)
 
     def _update_partition_in_delete(self, tenant_name):
         ''' Function to update a  partition'''
 
-        self._update_partition(tenant_name, None)
+        self._update_partition_srvc_node_ip(tenant_name, None)
 
     def _update_partition_out_create(self, tenant_id, tenant_name):
         ''' Function to update a  partition'''
 
         vrf_prof = self.serv_part_vrf_prof
-        sub, out_ip, out_ip_end, gw, sec_gw = self.get_out_ip_addr(tenant_id)
-        self._update_partition(tenant_name, out_ip, vrf_prof=vrf_prof,
-                               part_name=fw_const.SERV_PART_NAME)
+        seg = self.dcnm_obj.get_partition_segmentId(tenant_name,
+                                                    fw_const.SERV_PART_NAME)
+        if seg is None:
+            return False
+        else:
+            self._update_partition_dci_id(tenant_name, seg,
+                                          vrf_prof=vrf_prof,
+                                          part_name=fw_const.SERV_PART_NAME)
+            return True
 
     def _delete_partition(self, tenant_id, tenant_name):
         ''' Function to delete a service partition'''
@@ -1383,15 +1406,16 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         '''
         res = fw_const.DCNM_OUT_PART_UPDATE_SUCCESS
         ret = True
-        # This may not be needed, revisit later TODO
-        # try:
-        #    self._update_partition_out_create(tenant_id, tenant_name)
-        # except Exception as exc:
-        #    LOG.error("Update of Out Partition failed for tenant %(tenant)s"
-        #              " ,Exception %(exc)s",
-        #              {'tenant': tenant_id, 'exc': str(exc)})
-        #    res = fw_const.DCNM_OUT_PART_UPDATE_FAIL
-        #    ret = False
+        try:
+            ret = self._update_partition_out_create(tenant_id, tenant_name)
+            if not ret:
+                res = fw_const.DCNM_OUT_PART_UPDATE_FAIL
+        except Exception as exc:
+            LOG.error("Update of Out Partition failed for tenant %(tenant)s"
+                      " ,Exception %(exc)s",
+                      {'tenant': tenant_id, 'exc': str(exc)})
+            res = fw_const.DCNM_OUT_PART_UPDATE_FAIL
+            ret = False
         self.update_fw_db_result(tenant_id, dcnm_status=res)
         LOG.info("Out partition updated with service ip addr")
         return ret
@@ -1829,7 +1853,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
                          "%(tenant)s FW %(fw)s",
                          {'tenant': tenant_name, 'fw': fw_name})
                 self.service_attr[tenant_id].destroy_local_fw_db()
-                del self.service_attr[tenant_id]
+                self.delete_serv_obj(tenant_id)
             else:
                 LOG.error("Delete SM failed for tenant"
                           "%(tenant)s FW %(fw)s",

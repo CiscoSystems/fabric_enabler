@@ -48,6 +48,7 @@ class Asa5585():
                                             self.password)).replace('\n', '')
         req.add_header("Authorization", "Basic %s" % base64string)
         f = None
+        status_code = 400
         try:
             f = urllib2.urlopen(req)
             status_code = f.getcode()

@@ -208,7 +208,7 @@ class DfaFailureRecovery(object):
                 self.dcnm_client.update_project(proj.name,
                                                 self.cfg.dcnm.
                                                 default_partition_name,
-                                                proj.dci_id)
+                                                dci_id=proj.dci_id)
             except dexc.DfaClientRequestFailed as exc:
                 LOG.error("failure_recovery: Failed to update %(proj)s on "
                           "DCNM : %(reason)s",

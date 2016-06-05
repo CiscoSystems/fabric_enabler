@@ -808,8 +808,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             part = self.network[net_id].get('partition')
             if self._lbMgr and self._lbMgr.lb_is_internal_nwk(net.name):
                 self.dcnm_client.delete_service_network(tenant_name, net)
-            else:  
-                self.dcnm_client.delete_network(tenant_name, net, part_name=part)
+            else:
+                self.dcnm_client.delete_network(tenant_name, net,
+                                                part_name=part)
             # Put back the segmentation id into the pool.
             self.seg_drvr.release_segmentation_id(segid)
 
