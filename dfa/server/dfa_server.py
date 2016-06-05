@@ -410,6 +410,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             self.network[net.network_id]['tenant_id'] = net.tenant_id
             self.network[net.network_id]['name'] = net.name
             self.network[net.network_id]['id'] = net.network_id
+            self.network[net.network_id]['vlan'] = net.vlan
 
         LOG.info('Network info cache: %s', self.network)
 
@@ -559,7 +560,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         try:
             self.dcnm_client.update_project(new_proj_name,
                                             self.cfg.dcnm.
-                                            default_partition_name, new_dci_id)
+                                            default_partition_name,
+                                            dci_id=new_dci_id)
         except dexc.DfaClientRequestFailed:
             # Failed to update project in DCNM.
             # Save the info and mark it as failure and retry it later.
@@ -770,7 +772,6 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             if self._lbMgr and self._lbMgr.lb_is_internal_nwk(net_name):
                 vlan = self._lbMgr.lb_get_vlan_from_name(net_name)
                 self.network[net_id]['vlan'] = vlan
-
             self.add_network_db(net_id, self.network[net_id],
                                 'openstack',
                                 constants.RESULT_SUCCESS)
@@ -807,9 +808,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             part = self.network[net_id].get('partition')
             if self._lbMgr and self._lbMgr.lb_is_internal_nwk(net.name):
                 self.dcnm_client.delete_service_network(tenant_name, net)
-            else:
-                self.dcnm_client.delete_network(tenant_name, net,
-                                                part_name=part)
+            else:  
+                self.dcnm_client.delete_network(tenant_name, net, part_name=part)
             # Put back the segmentation id into the pool.
             self.seg_drvr.release_segmentation_id(segid)
 
