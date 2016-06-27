@@ -24,7 +24,7 @@ import time
 import ConfigParser
 import cisco_scp
 import paramiko
-
+import errno
 
 startup_cmds = {
     'ubuntu': {
@@ -72,6 +72,7 @@ class NexusFabricEnablerInstaller(object):
         self.mysql_host = mysql_host
         self.http_proxy = None
         self.https_proxy = None
+        self.vendor_os_rel = None
         self.root_helper = '' if os.geteuid() == 0 else 'sudo '
         self.src_dir = os.path.basename(
             os.path.dirname(os.path.realpath(__file__)))
@@ -79,7 +80,9 @@ class NexusFabricEnablerInstaller(object):
         self.uplink_file = "uplink"
         self.script_dir = '%s/dfa/scripts' % self.src_dir
         self.rm_uplink = '%s rm -f /tmp/uplink*' % self.root_helper
-        self.cp_uplink = 'cp %s/%s /tmp' % (self.src_dir, self.uplink_file)
+        self.cp_uplink = '[[ -e %s/%s ]] && cp %s/%s /tmp' % (
+            self.src_dir, self.uplink_file,
+            self.src_dir, self.uplink_file)
         self.run_dfa_prep_on_control = (
             '%s python %s/dfa_prepare_setup.py --node-function=control '
             '%s %s %s' % (
@@ -100,12 +103,18 @@ class NexusFabricEnablerInstaller(object):
         self.add_req_txt = 'touch %s/requirements.txt' % self.src_dir
         sudo_cmd = (self.root_helper + '-E ') if self.root_helper else ''
         self.install_pkg = ("cd  %s;"
-                            "python setup.py build;python setup.py bdist_egg;"
+                            "python setup.py build;%spython setup.py bdist_egg;"
                             "%spython setup.py install" % (
-                                self.src_dir, sudo_cmd))
+                                self.src_dir, sudo_cmd, sudo_cmd))
         self.distr_name = platform.dist()[0].lower()
         self.run_lldpad = '%s %s/run_lldpad.sh %s' % (
             self.root_helper, self.script_dir, self.src_dir)
+        self.cleanup = "cd %s ; %s rm -rf %s %s %s" % (
+            self.src_dir,
+            self.root_helper,
+            "openstack_fabric_enabler.egg-info",
+            "build",
+            "dist")
         self.neutron_restart_procs = [
             'neutron-server']
 
@@ -232,33 +241,8 @@ class NexusFabricEnablerInstaller(object):
             return
 
         scp_client = cisco_scp.cisco_SCPClient(client.get_transport())
+        scp_client.set_verbose(False)
         scp_client.put(self.src_dir, recursive=True)
-        client.close()
-
-    def invoke_scripts(self, compute_host, compute_uplink, compute_user,
-                       compute_passwd):
-        """Installs enabler package on compute node."""
-
-        script_list = [self.rm_uplink, self.cp_uplink,
-                       self.run_dfa_prep_on_compute,
-                       self.add_req_txt, self.install_pkg,
-                       self.stop_agent, self.start_agent, self.run_lldpad]
-
-        client = self.create_sshClient(compute_host, compute_user,
-                                       compute_passwd)
-        if client is None:
-            return
-
-        for script in script_list:
-            print("invoking script " + script + " on " + compute_host)
-            ssh_stdin, ssh_stdout, ssh_stderr = client.exec_command(
-                script, get_pty=self.get_pty)
-            ssh_stdin.write(compute_passwd)
-            ssh_stdin.write('\n')
-            for line in ssh_stdout:
-                print(line.encode('utf-8'))
-            for line in ssh_stderr:
-                print(line.encode('utf-8'))
         client.close()
 
     def generate_uplink_file(self, compute_uplink):
@@ -282,14 +266,22 @@ class NexusFabricEnablerInstaller(object):
         print output
         output, returncode = self.run_cmd_line(self.install_pkg, shell=True)
         print output
-        print "restarting keystone"
-        self.restart_keystone_process()
-        time.sleep(10)
-        self.restart_neutron_processes()
-        time.sleep(10)
-        if hamode is False:
-            self.restart_fabric_enabler_server()
-        self.restart_fabric_enabler_agent()
+        output, returncode = self.run_cmd_line(self.run_lldpad, shell=True, check_result=False)
+        print output
+        output, returncode = self.run_cmd_line(self.cleanup, shell=True, check_result=False)
+        print output
+
+        if self.vendor_os_rel == 'rhel-osp7':
+            self.rhel_osp7_setup(hamode)
+        else:
+            print "restarting keystone"
+            self.restart_keystone_process()
+            time.sleep(10)
+            self.restart_neutron_processes()
+            time.sleep(10)
+            if hamode is False:
+                self.restart_fabric_enabler_server()
+            self.restart_fabric_enabler_agent()
 
     def install_remote(self, command, host, user, password=None):
         """Invoke installation script on remote node."""
@@ -303,7 +295,7 @@ class NexusFabricEnablerInstaller(object):
         ssh_stdin, ssh_stdout, ssh_stderr = c.exec_command(command,
                                                            get_pty=True)
         for i in ssh_stdout.readlines():
-            print "(%s) %s" % (host, i),
+            print "(%s) %s" % (host, i.encode('utf-8')),
         c.close()
 
     def setup_control_remote(self, control_name, control_user,
@@ -323,6 +315,8 @@ class NexusFabricEnablerInstaller(object):
             cmd += "--mysql-password=\"%s\" " % (self.mysql_password)
         if self.mysql_host is not None:
             cmd += "--mysql-host=%s " % (self.mysql_host)
+        if self.vendor_os_rel is not None:
+            cmd += "--vendor-os-release=%s " % (self.vendor_os_rel)
         cmd += "--controller-only=True "
         if ha_mode:
             cmd += "--ha-mode=True"
@@ -343,6 +337,8 @@ class NexusFabricEnablerInstaller(object):
         cmd += "python setup_enabler.py --compute-local=True "
         if compute_uplink is not None:
             cmd += "--uplink=%s" % (compute_uplink)
+        if self.vendor_os_rel is not None:
+            cmd += "--vendor-os-release=%s " % (self.vendor_os_rel)
         self.install_remote(cmd, compute_name, compute_user, compute_password)
 
     def setup_compute_local(self, input_compute_uplink):
@@ -351,7 +347,8 @@ class NexusFabricEnablerInstaller(object):
         script_list = [self.rm_uplink, self.cp_uplink,
                        self.run_dfa_prep_on_compute,
                        self.add_req_txt, self.install_pkg,
-                       self.stop_agent, self.start_agent, self.run_lldpad]
+                       self.stop_agent, self.start_agent,
+                       self.run_lldpad, self.cleanup]
 
         if input_compute_uplink is None:
             input_compute_uplink = 'auto'
@@ -470,10 +467,69 @@ class NexusFabricEnablerInstaller(object):
     def set_https_proxy(self, https_proxy):
         self.https_proxy = https_proxy
 
+    def set_vendor_os_release(self, vendor_os_release):
+        if vendor_os_release is None:
+            return
+
+        # Save value...
+        self.vendor_os_rel = vendor_os_release
+
+        # ...and modify commands run locally
+        o = " --vendor-os-release=%s" % (vendor_os_release)
+        self.run_dfa_prep_on_control += o
+        self.run_dfa_prep_on_hacontrol += o
+        self.run_dfa_prep_on_compute += o
+
+    def rhel_osp7_setup(self, hamode):
+        # Restart keystone/neutron
+        print("Restarting keystone and neutron")
+        cmds = ["pcs resource restart openstack-keystone",
+                "pcs resource restart neutron-server"]
+        for c in cmds:
+            cmd = "%s %s" % (self.root_helper, c)
+            o, rc = self.run_cmd_line(cmd, check_result=False)
+            print(o)
+
+        # Setup Pacemaker/Start resources
+        pcs_resources = {
+            'fabric-enabler-server':
+            ["pcs resource create fabric-enabler-server systemd:fabric-enabler-server",
+             "pcs resource meta fabric-enabler-server migration-threshold=1",
+             "pcs constraint order start galera-master then start fabric-enabler-server",
+             "pcs constraint order start rabbitmq-clone then start fabric-enabler-server",
+             "pcs resource enable fabric-enabler-server"],
+                'fabric-enabler-agent':
+            ["pcs resource create fabric-enabler-agent systemd:fabric-enabler-agent --clone  interleave=true",
+             "pcs constraint order start rabbitmq-clone then start fabric-enabler-agent-clone",
+             "pcs resource enable fabric-enabler-agent"],
+            'lldpad':
+            ["pcs resource create lldpad systemd:lldpad --clone interleave=true",
+             "pcs resource enable lldpad"]
+        }
+        if not hamode:
+            print("Setting up and starting Pacemaker resources")
+            for resource in pcs_resources:
+                cmd = "%s pcs resource show %s 2>/dev/null" % \
+                      (self.root_helper, resource)
+                o, rc = self.run_cmd_line(cmd, check_result=False, shell=True)
+                if o is None:
+                    for c in pcs_resources[resource]:
+                        cmd = "%s %s" % (self.root_helper, c)
+                        o, rc = self.run_cmd_line(cmd, check_result=False)
+                        print(o)
+                else:
+                    print(o)
+        else:
+            for resource in pcs_resources:
+                cmd = "%s pcs resource cleanup %s" % \
+                      (self.root_helper, resource)
+                o, rc = self.run_cmd_line(cmd, check_result=False)
+                print(o)
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ha-mode", default=False,
+    parser.add_argument("--ha-mode", default=None,
                         help="Set this value to True, if installing ONLY on "
                         "a controller node in an HA setup.")
     parser.add_argument("--compute-name", default=None,
@@ -482,7 +538,7 @@ if __name__ == '__main__':
     parser.add_argument("--control-name", default=None,
                         help="Set this value to the control name or ip to "
                         "install the Enabler on a remote control node.")
-    parser.add_argument("--remote-user", default="heat-admin",
+    parser.add_argument("--remote-user", default=None,
                         help="Remote user for ssh access.")
     parser.add_argument("--remote-password", default=None,
                         help="Remote password for ssh access.")
@@ -504,42 +560,150 @@ if __name__ == '__main__':
     parser.add_argument("--mysql-host",
                         help="MySQL Host name or IP address "
                         "(only for control node)")
+    parser.add_argument("--vendor-os-release", default=None,
+                        help="Vendor specific OS release, e.g. rhel-osp7.")
 
     args = parser.parse_args()
-    ha_mode = args.ha_mode
     input_compute_name = args.compute_name
     input_uplink = args.uplink
-    hamode = True if ha_mode and ha_mode.lower() == 'true' else False
+    hamode = True if args.ha_mode is not None \
+             and args.ha_mode.lower() == 'true' else False
     local_compute = True if args.compute_local and \
                     args.compute_local.lower() == 'true' else False
     controller_only = True if args.controller_only and \
                       args.controller_only.lower() == 'true' or \
                       args.control_name is not None else False
 
+    install_control = False if args.compute_local or \
+                      args.compute_name is not None else True
+    control_node = "n/a" if not install_control else \
+                   args.control_name if args.control_name is not None else \
+                   "remote" if args.vendor_os_release == 'rhel-osp7' and \
+                   not args.controller_only \
+                   else "local"
+
+    if args.vendor_os_release == 'rhel-osp7' and \
+       not local_compute and not controller_only \
+       and args.control_name is None \
+       and args.compute_name is None:
+        if args.ha_mode is not None:
+            print("!!! WARNING: --ha-mode will be ignored.")
+            print("!!!         Installer will take care of proper HA config.")
+        control_ha_mode = "auto"
+        compute_nodes = "as per 'nova list' output"
+    else:
+        control_ha_mode = "n/a" if not install_control else args.ha_mode
+        compute_nodes = "n/a" if controller_only \
+                        else "local" if args.compute_local \
+                        else args.compute_name \
+                        if args.compute_name is not None \
+                        else "as per enabler_conf.ini"
+
     print("This script will install the Openstack Fabric Enabler as follows:")
-    print(" - install on control node: %s" %
-          ("no" if args.compute_local or args.compute_name is not None
-           else "yes"))
-    print(" - control node: %s" %
-          (args.control_name if args.control_name is not None else "local"))
-    print(" - control HA mode: %s" % (args.ha_mode))
+    print(" - install on control node: %s" % \
+          ("yes" if install_control else "no"))
+    print(" - control node(s): %s" % (control_node))
+    print(" - control HA mode: %s" % (control_ha_mode))
     print(" - install on compute nodes: %s" %
-          ("no" if controller_only else "yes"))
-    print(" - comput nodes: %s" %
-          ("local" if args.compute_local else args.compute_name
-           if args.compute_name is not None else "as per enabler_conf.ini"))
+        ("no" if controller_only else "yes"))
+    print(" - compute node(s): %s" % (compute_nodes))
     print(" - uplink: %s" % ("auto" if input_uplink is None else input_uplink))
-    user_answer = raw_input("Would you like to continue(y/n)? ").lower()
-    if user_answer.startswith('n'):
+    try: 
+        user_answer = raw_input("Would you like to continue(y/n)? ").lower()
+        if user_answer.startswith('n'):
+            sys.exit(1)
+    except KeyboardInterrupt:
+        print
         sys.exit(1)
 
     fabric_inst = NexusFabricEnablerInstaller(args.mysql_user,
                                               args.mysql_password,
                                               args.mysql_host)
-    os.chdir("../")
 
     fabric_inst.set_http_proxy(args.http_proxy)
     fabric_inst.set_https_proxy(args.https_proxy)
+    fabric_inst.set_vendor_os_release(args.vendor_os_release)
+
+    # RHEL-OSP7 specific behavior
+    if args.vendor_os_release == 'rhel-osp7':
+        root_helper = '' if os.geteuid() == 0 else 'sudo '
+
+        if args.remote_user is None:
+            args.remote_user = 'heat-admin'
+
+        extra_rpms_dir = "./extra-rpms"
+        pkgs = ["lldpad.x86_64",
+                "libconfig.x86_64"]
+
+        if local_compute or (args.control_name is None and controller_only):
+            # Install RPMs in extra_rpms_dir
+            cmd = "%s rpm -ihv %s/*" % (root_helper, extra_rpms_dir)
+            o, rc = fabric_inst .run_cmd_line(cmd, shell=True,
+                                              check_result=False)
+            if o is not None:
+                print(o)
+        else:
+            # Get extra RPMs
+            try:
+                os.mkdir(extra_rpms_dir)
+            except OSError as e:
+                if e.errno != errno.EEXIST:
+                    raise exc
+            os.chdir(extra_rpms_dir)
+            cmd = "%s yumdownloader %s" % (root_helper, " ".join(pkgs))
+            o, rc = fabric_inst.run_cmd_line(cmd, check_result=True)
+            if o is not None:
+                print(o)
+            os.chdir("../")
+
+        if not local_compute and not controller_only \
+           and args.control_name is None \
+           and args.compute_name is None:
+            # Install Fabric Enabler on controllers and computes
+            os.chdir("../")
+            first_controller = True
+            cmd = "nova list | grep ctlplane= "
+            o, rc = fabric_inst.run_cmd_line(cmd, shell=True,
+                                             check_result=False)
+            if o is None:
+                print 'NOTICE: the script could not retrieve overcloud information'
+                print '        This could be due to stackrc not being sourced'
+                print '        or overcloud not being deployed.'
+                print '        Please make sure overcloud is deployed and stackrc'
+                print '        is sourced before running this command. Thank you.'
+                sys.exit(1)
+            print(o)
+            for l in o.splitlines():
+                node_type = None
+                node_ip = None
+                s = l.split('|')
+                if 'compute' in s[2]:
+                    node_type = 'compute'
+                elif 'controller' in s[2]:
+                    node_type = 'controller'
+                node_ip = s[6].split('=')[1]
+                print 'Installing Fabric Enabler on', node_type, node_ip
+                if node_type == 'controller':
+                    fabric_inst.setup_control_remote(node_ip,
+                                                     args.remote_user,
+                                                     args.remote_password,
+                                                     not first_controller)
+                    first_controller = False
+                elif node_type == 'compute':
+                    fabric_inst.setup_compute_remote(node_ip, input_uplink,
+                                                     args.remote_user,
+                                                     args.remote_password)
+                else:
+                    print('WARNING: unknown node type for', node_ip)
+            # Done!
+            sys.exit(0)
+    elif args.vendor_os_release is not None:
+        print 'ERROR: Vendor OS release %s is not supported' % (args.vendor_os_release)
+        print '       Supported vendor OS releases are:'
+        print '         - rhel-osp7'
+        sys.exit(1)
+
+    os.chdir("../")
 
     if local_compute:
         # Compute-only enabler installation

@@ -35,7 +35,7 @@ generate_init () {
             if [ ! -f /usr/lib/systemd/system/ ]
             then
                 logger -t SETUP_LLDPAD "Copying lldpad systemd"
-                sudo cp $SRC_DIR/dfa/scripts/lldpad.service \
+                sudo cp -n $SRC_DIR/dfa/scripts/lldpad.service \
                         /usr/lib/systemd/system/
             fi
             act_stat=`sudo systemctl status lldpad | grep Loaded | grep enabled`

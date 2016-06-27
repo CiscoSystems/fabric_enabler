@@ -88,14 +88,16 @@ dist_data = {
 }
 
 
-def get_cmd_output(cmd):
+def get_cmd_output(cmd, check_result=True):
+    output = None
     final_cmd = shlex.split(cmd)
     try:
         output = subp.check_output(final_cmd)
     except subp.CalledProcessError as exc:
-        print("Error running %s: error: %s, output: %s" % (
-              cmd, exc.returncode, exc.output))
-        sys.exit(0)
+        if check_result:
+            print("Error running %s: error: %s, output: %s" % (
+                cmd, exc.returncode, exc.output))
+            sys.exit(0)
     except Exception as exc:
         print("Exception %s running command %s" % (cmd, exc))
         sys.exit(0)
@@ -121,9 +123,9 @@ def get_db_credentials(cfg_file):
         print('ERROR: Cannot open %s.', cfg_file)
         sys.exit(1)
 
-    value = parser.get('dfa_mysql', 'connection')
-
     try:
+        value = parser.get('dfa_mysql', 'connection')
+
         # Find location of pattern in connection parameter as shown below:
         # http://username:password@host/databasename?characterset=encoding'
         sobj = re.search(r"(://).*(@).*(/).*(\?)", value)
@@ -153,8 +155,11 @@ def get_db_credentials(cfg_file):
         charset = value[indices[3] + 1:].split('=')[1]
 
         return cred[0], cred[1], host, db_name, charset
+    except ConfigParser.NoOptionError as e:
+        print('ERROR: %s file error: %s' % (cfgfile, e))
+        sys.exit(1)
     except (ValueError, IndexError, AttributeError):
-        print('Failed to find mysql connections credentials.')
+        print('ERROR: failed to find mysql connections credentials.')
         sys.exit(1)
 
 
@@ -350,6 +355,23 @@ def get_mysql_cred():
 
     return mysql_user, mysql_password, mysql_host
 
+def do_rhel_osp7_customization(root_helper):
+    # Invoke script to do config file customization
+    path = (os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/scripts/')
+    for f in  ["/etc/neutron/neutron.conf",
+               "/usr/share/neutron/neutron-dist.conf",
+               "/usr/share/nova/nova-dist.conf",
+               "/etc/haproxy/haproxy.cfg"]:
+        cmd = "%s cp %s %s.bak" % (root_helper, f, f)
+        print(cmd)
+        get_cmd_output(cmd)
+    cmd = "%s python %s/%s" % (root_helper, path,
+                               "dfa_config_rhel_osp7.py")
+    get_cmd_output(cmd)
+    
+    # Restart HA proxy
+    cmd = "%s systemctl restart haproxy" % (root_helper)
+    get_cmd_output(cmd)
 
 usage = ('\n'
          'python dfa_prepare_setup.py --dir-path filepath1[,filepath2,...]'
@@ -382,6 +404,9 @@ if __name__ == '__main__':
     parser.add_option('--mysql-password',
                       type='string', dest='mysql_pass', default=mysqlpass,
                       help='MySQL password (only for a controller node.')
+    parser.add_option('--vendor-os-release',
+                      type='string', dest='vendor_os_release', default=None,
+                      help='Vendor specific OS release, e.g. rhel-osp7')
     (options, args) = parser.parse_args()
 
     node = options.node_function.lower()
@@ -398,5 +423,13 @@ if __name__ == '__main__':
     if node == 'ha-control':
         find_conf_and_modify(options.dir_path.lower(), root_helper)
 	node = 'control'
+
+    if (node == 'control' or node == 'ha-control') \
+       and options.vendor_os_release == "rhel-osp7":
+        dist = platform.dist()[0].lower()
+        if dist == 'redhat':
+            do_rhel_osp7_customization(root_helper)
+        else:
+            print("WARNING: no RedHat system, customization skipped.")
 
     copy_init_conf_files(node, root_helper)

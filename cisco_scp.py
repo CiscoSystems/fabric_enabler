@@ -86,6 +86,7 @@ class cisco_SCPClient(object):
         self._utime = None
         self.sanitize = sanitize
         self._dirtimes = {}
+        self.verbose = True
 
     def put(self, files, remote_path='.',
             recursive=False, preserve_times=False):
@@ -175,7 +176,8 @@ class cisco_SCPClient(object):
         for name in files:
             basename = os.path.basename(name)
             if (basename in not_copy_files or basename.endswith(".pyc")):
-                print "not copying %s\n" % basename
+                if self.verbose:
+                    print "not copying %s\n" % basename
                 continue
             (mode, size, mtime, atime) = self._read_stats(name)
             if self.preserve_times:
@@ -228,7 +230,8 @@ class cisco_SCPClient(object):
     def _send_recursive(self, files):
         for base in files:
             if (base in not_copy_list or base.endswith(".pyc")):
-                print "not copying %s\n" % base
+                if self.verbose:
+                    print "not copying %s\n" % base
                 continue
             if not os.path.isdir(base):
                 # filename mixed into the bunch
@@ -239,11 +242,13 @@ class cisco_SCPClient(object):
             for root, dirs, fls in os.walk(base):
                 sub_dirs = root.split('/')
                 if len(sub_dirs) > 1 and sub_dirs[1] in not_copy_dirs:
-                    print "not copying whole dir %s" % root
+                    if self.verbose:
+                        print "not copying whole dir %s" % root
                     continue
                 self._chdir(last_dir, root)
                 if (base.endswith(".pyc")):
-                    print "not copying %s\n" % base
+                    if self.verbose:
+                        print "not copying %s\n" % base
                     continue
                 self._send_files([os.path.join(root, f) for f in fls])
                 last_dir = root
@@ -412,6 +417,9 @@ class cisco_SCPClient(object):
                 os.utime(d, self._dirtimes[d])
         finally:
             self._dirtimes = {}
+
+    def set_verbose(self, verbose):
+        self.verbose = verbose
 
 
 class SCPException(Exception):
