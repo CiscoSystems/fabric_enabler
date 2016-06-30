@@ -1860,7 +1860,7 @@ def save_my_pid(cfg):
 def dfa_server():
     try:
         cfg = config.CiscoDFAConfig().cfg
-        logging.setup_logger('dfa_enabler', cfg)
+        logging.setup_logger('server', cfg)
         dfa = DfaServer(cfg)
         save_my_pid(cfg)
         dfa.create_threads()

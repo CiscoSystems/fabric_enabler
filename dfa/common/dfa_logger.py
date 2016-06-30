@@ -26,8 +26,8 @@ import sys
 # Rotating file size limit.
 ONEK = 1024
 ONEMEG = (1024 * 1024)
-MAX_BYTES = (5 * ONEMEG)
-BACKUP_COUNT = 10
+MAX_BYTES = (20 * ONEMEG)
+BACKUP_COUNT = 3
 DAYS = 'D'
 SECONDS = 'S'
 MINUTES = 'M'
@@ -73,7 +73,11 @@ def setup_logger(project, cfg):
 
     # Set log file path name.
     log_dir = cfg.dfa_log.log_dir
-    log_file = cfg.dfa_log.log_file
+    if cfg.dfa_log.log_file_prefix:
+        log_file = "%s_%s.log" % (cfg.dfa_log.log_file_prefix, project)
+    else:
+        log_file = cfg.dfa_log.log_file
+                                  
     if log_dir and log_file:
         try:
             if not os.path.exists(log_dir):

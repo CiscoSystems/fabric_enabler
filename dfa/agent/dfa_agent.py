@@ -217,7 +217,7 @@ def main():
 
     # Setup logger
     cfg = config.CiscoDFAConfig().cfg
-    logging.setup_logger('dfa_enabler', cfg)
+    logging.setup_logger('agent', cfg)
 
     # Get pid of the process and save it.
     save_my_pid(cfg)
