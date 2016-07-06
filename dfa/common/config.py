@@ -110,6 +110,7 @@ default_dcnm_opts = {
         'vlan_reuse_timeout': const.VLAN_REUSE_TIMEOUT,
         'dcnm_dhcp': True,
         'dcnm_net_create': False,
+        'orchestrator_id': com_const.ORCHESTRATOR_ID
     },
 }
 

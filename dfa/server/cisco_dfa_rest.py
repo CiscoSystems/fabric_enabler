@@ -85,6 +85,43 @@ class DFARESTClient(object):
                 return v1.group(3) >= v2.group(3)
         return False
 
+    def get_segmentid_range(self, orchestrator_id):
+        """get segment id range from DCNM.
+        """
+        url = "%s/%s" % (self._segmentid_ranges_url, orchestrator_id)
+
+        res = self._send_request('GET', url, None, 'segment-id range')
+        if res and res.status_code in self._resp_ok:
+            return res.json()
+
+    def set_segmentid_range(self, orchestrator_id, segid_min, segid_max):
+        """set segment id range in DCNM
+        """
+        url = self._segmentid_ranges_url
+
+        payload = { 'orchestratorId': orchestrator_id,
+                    'segmentIdRanges': "%s-%s" % (segid_min, segid_max)}
+
+        res = self._send_request('POST', url, payload, 'segment-id range')
+        if not (res and res.status_code in self._resp_ok):
+            LOG.error(("Failed to set segment id range for orchestrator" +
+                       "%s on DCNM: %s"), orchestrator_id, res.text)
+            raise dexc.DfaClientRequestFailed(reason=res.text)
+
+    def update_segmentid_range(self, orchestrator_id, segid_min, segid_max):
+        """update segment id range in DCNM
+        """
+        url = "%s/%s" % (self._segmentid_ranges_url, orchestrator_id)
+
+        payload = { 'orchestratorId': orchestrator_id,
+                    'segmentIdRanges': "%s-%s" % (segid_min, segid_max)}
+
+        res = self._send_request('PUT', url, payload, 'segment-id range')
+        if not (res and res.status_code in self._resp_ok):
+            LOG.error(("Failed to update segment id range for orchestrator" +
+                       " %s on DCNM: %s"), orchestrator_id, res.text)
+            raise dexc.DfaClientRequestFailed(reason=res.text)
+
     def _set_default_cfg_profile(self):
         """Set default network config profile.
 
@@ -160,7 +197,7 @@ class DFARESTClient(object):
         else:
             self._default_md = "md0"
 
-    def _create_org(self, name, desc):
+    def _create_org(self, orch_id, name, desc):
         """Create organization on the DCNM.
 
         :param name: Name of organization
@@ -170,7 +207,7 @@ class DFARESTClient(object):
         payload = {
             "organizationName": name,
             "description": name if len(desc) == 0 else desc,
-            "orchestrationSource": "Openstack Controller"}
+            "orchestrationSource": orch_id}
 
         return self._send_request('POST', url, payload, 'organization')
 
@@ -665,16 +702,17 @@ class DFARESTClient(object):
                       ({'part': partition_name, 'res': res}))
             raise dexc.DfaClientRequestFailed(reason=res)
 
-    def create_project(self, org_name, part_name, dci_id, desc=None):
+    def create_project(self, orch_id, org_name, part_name, dci_id, desc=None):
         """Create project on the DCNM.
 
+        :param orch_id: orchestrator ID
         :param org_name: name of organization.
         :param part_name: name of partition.
         :param dci_id: Data Center interconnect id.
         :param desc: description of project.
         """
         desc = desc or org_name
-        res = self._create_org(org_name, desc)
+        res = self._create_org(orch_id, org_name, desc)
         if res and res.status_code in self._resp_ok:
             LOG.debug("Created %s organization in DCNM.", org_name)
         else:
@@ -900,5 +938,7 @@ class DFARESTClient(object):
                                   (protocol, self._ip)) +
                                  '/%s/partitions/%s/networks/vlan/%s/'
                                  'mobility-domain/%s')
+        self._segmentid_ranges_url = ('%s://%s/rest/settings/segmentid-ranges' %
+                                      (protocol, self._ip))
         self._login_url = '%s://%s/rest/logon' % (protocol, self._ip)
         self._logout_url = '%s://%s/rest/logout' % (protocol, self._ip)

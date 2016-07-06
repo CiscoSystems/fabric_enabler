@@ -300,13 +300,33 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         self.PRI_MEDIUM_START = 20
         self.PRI_LOW_START = 30
 
+        # Create DCNM client
         self._gateway_mac = cfg.dcnm.gateway_mac
         dcnm_ip = cfg.dcnm.dcnm_ip
         dcnm_amqp_user = cfg.dcnm.dcnm_amqp_user
         dcnm_password = cfg.dcnm.dcnm_password
         self.dcnm_dhcp = cfg.dcnm.dcnm_dhcp
-
         self.dcnm_client = cdr.DFARESTClient(cfg)
+
+        # Register segmentation id pool with DCNM
+        orch_id = cfg.dcnm.orchestrator_id
+        try:
+            segid_range = self.dcnm_client.get_segmentid_range(orch_id)
+            if segid_range is None:
+                self.dcnm_client.set_segmentid_range(orch_id, seg_id_min,
+                                                     seg_id_max)
+            else:
+                conf_min = int(segid_range["segmentIdRanges"].split("-")[0])
+                conf_max = int(segid_range["segmentIdRanges"].split("-")[1])
+                if conf_min != seg_id_min or conf_max != seg_id_max:
+                    self.dcnm_client.update_segmentid_range(orch_id,
+                                                            seg_id_min,
+                                                            seg_id_max)
+        except dexc.DfaClientRequestFailed as exc:
+            LOG.critical(("Segment ID range could not be created/updated" +
+                         " on DCNM: %s") % (exc))
+            raise SystemExit(exc)
+
         self.populate_cfg_dcnm(cfg, self.dcnm_client)
         self.populate_event_queue(cfg, self.pqueue)
 
@@ -495,7 +515,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                       len(':'.join((proj_name, part_name))))
             return
         try:
-            self.dcnm_client.create_project(proj_name, part_name, dci_id,
+            self.dcnm_client.create_project(self.cfg.dcnm.orchestrator_id,
+                                            proj_name, part_name, dci_id,
                                             proj.description)
         except dexc.DfaClientRequestFailed:
             # Failed to send create project in DCNM.

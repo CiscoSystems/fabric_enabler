@@ -60,10 +60,11 @@ class TestCiscoDFAClient(base.BaseTestCase):
     def test_create_project(self):
         """Test create project."""
 
+        orch_id = 'Openstack'
         org_name = 'Cisco'
         part_name = self.dcnm_client._part_name
         dci = 100
-        self.dcnm_client.create_project(org_name, part_name, dci)
+        self.dcnm_client.create_project(orch_id, org_name, part_name, dci)
         call_cnt = self.dcnm_client._send_request.call_count
         self.assertEqual(2, call_cnt)
 
