@@ -38,6 +38,7 @@ class DFARESTClient(object):
 
     def __init__(self, cfg):
         self._base_ver = '7.1(0)'
+        self._is_iplus = False
         self._ip = cfg.dcnm.dcnm_ip
         self._user = cfg.dcnm.dcnm_user
         self._pwd = cfg.dcnm.dcnm_password
@@ -62,28 +63,32 @@ class DFARESTClient(object):
         self.dcnm_http_or_https = self.get_dcnm_http_or_https()
         # urls
         self.fill_urls(self.dcnm_http_or_https)
+
+        # Get and check DCNM version
         self._cur_ver = self.get_version()
+        self._detect_iplus()
 
         # Update the default network profile based on version of DCNM.
         self._set_default_cfg_profile()
         self._default_md = None
 
-    @property
-    def is_iplus(self):
-        """Check the DCNM version."""
+    def _detect_iplus(self):
+        """Check the DCNM version and determine if it's for iplus"""
 
         ver_expr = "([0-9]+)\.([0-9]+)\((.*)\)"
         v1 = re.match(ver_expr, self._cur_ver)
         v2 = re.match(ver_expr, self._base_ver)
 
         if int(v1.group(1)) > int(v2.group(1)):
-            return True
+            self._is_iplus = True
         elif int(v1.group(1)) == int(v2.group(1)):
             if int(v1.group(2)) > int(v2.group(2)):
-                return True
+                self._is_iplus = True
             elif int(v1.group(2)) == int(v2.group(2)):
-                return v1.group(3) >= v2.group(3)
-        return False
+                self._is_iplus = v1.group(3) >= v2.group(3)
+
+        LOG.info("DCNM version: %s, iplus: %s" %
+                 (self._cur_ver, self._is_iplus))
 
     def _failure_msg(self, response):
         return "[%s] %s" % (response.status_code, response.text)
@@ -249,7 +254,7 @@ class DFARESTClient(object):
 
         # Check the DCNM version and find out whether it is need to have
         # extra payload for the new version when creating/updating a partition.
-        if self.is_iplus:
+        if self._is_iplus:
             # Need to add extra payload for the new version.
             enable_dci = "true" if dci_id and int(dci_id) != 0 else "false"
             extra_payload = {
@@ -498,7 +503,7 @@ class DFARESTClient(object):
         if dhcp_range:
             network_info["dhcpScope"] = dhcp_scopes
 
-        if self.is_iplus:
+        if self._is_iplus:
             # Need to add the vrf name to the network info
             prof = self._config_profile_get(network.config_profile)
             if prof and prof.get('profileSubType') == 'network:universal':
@@ -580,7 +585,7 @@ class DFARESTClient(object):
             network_info["dhcpScope"] = dhcp_scopes
         if hasattr(subnet, 'secondary_gw'):
             network_info["secondaryGateway"] = subnet.secondary_gw
-        if self.is_iplus:
+        if self._is_iplus:
             # Need to add the vrf name to the network info
             prof = self._config_profile_get(network.config_profile)
             if prof and prof.get('profileSubType') == 'network:universal':
