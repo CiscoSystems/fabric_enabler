@@ -17,11 +17,13 @@
 #
 # Service Constants
 
+import dfa.server.services.constants as services_const
+
 AUTO_NWK_CREATE = True
 DEVICE = ''
 SCHED_POLICY = 'max_sched'
-VLAN_ID_MIN = 2550
-VLAN_ID_MAX = 2650
+VLAN_ID_MIN = services_const.VLAN_ID_MIN
+VLAN_ID_MAX = services_const.VLAN_ID_MAX
 MOB_DOMAIN_NAME = 'md0'
 HOST_PROF = 'serviceNetworkUniversalDynamicRoutingESProfile'
 HOST_FWD_MODE = 'proxy-gateway'
