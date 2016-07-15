@@ -370,6 +370,7 @@ class DfaFwInfo(db.Base):
 
     fw_id = sa.Column(sa.String(36), primary_key=True)
     name = sa.Column(sa.String(255))
+    fw_type = sa.Column(sa.String(8))
     tenant_id = sa.Column(sa.String(36))
     in_network_id = sa.Column(sa.String(36))
     in_service_node_ip = sa.Column(sa.String(16))
@@ -524,6 +525,17 @@ class DfaDBMixin(object):
             LOG.error('More than one enty found for seg-id %(id)s.' % (
                 {'id': segid}))
 
+    def get_network_by_tenant_id(self, tenant_id):
+        session = db.get_session()
+        try:
+            with session.begin(subtransactions=True):
+                net = session.query(DfaNetwork).filter_by(
+                    tenant_id=tenant_id).all()
+            return net
+        except orm_exc.NoResultFound:
+            LOG.info('Network in %(tenant)s does not exist' % (
+                {'tenant': tenant_id}))
+
     def update_network_db(self, net_id, result):
         session = db.get_session()
         with session.begin(subtransactions=True):
@@ -654,6 +666,7 @@ class DfaDBMixin(object):
         with session.begin(subtransactions=True):
             fw = DfaFwInfo(fw_id=fw_id,
                            name=fw_data.get('name'),
+                           fw_type=fw_data.get('fw_type'),
                            tenant_id=fw_data.get('tenant_id'),
                            in_network_id=fw_data.get('in_network_id'),
                            in_service_node_ip=fw_data.get('in_service_ip'),
@@ -742,6 +755,7 @@ class DfaDBMixin(object):
         fw_dict['dcnm_status'] = alloc.dcnm_provision_status
         fw_dict['device_status'] = alloc.device_provision_status
         fw_dict['name'] = alloc.name
+        fw_dict['fw_type'] = alloc.fw_type
         fw_dict['fw_mgmt_ip'] = alloc.fw_mgmt_ip
         fw_dict['result'] = alloc.result
         fw_dict['fw_id'] = alloc.fw_id

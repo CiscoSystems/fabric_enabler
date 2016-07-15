@@ -241,6 +241,18 @@ class DfaNeutronHelper(object):
                       {'name': name, 'exc': str(exc)})
             return None
 
+        ret = self.add_intf_router(rout_id, tenant_id, subnet_lst)
+        if not ret:
+            try:
+                ret = self.neutronclient.delete_router(rout_id)
+            except Exception as exc:
+                LOG.error("Failed to delete router %(name)s, Exc %(exc)s",
+                          {'name': name, 'exc': str(exc)})
+            return None
+        return rout_id
+
+    def add_intf_router(self, rout_id, tenant_id, subnet_lst):
+        ''' Add the interfaces to a router '''
         try:
             for subnet_id in subnet_lst:
                 body = {'subnet_id': subnet_id}
@@ -250,16 +262,28 @@ class DfaNeutronHelper(object):
         except Exception as exc:
             LOG.error("Failed to create router intf ID %(id)s, Exc %(exc)s",
                       {'id': rout_id, 'exc': str(exc)})
-            try:
-                ret = self.neutronclient.delete_router(rout_id)
-            except Exception as exc:
-                LOG.error("Failed to delete router %(name)s, Exc %(exc)s",
-                          {'name': name, 'exc': str(exc)})
-            return None
-        return rout_id
+            return False
+        return True
 
     # Passed
     def delete_router(self, name, tenant_id, rout_id, subnet_lst):
+        '''
+        Delete the openstack router and remove the interfaces attached to it
+        '''
+        ret = self.delete_intf_router(name, tenant_id, rout_id, subnet_lst)
+        if not ret:
+            return False
+
+        try:
+            ret = self.neutronclient.delete_router(rout_id)
+        except Exception as exc:
+            LOG.error("Failed to delete router %(name)s ret %(ret)s "
+                      "Exc %(exc)s",
+                      {'name': name, 'ret': str(ret), 'exc': str(exc)})
+            return False
+        return True
+
+    def delete_intf_router(self, name, tenant_id, rout_id, subnet_lst):
         '''
         Delete the openstack router and remove the interfaces attached to it
         '''
@@ -273,13 +297,24 @@ class DfaNeutronHelper(object):
             LOG.error("Failed to delete router interface %(name)s, "
                       " Exc %(exc)s", {'name': name, 'exc': str(exc)})
             return False
+        return True
 
+    def delete_router_by_name(self, rtr_name, tenant_id):
+        '''
+        Delete the openstack router given its name and remove the interfaces.
+        The interfaces should be already removed prior to calling this
+        function.
+        '''
         try:
-            ret = self.neutronclient.delete_router(rout_id)
+            rtr_list = self.neutronclient.list_routers()
+            rtr_list = rtr_list.get('routers')
+            for rtr in rtr_list:
+                if rtr_name == rtr['name']:
+                    ret = self.neutronclient.delete_router(rtr['id'])
         except Exception as exc:
-            LOG.error("Failed to delete router %(name)s ret %(ret)s "
+            LOG.error("Failed to get and delete router by name %(name)s, "
                       "Exc %(exc)s",
-                      {'name': name, 'ret': str(ret), 'exc': str(exc)})
+                      {'name': rtr_name, 'exc': str(exc)})
             return False
         return True
 
@@ -308,6 +343,16 @@ class DfaNeutronHelper(object):
             LOG.error("Failed to get router port subnet %(net)s, Exc: %(exc)s",
                       {'net': subnet_id, 'exc': str(exc)})
             return None
+
+    def get_rtr_name(self, router_id):
+        ''' Incomplete '''
+        try:
+            body = {}
+            rout = self.neutronclient.show_router(router_id, body=body)
+            return rout.get('router').get('name')
+        except Exception as exc:
+            LOG.error("Failed to show router interface %(id)s Exc %(exc)s",
+                      {'id': router_id, 'exc': str(exc)})
 
     def find_rtr_namespace(self, rout_id):
         ''' Find the namespace associated with the router '''
