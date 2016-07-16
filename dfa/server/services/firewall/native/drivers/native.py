@@ -73,16 +73,21 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
         '''
         return 50
 
-    def attach_intf_router(self, tenant_id, tenant_name, rtr_id):
-        ''' Routine to attach the interface to the router '''
+    def create_router(self, tenant_id, tenant_name):
+        ''' Routine to create a Openstack router for the FW '''
         in_sub = self.get_in_subnet_id(tenant_id)
         out_sub = self.get_out_subnet_id(tenant_id)
         # Modify Hard coded Name fixme
         subnet_lst = set()
         subnet_lst.add(in_sub)
         subnet_lst.add(out_sub)
-        ret = self.os_helper.add_intf_router(rtr_id, tenant_id, subnet_lst)
-        return ret, in_sub, out_sub
+        rtr_list = self.os_helper.get_rtr_by_name('FW_RTR_' + tenant_name)
+        if len(rtr_list) == 0:
+            rout_id = self.os_helper.create_router('FW_RTR_' + tenant_name,
+                                                   tenant_id, subnet_lst)
+        else:
+            rout_id = rtr_list[0].get('id')
+        return rout_id, in_sub, out_sub
 
     def get_rtr_id(self, tenant_id, tenant_name):
         ''' Retrieve the router ID '''
@@ -96,24 +101,24 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
                 rout_id = rtr_list[0].get('id')
         return rout_id
 
-    def delete_intf_router(self, tenant_id, tenant_name, rout_id):
+    def delete_router(self, tenant_id, tenant_name):
         ''' Routine to delete the router '''
         in_sub = self.get_in_subnet_id(tenant_id)
         out_sub = self.get_out_subnet_id(tenant_id)
+        # Modify Hard coded Name fixme
         subnet_lst = set()
         subnet_lst.add(in_sub)
         subnet_lst.add(out_sub)
         rout_id = None
         rout_id = self.get_rtr_id(tenant_id, tenant_name)
         if rout_id is not None:
-            ret = self.os_helper.delete_intf_router(tenant_name, tenant_id,
-                                                    rout_id, subnet_lst)
+            ret = self.os_helper.delete_router('FW_RTR_' + tenant_name,
+                                               tenant_id, rout_id, subnet_lst)
             if not ret:
-                LOG.error("Failed to delete router intf id %(rout)s, tenant "
+                LOG.error("Failed to delete router id %(rout)s, tenant "
                           "%(tenant)s", {'rout': rout_id, 'tenant': tenant_id})
             return ret
         else:
-            LOG.error("Invalid router ID, can't delete interface from router")
             return False
 
     def prepare_rout_vm_msg(self, tenant_id, tenant_name, rout_id, net_id,
@@ -200,11 +205,9 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
         # self.get_vlan_in_out(tenant_id)
         # Check if router is already added and only then add, needed for
         # restart cases since native doesn't have a special DB fixme
-        rout_id = data.get('router_id')
-        ret, in_sub, out_sub = self.attach_intf_router(tenant_id,
-                                                       tenant_name, rout_id)
-        if not ret:
-            LOG.error("Native FW: Attach intf router failed for tenant %s",
+        rout_id, in_sub, out_sub = self.create_router(tenant_id, tenant_name)
+        if rout_id is None:
+            LOG.error("Native FW: Create router failed for tenant %s",
                       tenant_id)
             return False
         self.create_tenant_dict(tenant_id, rout_id)
@@ -213,9 +216,13 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
             self.get_in_ip_addr(tenant_id)
         out_ip, out_start, out_end, out_gw, out_sec_gw = \
             self.get_out_ip_addr(tenant_id)
+        dummy_net, dummy_subnet, dummy_rtr = (
+            self.get_dummy_router_net(tenant_id))
+        dummy_cidr = self.os_helper.get_subnet_cidr(dummy_subnet)
         excl_list = []
         excl_list.append(in_ip)
         excl_list.append(out_ip)
+        excl_list.append(dummy_cidr.split('/')[0])
 
         # Program DCNM to update profile's static IP address on OUT part
         ip_list = self.os_helper.get_subnet_nwk_excl(tenant_id, excl_list)
@@ -228,7 +235,7 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
         if not ret:
             LOG.error("Unable to update DCNM ext profile with static route %s",
                       rout_id)
-            ret = self.delete_intf_router(tenant_id, tenant_name, rout_id)
+            ret = self.delete_router(tenant_id, tenant_name)
             return False
 
         # Program the default GW in router namespace
@@ -242,7 +249,7 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
                 cnt = cnt + 1
         if not ret:
             LOG.error("Unable to program default GW in router %s", rout_id)
-            ret = self.delete_intf_router(tenant_id, tenant_name, rout_id)
+            ret = self.delete_router(tenant_id, tenant_name)
             return False
 
         # Program router namespace to have all tenant networks to be routed
@@ -254,7 +261,7 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
             if not ret:
                 LOG.error("Unable to program default router next hop %s",
                           rout_id)
-                ret = self.delete_intf_router(tenant_id, tenant_name, rout_id)
+                ret = self.delete_router(tenant_id, tenant_name)
                 return False
 
         # Send message for router port auto config for in service nwk
@@ -265,7 +272,7 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
             LOG.error("Sending rout port message failed for in network "
                       "tenant %(tenant)s subnet %(seg)s",
                       {'tenant': tenant_id, 'seg': in_seg})
-            ret = self.delete_intf_router(tenant_id, tenant_name, rout_id)
+            ret = self.delete_router(tenant_id, tenant_name)
             return False
 
         # Send message for router port auto config for out service nwk
@@ -283,7 +290,7 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
                 LOG.error("Error case, sending rout port message for in nwk"
                           " tenant %(tenant)s subnet %(seg)s",
                           {'tenant': tenant_id, 'seg': in_seg})
-            ret = self.delete_intf_router(tenant_id, tenant_name, rout_id)
+            ret = self.delete_router(tenant_id, tenant_name)
             return False
         return True
 
@@ -311,7 +318,7 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
         in_sub = self.get_in_subnet_id(tenant_id)
         out_sub = self.get_out_subnet_id(tenant_id)
 
-        rout_id = data.get('router_id')
+        rout_id = self.get_rtr_id(tenant_id, tenant_name)
         if rout_id is None:
             LOG.error("Router ID unknown for tenant %s", tenant_id)
             return False
@@ -332,7 +339,7 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
                       {'tenant': tenant_id, 'seg': out_seg})
         # Usually sending message to queue doesn't fail!!!
 
-        rout_ret = self.delete_intf_router(tenant_id, tenant_name, rout_id)
+        rout_ret = self.delete_router(tenant_id, tenant_name)
         if not rout_ret:
             LOG.error("Unable to delete router for tenant %s, error case",
                       tenant_id)
@@ -367,11 +374,15 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
             return False
         out_ip, out_start, out_end, out_gw, out_sec_gw = \
             self.get_out_ip_addr(tenant_id)
+        dummy_net, dummy_subnet, dummy_rtr = (
+            self.get_dummy_router_net(tenant_id))
+        dummy_cidr = self.os_helper.get_subnet_cidr(dummy_subnet)
 
         # Program DCNM to update profile's static IP address on OUT part
         excl_list = []
         excl_list.append(in_ip)
         excl_list.append(out_ip)
+        excl_list.append(dummy_cidr.split('/')[0])
         subnet_lst = self.os_helper.get_subnet_nwk_excl(tenant_id, excl_list,
                                                         excl_part=True)
         # This count is for telling DCNM to insert the static route in a
@@ -440,11 +451,17 @@ class NativeFw(base.BaseDrvr, FP.FabricApi):
             return False
         out_ip, out_start, out_end, out_gw, out_sec_gw = \
             self.get_out_ip_addr(tenant_id)
+        dummy_net, dummy_subnet, dummy_rtr = (
+            self.get_dummy_router_net(tenant_id))
+        dummy_cidr = self.os_helper.get_subnet_cidr(dummy_subnet)
         excl_list = []
         excl_list.append(in_ip)
         excl_list.append(out_ip)
+        excl_list.append(dummy_cidr.split('/')[0])
         subnet_lst = self.os_helper.get_subnet_nwk_excl(tenant_id, excl_list,
                                                         excl_part=True)
+        # The dummy route anyway would not have got added, so no need to add
+        # it to excl_list
         ret = self.os_helper.remove_rtr_nwk_next_hop(rout_id, in_gw,
                                                      subnet_lst, excl_list)
         if not ret:

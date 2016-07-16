@@ -530,7 +530,6 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                                            dci_id=dci_id)
             LOG.debug('project %(name)s %(dci)s %(desc)s', (
                 {'name': proj_name, 'dci': dci_id, 'desc': proj.description}))
-        self.project_create_notif(proj_id, proj_name)
 
     def project_update_event(self, proj_info):
         """Process project update event.

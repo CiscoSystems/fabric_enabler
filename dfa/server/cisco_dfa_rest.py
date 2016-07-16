@@ -107,8 +107,8 @@ class DFARESTClient(object):
         """
         url = self._segmentid_ranges_url
 
-        payload = {'orchestratorId': orchestrator_id,
-                   'segmentIdRanges': "%s-%s" % (segid_min, segid_max)}
+        payload = { 'orchestratorId': orchestrator_id,
+                    'segmentIdRanges': "%s-%s" % (segid_min, segid_max)}
 
         res = self._send_request('POST', url, payload, 'segment-id range')
         if not (res and res.status_code in self._resp_ok):
@@ -121,8 +121,8 @@ class DFARESTClient(object):
         """
         url = "%s/%s" % (self._segmentid_ranges_url, orchestrator_id)
 
-        payload = {'orchestratorId': orchestrator_id,
-                   'segmentIdRanges': "%s-%s" % (segid_min, segid_max)}
+        payload = { 'orchestratorId': orchestrator_id,
+                    'segmentIdRanges': "%s-%s" % (segid_min, segid_max)}
 
         res = self._send_request('PUT', url, payload, 'segment-id range')
         if not (res and res.status_code in self._resp_ok):
@@ -315,11 +315,7 @@ class DFARESTClient(object):
             "vrfName": ':'.join((org_name, part_name)),
             "configArg": cfg_args}
 
-        res = self._send_request(operation, url, payload, 'partition')
-        if res and res.status_code in self._resp_ok:
-            return True
-        else:
-            return False
+        return self._send_request(operation, url, payload, 'partition')
 
     def _delete_org(self, org_name):
         """Send organization delete request to DCNM.
@@ -950,7 +946,7 @@ class DFARESTClient(object):
                                   (protocol, self._ip)) +
                                  '/%s/partitions/%s/networks/vlan/%s/'
                                  'mobility-domain/%s')
-        self._segmentid_ranges_url = (
-            '%s://%s/rest/settings/segmentid-ranges' % (protocol, self._ip))
+        self._segmentid_ranges_url = ('%s://%s/rest/settings/segmentid-ranges' %
+                                      (protocol, self._ip))
         self._login_url = '%s://%s/rest/logon' % (protocol, self._ip)
         self._logout_url = '%s://%s/rest/logout' % (protocol, self._ip)

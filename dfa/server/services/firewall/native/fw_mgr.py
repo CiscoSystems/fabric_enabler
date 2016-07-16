@@ -91,7 +91,6 @@ class FwMapAttr(object):
         self.fw_created = False
         self.fw_drvr_status = False
         self.fw_id = None
-        self.fw_type = None
         self.tenant_name = None
         self.fw_name = None
         self.mutex_lock = sys_utils.lock()
@@ -152,15 +151,13 @@ class FwMapAttr(object):
         else:
             return True
 
-    def create_fw(self, proj_name, pol_id, fw_id, fw_name, fw_type, rtr_id):
+    def create_fw(self, proj_name, pol_id, fw_id, fw_name):
         ''' Fills up the local attributes when FW is created '''
         self.tenant_name = proj_name
         self.fw_id = fw_id
         self.fw_name = fw_name
         self.fw_created = True
         self.active_pol_id = pol_id
-        self.fw_type = fw_type
-        self.router_id = rtr_id
 
     def delete_fw(self, fw_id):
         ''' Deletes the FW local attributes '''
@@ -184,12 +181,11 @@ class FwMapAttr(object):
             successfully.
         '''
         LOG.info("In fw_complete needed %(fw_created)s %(active_policy_id)s"
-                 " %(is_fw_drvr_created)s %(pol_present)s %(fw_type)s",
+                 " %(is_fw_drvr_created)s %(pol_present)s",
                  {'fw_created': self.fw_created,
                   'active_policy_id': self.active_pol_id,
                   'is_fw_drvr_created': self.is_fw_drvr_created(),
-                  'pol_present': self.active_pol_id in self.policies,
-                  'fw_type': self.fw_type})
+                  'pol_present': self.active_pol_id in self.policies})
         if self.active_pol_id is not None:
             LOG.info("In Drvr create needed %(len_policy)s %(one_rule)s",
                      {'len_policy':
@@ -197,7 +193,7 @@ class FwMapAttr(object):
                       'one_rule':
                       self.one_rule_present(self.active_pol_id)})
         return self.fw_created and self.active_pol_id and (
-            self.is_fw_drvr_created()) and self.fw_type and (
+            self.is_fw_drvr_created()) and (
             self.active_pol_id in self.policies) and (
             len(self.policies[self.active_pol_id]['rule_dict'])) > 0 and (
             self.one_rule_present(self.active_pol_id))
@@ -209,12 +205,11 @@ class FwMapAttr(object):
             done.
         '''
         LOG.info("In Drvr create needed %(fw_created)s %(active_policy_id)s"
-                 " %(is_fw_drvr_created)s %(pol_present)s %(fw_type)s",
+                 " %(is_fw_drvr_created)s %(pol_present)s",
                  {'fw_created': self.fw_created,
                   'active_policy_id': self.active_pol_id,
                   'is_fw_drvr_created': self.is_fw_drvr_created(),
-                  'pol_present': self.active_pol_id in self.policies,
-                  'fw_type': self.fw_type})
+                  'pol_present': self.active_pol_id in self.policies})
         if self.active_pol_id is not None and (
            self.active_pol_id in self.policies):
             LOG.info("In Drvr create needed %(len_policy)s %(one_rule)s",
@@ -223,7 +218,7 @@ class FwMapAttr(object):
                       'one_rule':
                       self.one_rule_present(self.active_pol_id)})
         return self.fw_created and self.active_pol_id and (
-            not self.is_fw_drvr_created()) and self.fw_type and (
+            not self.is_fw_drvr_created()) and (
             self.active_pol_id in self.policies) and (
             len(self.policies[self.active_pol_id]['rule_dict'])) > 0 and (
             self.one_rule_present(self.active_pol_id))
@@ -261,8 +256,6 @@ class FwMapAttr(object):
         fw_dict['fw_id'] = self.fw_id
         fw_dict['fw_name'] = self.fw_name
         fw_dict['firewall_policy_id'] = self.active_pol_id
-        fw_dict['fw_type'] = self.fw_type
-        fw_dict['router_id'] = self.router_id
         # When Firewall and Policy are both deleted and the SM is doing a
         # retry (maybe DCNM Out partition could not be deleted) during
         # which without this check, it throws an exception since
@@ -273,13 +266,6 @@ class FwMapAttr(object):
         for rule in pol_dict['rule_dict']:
             fw_dict['rules'][rule] = self.rules[rule]
         return fw_dict
-
-    def update_fw_params(self, rtr_id=-1, fw_type=-1):
-        ''' Updates the FW parameters '''
-        if rtr_id != -1:
-            self.router_id = rtr_id
-        if fw_type != -1:
-            self.fw_type = fw_type
 
 
 class FwMgr(dev_mgr.DeviceMgr):
@@ -302,7 +288,6 @@ class FwMgr(dev_mgr.DeviceMgr):
             'firewall_policy.create.end': self.fw_policy_create,
             'firewall_policy.delete.end': self.fw_policy_delete,
             'firewall.create.end': self.fw_create,
-            'firewall.update.end': self.fw_update,
             'firewall.delete.end': self.fw_delete})
         self.fwid_attr = {}
         self.pid_dict = {}
@@ -338,46 +323,14 @@ class FwMgr(dev_mgr.DeviceMgr):
         if not self.fw_init:
             return
         self.nwk_create_notif(tenant_id, tenant_name, cidr)
-        # Check using Openstack API's that TE/EW Router exists. If not create.
-        # This is to take care of cases, when a user removes all networks
-        # and then w/o deleting project, starts creating networks again.
-        # This check is a small optimization. Ideally a cache of all networks
-        # for a tenant is more apt.
-        if tenant_id not in self.fwid_attr or (
-           not self.fwid_attr[tenant_id].is_fw_complete()):
-            rtr_name = '_'.join([fw_constants.TENANT_EDGE_RTR, tenant_name])
-            net_lst = dfa_dbm.DfaDBMixin.get_network_by_tenant_id(self,
-                                                                  tenant_id)
-            # First network created
-            if len(net_lst) is 1:
-                rtr_lst = self.os_helper.get_rtr_by_name(rtr_name)
-                if len(rtr_lst) is 0:
-                    self.os_helper.create_router(rtr_name, tenant_id, [])
 
     def nwk_del_notif(self, tenant_id, tenant_name, net_id):
         ''' Network delete notification '''
         if not self.fw_init:
             return
         self.nwk_delete_notif(tenant_id, tenant_name, net_id)
-        # IF there's a active FW, don't delete FW router
-        if tenant_id not in self.fwid_attr or (
-           not self.fwid_attr[tenant_id].is_fw_complete()):
-            net_lst = dfa_dbm.DfaDBMixin.get_network_by_tenant_id(self,
-                                                                  tenant_id)
-            if len(net_lst) is 0:
-                rtr_name = '_'.join([fw_constants.TENANT_EDGE_RTR,
-                                     tenant_name])
-                self.os_helper.delete_router_by_name(rtr_name, tenant_id)
 
-    def project_create_notif(self, tenant_id, tenant_name):
-        ''' Tenant Create notification '''
-        if not self.fw_init:
-            return
-        self.os_helper.create_router('_'.join([fw_constants.TENANT_EDGE_RTR,
-                                               tenant_name]),
-                                     tenant_id, [])
-
-    def _create_fw_fab_dev_te(self, tenant_id, drvr_name, fw_dict):
+    def _create_fw_fab_dev(self, tenant_id, drvr_name, fw_dict):
         '''
             This routine calls the fabric class to prepare the fabric when
             a firewall is created. It also calls the device manager to
@@ -385,9 +338,12 @@ class FwMgr(dev_mgr.DeviceMgr):
             result.
         '''
         is_fw_virt = self.is_device_virtual()
-        ret = self.fabric.prepare_fabric_fw(tenant_id, fw_dict, is_fw_virt,
+        ret = self.fabric.prepare_fabric_fw(tenant_id,
+                                            fw_dict.get('tenant_name'),
+                                            fw_dict.get('fw_id'),
+                                            fw_dict.get('fw_name'),
+                                            is_fw_virt,
                                             fw_constants.RESULT_FW_CREATE_INIT)
-
         if not ret:
             LOG.error("Prepare Fabric failed")
             return
@@ -402,13 +358,6 @@ class FwMgr(dev_mgr.DeviceMgr):
             LOG.info("FW device create returned success")
         else:
             LOG.error("FW device create returned failure")
-
-    def _create_fw_fab_dev(self, tenant_id, drvr_name, fw_dict):
-        '''
-            This routine calls the Tenant Edge routine if FW Type is TE
-        '''
-        if fw_dict.get('fw_type') == fw_constants.FW_TENANT_EDGE:
-            self._create_fw_fab_dev_te(tenant_id, drvr_name, fw_dict)
 
     def _check_create_fw(self, tenant_id, drvr_name):
         '''
@@ -448,7 +397,11 @@ class FwMgr(dev_mgr.DeviceMgr):
                 self.fwid_attr[tenant_id].fw_drvr_created(False)
                 self.update_fw_db_dev_status(fw_dict.get('fw_id'),
                                              '')
-        ret = self.fabric.delete_fabric_fw(tenant_id, fw_dict, is_fw_virt,
+        ret = self.fabric.delete_fabric_fw(tenant_id,
+                                           fw_dict.get('tenant_name'),
+                                           fw_dict.get('fw_id'),
+                                           fw_dict.get('fw_name'),
+                                           is_fw_virt,
                                            fw_constants.RESULT_FW_DELETE_INIT)
         if not ret:
             LOG.error("Error in delete_fabric_fw")
@@ -491,31 +444,21 @@ class FwMgr(dev_mgr.DeviceMgr):
             It retrieves the policy associated with the FW by calling
             Openstack API's and calls t he policy create internal routine.
         '''
-        # If no TE/EW Router, create it. Only TE for now.
         fw = data.get('firewall')
         tenant_id = fw.get('tenant_id')
         fw_name = fw.get('name')
         fw_id = fw.get('id')
         fw_pol_id = fw.get('firewall_policy_id')
         admin_state = fw.get('admin_state_up')
-        rtr_id = None
-        if 'router_ids' in fw and len(fw.get('router_ids')) != 0:
-            rtr_id = fw.get('router_ids')[0]
         if not admin_state:
             LOG.debug("Admin state disabled")
             return
 
-        name = dfa_dbm.DfaDBMixin.get_project_name(self, tenant_id)
-        rtr_name = '_'.join([fw_constants.TENANT_EDGE_RTR, name])
-
-        fw_rtr_name = self.os_helper.get_rtr_name(rtr_id)
-        fw_type = None
-        if fw_rtr_name == rtr_name:
-            fw_type = fw_constants.FW_TENANT_EDGE
         if tenant_id not in self.fwid_attr:
             self.fwid_attr[tenant_id] = FwMapAttr(tenant_id)
         tenant_obj = self.fwid_attr[tenant_id]
-        tenant_obj.create_fw(name, fw_pol_id, fw_id, fw_name, fw_type, rtr_id)
+        name = dfa_dbm.DfaDBMixin.get_project_name(self, tenant_id)
+        tenant_obj.create_fw(name, fw_pol_id, fw_id, fw_name)
         self.temp_db.store_fw_tenant(fw_id, tenant_id)
         if not cache:
             self._check_create_fw(tenant_id, drvr_name)
@@ -524,13 +467,6 @@ class FwMgr(dev_mgr.DeviceMgr):
             pol_data = self.os_helper.get_fw_policy(fw_pol_id)
             if pol_data is not None:
                 self.fw_policy_create(pol_data, cache=cache)
-        # Check using Openstack API's that TE/EW Router exists. If not
-        # create. This is to take care of cases, when a user removes all
-        # networks and then w/o deleting project, starts creating networks
-        # again.
-        rtr_lst = self.os_helper.get_rtr_by_name(rtr_name)
-        if len(rtr_lst) is 0:
-            self.os_helper.create_router(rtr_name, tenant_id, [])
 
     def fw_create(self, data, fw_name=None, cache=False):
         ''' Top level FW create function'''
@@ -539,46 +475,6 @@ class FwMgr(dev_mgr.DeviceMgr):
             self._fw_create(fw_name, data, cache)
         except Exception as exc:
             LOG.error("Exception in fw_create %s", str(exc))
-
-    def _fw_update(self, drvr_name, data):
-        # Check if FW is already cfgd using the below function
-        # if self.fwid_attr[tenant_id].is_fw_complete() or
-        # is_fw_drvr_create_needed():
-        # The above two functions will take care of whether FW is already
-        # cfgd or about to be cfgd in case of error.
-        # If yes, this may be a change in policies attached to FW.
-        # If no, do a check, create after storing the parameters like
-        # rtr_id
-        fw = data.get('firewall')
-        tenant_id = fw.get('tenant_id')
-        if self.fwid_attr[tenant_id].is_fw_complete() or \
-           self.fwid_attr[tenant_id].is_fw_drvr_create_needed():
-            prev_info_complete = True
-        else:
-            prev_info_complete = False
-
-        tenant_obj = self.fwid_attr[tenant_id]
-        if 'router_ids' in fw and len(fw.get('router_ids')) != 0:
-            rtr_id = fw.get('router_ids')[0]
-            name = dfa_dbm.DfaDBMixin.get_project_name(self, tenant_id)
-            rtr_name = '_'.join([fw_constants.TENANT_EDGE_RTR, name])
-
-            fw_rtr_name = self.os_helper.get_rtr_name(rtr_id)
-            fw_type = None
-            if fw_rtr_name == rtr_name:
-                fw_type = fw_constants.FW_TENANT_EDGE
-            tenant_obj.update_fw_params(rtr_id, fw_type)
-
-        if not prev_info_complete:
-            self._check_create_fw(tenant_id, drvr_name)
-
-    def fw_update(self, data, fw_name=None):
-        ''' Top level FW update function'''
-        LOG.debug("FW Update %s", data)
-        try:
-            self._fw_update(fw_name, data)
-        except Exception as exc:
-            LOG.error("Exception in fw_update %s", str(exc))
 
     def _fw_delete(self, drvr_name, data):
         '''
@@ -591,18 +487,11 @@ class FwMgr(dev_mgr.DeviceMgr):
         if tenant_id not in self.fwid_attr:
             LOG.error("Invalid tenant id for FW delete %s", tenant_id)
             return
-
         tenant_obj = self.fwid_attr[tenant_id]
         ret = self._check_delete_fw(tenant_id, drvr_name)
         if ret:
             tenant_obj.delete_fw(fw_id)
             self.temp_db.del_fw_tenant(fw_id)
-        # Delete the FW routers if this is the last network in the tenant
-        net_lst = dfa_dbm.DfaDBMixin.get_network_by_tenant_id(self, tenant_id)
-        if len(net_lst) is 0:
-            name = dfa_dbm.DfaDBMixin.get_project_name(self, tenant_id)
-            rtr_name = '_'.join([fw_constants.TENANT_EDGE_RTR, name])
-            self.os_helper.delete_router_by_name(rtr_name, tenant_id)
 
     def fw_delete(self, data, fw_name=None):
         ''' Top level FW delete function '''
@@ -935,8 +824,6 @@ class FwMgr(dev_mgr.DeviceMgr):
         fw_dict['fw_id'] = fw_data.get('fw_id')
         fw_dict['fw_name'] = fw_data.get('name')
         fw_dict['firewall_policy_id'] = fw_data.get('firewall_policy_id')
-        fw_dict['fw_type'] = fw_data.get('fw_type')
-        fw_dict['router_id'] = fw_data.get('router_id')
         fw_dict['rules'] = {}
         for rule in rule_dict:
             fw_dict['rules'][rule] = rule_dict.get(rule)

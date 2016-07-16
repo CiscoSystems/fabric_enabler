@@ -57,11 +57,11 @@ class ServiceIpSegTenantMap(dfa_dbm.DfaDBMixin):
         ''' retrieving the fw dict '''
         return self.fw_dict
 
-    def store_dummy_router_net(self, net_id, subnet_id, rtr_id):
+    def store_dummy_router_net(self, net_id, subnet_id, rout_id):
         ''' Storing the router attributes '''
         self.dummy_net_id = net_id
         self.dummy_subnet_id = subnet_id
-        self.dummy_router_id = rtr_id
+        self.dummy_router_id = rout_id
 
     def get_dcnm_net_dict(self, direc):
         ''' Retrieve the DCNM net dict '''
@@ -1065,7 +1065,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         self.update_subnet_db_info(tenant_id, direc, net_id, subnet_id)
         return net_id, subnet_id
 
-    def _attach_dummy_intf_rtr(self, tenant_id, tenant_name, rtr_id):
+    def _create_dummy_router_and_intf(self, tenant_id, tenant_name):
         '''Function to create a dummy router and interface'''
 
         serv_obj = self.get_service_obj(tenant_id)
@@ -1078,37 +1078,32 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         net_id, subnet_id = self.os_helper.create_network(
             rtr_nwk, tenant_id, self.servicedummy_ip_subnet)
         if net_id is None or subnet_id is None:
-            return None, None
+            return None, None, None
         net_dict = {}
         net_dict['name'] = rtr_nwk
         self.store_net_db(tenant_id, net_id, net_dict, 'SUCCESS')
         subnet_lst = set()
         subnet_lst.add(subnet_id)
-        if rtr_id is None:
+        rout_id = self.os_helper.create_router(rtr_name, tenant_id, subnet_lst)
+        if rout_id is None:
             self.os_helper.delete_network(rtr_nwk, tenant_id, subnet_id,
                                           net_id)
-            return net_id, subnet_id
-        ret = self.os_helper.add_intf_router(rtr_id, tenant_id, subnet_lst)
-        if not ret:
-            self.os_helper.delete_network(rtr_nwk, tenant_id, subnet_id,
-                                          net_id)
-            return net_id, subnet_id
-        return net_id, subnet_id
+            return net_id, subnet_id, None
+        return net_id, subnet_id, rout_id
 
-    def _delete_dummy_intf_rtr(self, tenant_id, tenant_name, rtr_id):
-        '''Function to delete a dummy interface of a router'''
+    def _delete_dummy_router_and_intf(self, tenant_id, tenant_name):
+        '''Function to delete a dummy router and interface'''
 
-        net_id, subnet_id, rtr_id = self.get_dummy_router_net(tenant_id)
-        ret = self.delete_os_dummy_rtr_nwk(rtr_id, net_id, subnet_id)
+        net_id, subnet_id, rout_id = self.get_dummy_router_net(tenant_id)
+        ret = self.delete_os_dummy_rtr_nwk(rout_id, net_id, subnet_id)
         # Release the network DB entry
         self.delete_network_db(net_id)
         return ret
 
-    def create_os_in_nwk(self, tenant_id, fw_dict, is_fw_virt=False):
+    def create_os_in_nwk(self, tenant_id, tenant_name, is_fw_virt=False):
         '''
         Create the Openstack IN network and stores the values in DB.
         '''
-        tenant_name = fw_dict.get('tenant_name')
         try:
             net, subnet = self._create_os_nwk(tenant_id, tenant_name, "in",
                                               is_fw_virt=is_fw_virt)
@@ -1136,11 +1131,10 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
                              "in", 'SUCCESS', os_status=ret)
         return True
 
-    def create_os_out_nwk(self, tenant_id, fw_dict, is_fw_virt=False):
+    def create_os_out_nwk(self, tenant_id, tenant_name, is_fw_virt=False):
         '''
         Create the Openstack OUT network and stores the values in DB.
         '''
-        tenant_name = fw_dict.get('tenant_name')
         try:
             net, subnet = self._create_os_nwk(tenant_id, tenant_name, "out",
                                               is_fw_virt=is_fw_virt)
@@ -1210,10 +1204,9 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         self.delete_network_db(net_id)
         return True
 
-    def delete_os_in_nwk(self, tenant_id, fw_dict, is_fw_virt=False):
+    def delete_os_in_nwk(self, tenant_id, tenant_name, is_fw_virt=False):
         ''' Deletes the Openstack In network and update the DB'''
         ret = True
-        tenant_name = fw_dict.get('tenant_name')
         try:
             ret = self._delete_os_nwk(tenant_id, tenant_name, "in")
         except Exception as exc:
@@ -1229,10 +1222,9 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         self.update_fw_db_result(tenant_id, os_status=res)
         return ret
 
-    def delete_os_out_nwk(self, tenant_id, fw_dict, is_fw_virt=False):
+    def delete_os_out_nwk(self, tenant_id, tenant_name, is_fw_virt=False):
         ''' Deletes the Openstack Out network and update the DB'''
         ret = True
-        tenant_name = fw_dict.get('tenant_name')
         try:
             ret = self._delete_os_nwk(tenant_id, tenant_name, "out")
         except Exception as exc:
@@ -1248,52 +1240,31 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         self.update_fw_db_result(tenant_id, os_status=res)
         return ret
 
-    def create_os_dummy_rtr(self, tenant_id, fw_dict, is_fw_virt=False):
-        ''' Attach the dummy interface to the Openstack router and store the
-            info in DB
-        '''
+    def create_os_dummy_rtr(self, tenant_id, tenant_name, is_fw_virt=False):
+        ''' Create the Openstack Dummy router and store the info in DB '''
         res = fw_const.OS_DUMMY_RTR_CREATE_SUCCESS
-        tenant_name = fw_dict.get('tenant_name')
         try:
-            rtr_id = fw_dict.get('router_id')
-            if rtr_id is None:
-                LOG.error("Invalid router id, attaching dummy interface"
-                          " failed")
+            net_id, subnet_id, rout_id = self._create_dummy_router_and_intf(
+                tenant_id, tenant_name)
+            if net_id is None or subnet_id is None or rout_id is None:
                 return False
-            if is_fw_virt:
-                net_id = subnet_id = None
-            else:
-                net_id, subnet_id = \
-                    self._attach_dummy_intf_rtr(tenant_id, tenant_name, rtr_id)
-                if net_id is None or subnet_id is None:
-                    LOG.error("Invalid net_id or subnet_id, creating dummy"
-                              " interface failed")
-                    return False
         except Exception as exc:
-            # Function _attach_dummy_intf_rtr already took care of
+            # Function _create_dummy_router_and_intf already took care of
             # cleanup for error cases.
             LOG.error("Creation of Openstack Router failed tenant %(tenant)s "
                       ", Exception %(exc)s",
                       {'tenant': tenant_id, 'exc': str(exc)})
             res = fw_const.OS_DUMMY_RTR_CREATE_FAIL
-        self.store_fw_db_router(tenant_id, net_id, subnet_id, rtr_id, res)
+        self.store_fw_db_router(tenant_id, net_id, subnet_id, rout_id, res)
         return True
 
-    def delete_os_dummy_rtr(self, tenant_id, fw_dict, is_fw_virt=False):
+    def delete_os_dummy_rtr(self, tenant_id, tenant_name, is_fw_virt=False):
         ''' Delete the Openstack Dummy router and store the info in DB '''
         ret = True
-        tenant_name = fw_dict.get('tenant_name')
         try:
-            rtr_id = fw_dict.get('router_id')
-            if rtr_id is False:
-                LOG.error("Invalid router id, deleting dummy interface"
-                          " failed")
-                return False
-            if not is_fw_virt:
-                ret = self._delete_dummy_intf_rtr(tenant_id, tenant_name,
-                                                  rtr_id)
+            ret = self._delete_dummy_router_and_intf(tenant_id, tenant_name)
         except Exception as exc:
-            # Function _attach_dummy_intf_rtr already took care of
+            # Function _create_dummy_router_and_intf already took care of
             # cleanup for error cases.
             LOG.error("Deletion of Openstack Router failed tenant %(tenant)s",
                       "Exception %(exc)s",
@@ -1306,9 +1277,8 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         self.update_fw_db_result(tenant_id, os_status=res)
         return ret
 
-    def create_dcnm_in_nwk(self, tenant_id, fw_dict, is_fw_virt=False):
+    def create_dcnm_in_nwk(self, tenant_id, tenant_name, is_fw_virt=False):
         ''' Create the DCNM In Network and store the result in DB '''
-        tenant_name = fw_dict.get('tenant_name')
         ret = self._create_service_nwk(tenant_id, tenant_name, 'in')
         if ret:
             res = fw_const.DCNM_IN_NETWORK_CREATE_SUCCESS
@@ -1320,9 +1290,8 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         self.update_fw_db_result(tenant_id, dcnm_status=res)
         return ret
 
-    def delete_dcnm_in_nwk(self, tenant_id, fw_dict, is_fw_virt=False):
+    def delete_dcnm_in_nwk(self, tenant_id, tenant_name, is_fw_virt=False):
         ''' Delete the DCNM In Network and store the result in DB '''
-        tenant_name = fw_dict.get('tenant_name')
         ret = self._delete_service_nwk(tenant_id, tenant_name, 'in')
         if ret:
             res = fw_const.DCNM_IN_NETWORK_DEL_SUCCESS
@@ -1334,13 +1303,12 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         self.update_fw_db_result(tenant_id, dcnm_status=res)
         return ret
 
-    def update_dcnm_in_part(self, tenant_id, fw_dict, is_fw_virt=False):
+    def update_dcnm_in_part(self, tenant_id, tenant_name, is_fw_virt=False):
         '''
         Update the In partition service node IP address in DCNM and
         update the result
         '''
         res = fw_const.DCNM_IN_PART_UPDATE_SUCCESS
-        tenant_name = fw_dict.get('tenant_name')
         ret = True
         try:
             self._update_partition_in_create(tenant_id, tenant_name)
@@ -1354,13 +1322,12 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         LOG.info("In partition updated with service ip addr")
         return ret
 
-    def clear_dcnm_in_part(self, tenant_id, fw_dict, is_fw_virt=False):
+    def clear_dcnm_in_part(self, tenant_id, tenant_name, is_fw_virt=False):
         '''
         Clear the In partition service node IP address in DCNM and update the
         result
         '''
         res = fw_const.DCNM_IN_PART_UPDDEL_SUCCESS
-        tenant_name = fw_dict.get('tenant_name')
         ret = True
         try:
             self._update_partition_in_delete(tenant_name)
@@ -1374,10 +1341,9 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         LOG.info("In partition cleared off service ip addr")
         return ret
 
-    def create_dcnm_out_part(self, tenant_id, fw_dict, is_fw_virt=False):
+    def create_dcnm_out_part(self, tenant_id, tenant_name, is_fw_virt=False):
         ''' Create the DCNM OUT partition and update the result '''
         res = fw_const.DCNM_OUT_PART_CREATE_SUCCESS
-        tenant_name = fw_dict.get('tenant_name')
         ret = True
         try:
             self._create_out_partition(tenant_id, tenant_name)
@@ -1391,10 +1357,9 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         LOG.info("Out partition created")
         return ret
 
-    def delete_dcnm_out_part(self, tenant_id, fw_dict, is_fw_virt=False):
+    def delete_dcnm_out_part(self, tenant_id, tenant_name, is_fw_virt=False):
         ''' Delete the DCNM OUT partition and update the result '''
         res = fw_const.DCNM_OUT_PART_DEL_SUCCESS
-        tenant_name = fw_dict.get('tenant_name')
         ret = True
         try:
             self._delete_partition(tenant_id, tenant_name)
@@ -1408,9 +1373,8 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         LOG.info("Out partition deleted")
         return ret
 
-    def create_dcnm_out_nwk(self, tenant_id, fw_dict, is_fw_virt=False):
+    def create_dcnm_out_nwk(self, tenant_id, tenant_name, is_fw_virt=False):
         ''' Create the DCNM OUT Network and update the result '''
-        tenant_name = fw_dict.get('tenant_name')
         ret = self._create_service_nwk(tenant_id, tenant_name, 'out')
         if ret:
             res = fw_const.DCNM_OUT_NETWORK_CREATE_SUCCESS
@@ -1422,9 +1386,8 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         self.update_fw_db_result(tenant_id, dcnm_status=res)
         return ret
 
-    def delete_dcnm_out_nwk(self, tenant_id, fw_dict, is_fw_virt=False):
+    def delete_dcnm_out_nwk(self, tenant_id, tenant_name, is_fw_virt=False):
         ''' Delete the DCNM OUT network and update the result '''
-        tenant_name = fw_dict.get('tenant_name')
         ret = self._delete_service_nwk(tenant_id, tenant_name, 'out')
         if ret:
             res = fw_const.DCNM_OUT_NETWORK_DEL_SUCCESS
@@ -1436,13 +1399,12 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         self.update_fw_db_result(tenant_id, dcnm_status=res)
         return ret
 
-    def update_dcnm_out_part(self, tenant_id, fw_dict, is_fw_virt=False):
+    def update_dcnm_out_part(self, tenant_id, tenant_name, is_fw_virt=False):
         '''
         Update the DCNM OUT partition service node IP address and update
         the result
         '''
         res = fw_const.DCNM_OUT_PART_UPDATE_SUCCESS
-        tenant_name = fw_dict.get('tenant_name')
         ret = True
         try:
             ret = self._update_partition_out_create(tenant_id, tenant_name)
@@ -1450,7 +1412,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
                 res = fw_const.DCNM_OUT_PART_UPDATE_FAIL
         except Exception as exc:
             LOG.error("Update of Out Partition failed for tenant %(tenant)s"
-                      " Exception %(exc)s",
+                      " ,Exception %(exc)s",
                       {'tenant': tenant_id, 'exc': str(exc)})
             res = fw_const.DCNM_OUT_PART_UPDATE_FAIL
             ret = False
@@ -1458,18 +1420,17 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         LOG.info("Out partition updated with service ip addr")
         return ret
 
-    def clear_dcnm_out_part(self, tenant_id, fw_dict, is_fw_virt=False):
+    def clear_dcnm_out_part(self, tenant_id, tenant_name, is_fw_virt=False):
         '''
         Clear the DCNM OUT partition service node IP address and update
         the result
         '''
         res = fw_const.DCNM_OUT_PART_UPDDEL_SUCCESS
-        tenant_name = fw_dict.get('tenant_name')
         self.update_fw_db_result(tenant_id, dcnm_status=res)
         LOG.info("Out partition cleared -noop- with service ip addr")
         return True
 
-    def init_state(self, tenant_id, fw_dict, is_fw_virt=False):
+    def init_state(self, tenant_id, tenant_name, is_fw_virt=False):
         ''' Dummy function called at the init stage '''
         return True
 
@@ -1504,7 +1465,8 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         else:
             return self.get_next_del_state(state, ret)
 
-    def run_create_sm(self, tenant_id, fw_dict, is_fw_virt):
+    def run_create_sm(self, fw_id, fw_name, tenant_id, tenant_name,
+                      is_fw_virt):
         '''
         Runs the create SM. Goes through every state function until the end
         or when one state returns failure.
@@ -1520,7 +1482,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             serv_obj.store_state(state)
         while ret:
             try:
-                ret = self.fabric_fsm[state][0](tenant_id, fw_dict,
+                ret = self.fabric_fsm[state][0](tenant_id, tenant_name,
                                                 is_fw_virt=is_fw_virt)
             except Exception as exc:
                 LOG.error("Exception %(exc)s for state %(state)s",
@@ -1538,7 +1500,8 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             serv_obj.store_local_final_result(fw_const.RESULT_FW_CREATE_DONE)
         return ret
 
-    def run_delete_sm(self, tenant_id, fw_dict, is_fw_virt):
+    def run_delete_sm(self, fw_id, fw_name, tenant_id, tenant_name,
+                      is_fw_virt):
         '''
         Runs the delete SM. Goes through every state function until the end
         or when one state returns failure.
@@ -1555,7 +1518,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             serv_obj.store_state(state)
         while ret:
             try:
-                ret = self.fabric_fsm[state][1](tenant_id, fw_dict,
+                ret = self.fabric_fsm[state][1](tenant_id, tenant_name,
                                                 is_fw_virt=is_fw_virt)
             except Exception as exc:
                 LOG.error("Exception %(exc)s for state %(state)s",
@@ -1687,7 +1650,7 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
         '''
         subnet_lst = set()
         subnet_lst.add(subnet_id)
-        ret = self.os_helper.delete_intf_router(None, None, rtr_id, subnet_lst)
+        ret = self.os_helper.delete_router(None, None, rtr_id, subnet_lst)
         if not ret:
             return ret
         ret = self.os_helper.delete_network_all_subnets(net_id)
@@ -1794,29 +1757,26 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
                     if len(net_list) == 0:
                         LOG.error("net_list len is 0, router net not found")
                         return
-                    fw_type = fw_dict[fw_id].get('fw_type')
-                    if fw_type == fw_const.FW_TENANT_EDGE:
-                        rtr_net = net_list[0]
-                        rtr_subnet_lt = \
-                            self.os_helper.get_subnets_for_net(rtr_net)
-                        if rtr_subnet_lt is None:
-                            LOG.error("router subnet not found for net %s",
-                                      rtr_net)
-                            return
-                        rtr_subnet_id = rtr_subnet_lt[0].get('id')
-                        LOG.info("Deleted dummy router network %s",
-                                 rtr.get('id'))
-                        ret = self.delete_os_dummy_rtr_nwk(rtr.get('id'),
-                                                           rtr_net.get('id'),
-                                                           rtr_subnet_id)
-                        return ret
+                    rtr_net = net_list[0]
+                    rtr_subnet_lt = self.os_helper.get_subnets_for_net(rtr_net)
+                    if rtr_subnet_lt is None:
+                        LOG.error("router subnet not found for net %s",
+                                  rtr_net)
+                        return
+                    rtr_subnet_id = rtr_subnet_lt[0].get('id')
+                    LOG.info("Deleted dummy router network %s", rtr.get('id'))
+                    ret = self.delete_os_dummy_rtr_nwk(rtr.get('id'),
+                                                       rtr_net.get('id'),
+                                                       rtr_subnet_id)
+                    return ret
         LOG.info("Done Checking consistency of DB, no issues")
         # fixme Read the Service NWK creation status in DCNM.
         # If it does not match with FW DB DCNM status, update it
         # Do the same for partition as well.
         # fixme go through the algo for delete SM as well.
 
-    def prepare_fabric_fw_int(self, tenant_id, fw_dict, is_fw_virt, result):
+    def prepare_fabric_fw_int(self, tenant_id, tenant_name, fw_id, fw_name,
+                              is_fw_virt, result):
         '''
         Internal routine to prepare the fabric. This creates an entry in FW
         DB and runs the SM.
@@ -1825,9 +1785,6 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             LOG.info("Auto network creation disabled")
             return False
         try:
-            tenant_name = fw_dict.get('tenant_name')
-            fw_id = fw_dict.get('fw_id')
-            fw_name = fw_dict.get('fw_name')
             # More than 1 FW per tenant not supported fixme(padkrish)
             if tenant_id in self.service_attr and (
                result == fw_const.RESULT_FW_CREATE_DONE):
@@ -1839,7 +1796,8 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
                 self.create_serv_obj(tenant_id)
             self.service_attr[tenant_id].create_fw_db(fw_id, fw_name,
                                                       tenant_id)
-            ret = self.run_create_sm(tenant_id, fw_dict, is_fw_virt)
+            ret = self.run_create_sm(fw_id, fw_name, tenant_id, tenant_name,
+                                     is_fw_virt)
             if ret:
                 LOG.info("SM create returned True for Tenant Name %(tenant)s"
                          " FW %(fw)s", {'tenant': tenant_name, 'fw': fw_name})
@@ -1852,18 +1810,21 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             return False
         return ret
 
-    def prepare_fabric_fw(self, tenant_id, fw_dict, is_fw_virt, result):
+    def prepare_fabric_fw(self, tenant_id, tenant_name, fw_id, fw_name,
+                          is_fw_virt, result):
         ''' Top level routine to prepare the fabric '''
         try:
             with self.mutex_lock:
-                ret = self.prepare_fabric_fw_int(tenant_id, fw_dict,
-                                                 is_fw_virt, result)
+                ret = self.prepare_fabric_fw_int(tenant_id, tenant_name,
+                                                 fw_id, fw_name, is_fw_virt,
+                                                 result)
         except Exception as exc:
             LOG.error("Exception raised in create fabric %s", str(exc))
             return False
         return ret
 
-    def delete_fabric_fw_int(self, tenant_id, fw_dict, is_fw_virt, result):
+    def delete_fabric_fw_int(self, tenant_id, tenant_name, fw_id, fw_name,
+                             is_fw_virt, result):
         '''
         Internal routine to delete the fabric cfg. This runs the SM and deletes
         the entries from DB and local cache
@@ -1872,9 +1833,6 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             LOG.info("Auto network creation disabled")
             return False
         try:
-            tenant_name = fw_dict.get('tenant_name')
-            fw_id = fw_dict.get('fw_id')
-            fw_name = fw_dict.get('fw_name')
             if tenant_id not in self.service_attr:
                 LOG.error("Service obj not created for tenant %s", tenant_name)
                 return False
@@ -1887,7 +1845,8 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             if result == fw_const.RESULT_FW_DELETE_DONE:
                 LOG.error("Fabric for tenant %s already deleted", tenant_id)
                 return True
-            ret = self.run_delete_sm(tenant_id, fw_dict, is_fw_virt)
+            ret = self.run_delete_sm(fw_id, fw_name, tenant_id, tenant_name,
+                                     is_fw_virt)
             self.service_attr[tenant_id].set_fabric_create(False)
             if ret:
                 LOG.info("Delete SM completed successfully for tenant"
@@ -1905,12 +1864,14 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
             return False
         return ret
 
-    def delete_fabric_fw(self, tenant_id, fw_dict, is_fw_virt, result):
+    def delete_fabric_fw(self, tenant_id, tenant_name, fw_id, fw_name,
+                         is_fw_virt, result):
         ''' Top level routine to unconfigure the fabric '''
         try:
             with self.mutex_lock:
-                ret = self.delete_fabric_fw_int(tenant_id, fw_dict,
-                                                is_fw_virt, result)
+                ret = self.delete_fabric_fw_int(tenant_id, tenant_name,
+                                                fw_id, fw_name, is_fw_virt,
+                                                result)
         except Exception as exc:
             LOG.error("Exception raised in delete fabric %s", str(exc))
             return False
@@ -1929,13 +1890,18 @@ class FabricBase(dfa_dbm.DfaDBMixin, FabricApi):
                 return False
             if result == fw_const.RESULT_FW_CREATE_INIT:
                 # A check for is_fabric_create is not done here.
-                ret = self.run_create_sm(tenant_id, fw_data, is_fw_virt)
+                ret = self.run_create_sm(fw_data.get('fw_id'),
+                                         fw_data.get('fw_name'), tenant_id,
+                                         tenant_name, is_fw_virt)
             else:
                 if result == fw_const.RESULT_FW_DELETE_INIT:
                     # A check for is_fabric_create is not done here.
                     # Pls check the comment given in function
                     # delete_fabric_fw_int
-                    ret = self.run_delete_sm(tenant_id, fw_data, is_fw_virt)
+                    ret = self.run_delete_sm(fw_data.get('fw_id'),
+                                             fw_data.get('fw_name'),
+                                             tenant_id, tenant_name,
+                                             is_fw_virt)
                 else:
                     LOG.error("Unknown state in retry")
                     return False
