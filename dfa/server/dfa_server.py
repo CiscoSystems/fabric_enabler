@@ -530,6 +530,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                                            dci_id=dci_id)
             LOG.debug('project %(name)s %(dci)s %(desc)s', (
                 {'name': proj_name, 'dci': dci_id, 'desc': proj.description}))
+        self.project_create_notif(proj_id, proj_name)
 
     def project_update_event(self, proj_info):
         """Process project update event.
@@ -619,6 +620,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             else:
                 self.update_project_info_cache(proj_id, opcode='delete')
                 LOG.debug('Deleted project:%s', proj_name)
+            self.project_delete_notif(proj_id, proj_name)
 
     def subnet_create_event(self, subnet_info):
         """Process subnet create event."""
