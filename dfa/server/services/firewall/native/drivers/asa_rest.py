@@ -133,6 +133,7 @@ class Asa5585():
         cmds.append("no interface " + inside_int)
         cmds.append("no interface " + outside_int)
         cmds.append("write memory")
+        cmds.append("del /noconfirm disk0:/" + context + ".cfg")
 
         data = {"commands": cmds}
         return self.rest_send_cli(data)
