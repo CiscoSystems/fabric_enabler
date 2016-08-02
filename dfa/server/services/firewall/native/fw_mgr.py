@@ -18,7 +18,7 @@
 from dfa.db import dfa_db_models as dfa_dbm
 from dfa.common import dfa_logger as logging
 from dfa.common import utils as sys_utils
-from dfa.server.dfa_openstack_helper import DfaNeutronHelper as OsHelper
+from dfa.server import dfa_openstack_helper as OsHelper
 from dfa.server.services.firewall.native import fabric_setup_base as fabric
 from dfa.server.services.firewall.native import fw_constants
 from dfa.server.services.firewall.native.drivers import dev_mgr
@@ -310,7 +310,7 @@ class FwMgr(dev_mgr.DeviceMgr):
         self.fw_drvr_created = False
         self.fabric = fabric.FabricBase()
         self.temp_db = FwTempDb()
-        self.os_helper = OsHelper()
+        self.os_helper = OsHelper.DfaNeutronHelper()
         fw_dict = self.pop_local_cache()
         self.pop_local_sch_cache(fw_dict)
         self.dcnm_obj = None
@@ -828,7 +828,7 @@ class FwMgr(dev_mgr.DeviceMgr):
                 self.update_fw_db_final_result(fw_dict.get('fw_id'), result)
         # Device portion
         if result == fw_constants.RESULT_FW_CREATE_DONE:
-            if fw_data.get('device_provision_status') != 'SUCCESS':
+            if fw_data.get('device_status') != 'SUCCESS':
                 ret = self.create_fw_device(tenant_id, fw_dict.get('fw_id'),
                                             fw_dict)
                 if ret:

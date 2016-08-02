@@ -32,11 +32,11 @@ class PhyAsa(base.BaseDrvr, FP.FabricApi):
 
     def initialize(self, cfg_dict):
         LOG.debug("Initialize for PhyAsa")
-        self.mgmt_ip_addr = cfg_dict.get('mgmt_ip_addr')
-        self.user = cfg_dict.get('user')
-        self.pwd = cfg_dict.get('pwd')
-        self.interface_in = cfg_dict.get('interface_in')
-        self.interface_out = cfg_dict.get('interface_out')
+        self.mgmt_ip_addr = cfg_dict.get('mgmt_ip_addr').strip()
+        self.user = cfg_dict.get('user').strip()
+        self.pwd = cfg_dict.get('pwd').strip()
+        self.interface_in = cfg_dict.get('interface_in').strip()
+        self.interface_out = cfg_dict.get('interface_out').strip()
         self.asa5585 = asa.Asa5585(self.mgmt_ip_addr, self.user, self.pwd)
 
     def pop_evnt_que(self, que_obj):

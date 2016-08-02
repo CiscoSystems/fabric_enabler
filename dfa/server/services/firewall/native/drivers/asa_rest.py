@@ -35,6 +35,7 @@ class Asa5585():
         self.server = "https://" + mgmt_ip
         self.username = username
         self.password = password
+        self.tenant_rule = dict()
         self.rule_tbl = {}
 
     def rest_send_cli(self, data):
@@ -112,6 +113,10 @@ class Asa5585():
         cmds.append("end")
         cmds.append("write memory")
 
+        if tenant not in self.tenant_rule:
+            self.tenant_rule[tenant] = dict()
+            self.tenant_rule[tenant]['rule_lst'] = []
+
         data = {"commands": cmds}
         return self.rest_send_cli(data)
 
@@ -135,6 +140,10 @@ class Asa5585():
         cmds.append("write memory")
         cmds.append("del /noconfirm disk0:/" + context + ".cfg")
 
+        if tenant in self.tenant_rule:
+            for rule in self.tenant_rule[tenant].get('rule_lst'):
+                del self.rule_tbl[rule]
+            del self.tenant_rule[tenant]
         data = {"commands": cmds}
         return self.rest_send_cli(data)
 
@@ -252,6 +261,9 @@ class Asa5585():
                 cmds.append('no ' + self.rule_tbl[rule_id])
 
             self.rule_tbl[rule_id] = acl
+            if tenant_name in self.tenant_rule:
+                if rule_id not in self.tenant_rule[tenant_name]['rule_lst']:
+                    self.tenant_rule[tenant_name]['rule_lst'].append(rule_id)
             cmds.append(acl)
         cmds.append("access-group " + tenant_name + " global")
         cmds.append("write memory")
