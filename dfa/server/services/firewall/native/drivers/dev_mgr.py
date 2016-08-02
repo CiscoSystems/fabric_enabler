@@ -48,13 +48,26 @@ class MaxSched(object):
             self.res[cnt]['fw_id_lst'] = []
             cnt = cnt + 1
 
-    def allocate_fw_dev(self, fw_id, new):
+    def allocate_fw_dev(self, fw_id):
         '''
         Allocate the first Firewall device which has resources available
         '''
         for cnt in self.res:
             used = self.res.get(cnt).get('used')
             if used < self.res.get(cnt).get('quota'):
+                self.res[cnt]['used'] = used + 1
+                self.res[cnt]['fw_id_lst'].append(fw_id)
+                return self.res[cnt].get('obj_dict'), (
+                    self.res[cnt].get('mgmt_ip'))
+        return None, None
+
+    def populate_fw_dev(self, fw_id, mgmt_ip, new):
+        '''
+        Populate the class after a restart
+        '''
+        for cnt in self.res:
+            used = self.res.get(cnt).get('used')
+            if mgmt_ip == self.res[cnt].get('mgmt_ip'):
                 if new:
                     self.res[cnt]['used'] = used + 1
                 self.res[cnt]['fw_id_lst'].append(fw_id)
@@ -122,13 +135,14 @@ class DeviceMgr(object):
         for fw_id in fw_dict:
             fw_data = fw_dict.get(fw_id)
             mgmt_ip = fw_data.get('fw_mgmt_ip')
-            dev_status = fw_data.get('device_provision_status')
-            if dev_status is 'SUCCESS':
+            dev_status = fw_data.get('device_status')
+            if dev_status == 'SUCCESS':
                 new = True
             else:
                 new = False
             if mgmt_ip is not None:
-                drvr_dict, mgmt_ip = self.sched_obj.allocate_fw_dev(fw_id,
+                drvr_dict, mgmt_ip = self.sched_obj.populate_fw_dev(fw_id,
+                                                                    mgmt_ip,
                                                                     new)
                 if drvr_dict is None or mgmt_ip is None:
                     LOG.info("Pop cache for FW sch: drvr_dict or mgmt_ip is "
@@ -179,7 +193,7 @@ class DeviceMgr(object):
 
     def create_fw_device(self, tenant_id, fw_id, data):
         ''' Creates the Firewall '''
-        drvr_dict, mgmt_ip = self.sched_obj.allocate_fw_dev(fw_id, True)
+        drvr_dict, mgmt_ip = self.sched_obj.allocate_fw_dev(fw_id)
         if drvr_dict is not None and mgmt_ip is not None:
             self.update_fw_db_mgmt_ip(fw_id, mgmt_ip)
             ret = drvr_dict.get('drvr_obj').create_fw(tenant_id, data)
