@@ -21,7 +21,11 @@ import sqlalchemy as sa
 import sqlalchemy.orm.exc as orm_exc
 import time
 
-from oslo.db import exception as db_exc
+try:
+    from oslo_db import exception as db_exc
+except ImportError:
+    from oslo.db import exception as db_exc
+
 from six import moves
 
 from dfa.common import constants as const

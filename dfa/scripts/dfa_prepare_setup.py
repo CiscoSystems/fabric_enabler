@@ -176,7 +176,7 @@ def modify_conf(cfgfile, service_name, outfn):
 
     for opt in options:
         op = opt.get('option')
-        res = [line for line in lines if line.startswith(op)]
+        res = [line for line in lines if re.match("$op\s*=", line)]
         if len(res) > 1:
             print('ERROR: There are more than one %s option.' % res)
             sys.exit(0)

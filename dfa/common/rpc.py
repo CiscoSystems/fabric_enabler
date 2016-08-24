@@ -16,8 +16,14 @@
 # @author: Nader Lahouti, Cisco Systems, Inc.
 
 
-from oslo import messaging
-from oslo.config import cfg
+try:
+    import oslo_messaging as messaging
+except ImportError:
+    from oslo import messaging
+try:
+    from oslo_config import cfg
+except ImportError:
+    from oslo.config import cfg
 
 from dfa.common import dfa_logger as logging
 

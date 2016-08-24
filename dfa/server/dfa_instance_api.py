@@ -22,7 +22,11 @@ information such as display_name.
 
 from keystoneclient.v2_0 import client as keyc
 from novaclient import exceptions as nexc
-from novaclient.v1_1 import client as nova_client
+try:
+    from novaclient.v1_1 import client as nova_client
+except ImportError:
+    from novaclient.v2 import client as nova_client
+
 
 from dfa.common import config
 from dfa.common import dfa_logger as logging
