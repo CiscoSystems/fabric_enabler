@@ -22,7 +22,11 @@ import logging
 logging.basicConfig(level=logging.INFO)
 LOG = logging.getLogger(__name__)
 
-from oslo.config.cfg import ConfigParser
+try:
+    from oslo_config.cfg import ConfigParser
+except ImportError:
+    from oslo.config.cfg import ConfigParser
+
 
 class EnhancedConfigParser(ConfigParser):
     '''

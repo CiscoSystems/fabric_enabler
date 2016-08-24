@@ -16,7 +16,10 @@
 # @author: Nader Lahouti, Cisco Systems, Inc.
 
 
-from oslo.config import cfg
+try:
+    from oslo_config import cfg
+except ImportError:
+    from oslo.config import cfg
 import sys
 
 import dfa.common.constants as com_const
