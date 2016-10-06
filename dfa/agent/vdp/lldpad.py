@@ -492,9 +492,40 @@ class LldpadDriver(object):
                                      oui_args=oui_cmd_str)
         return reply
 
-    def get_vlan_from_reply1(self, reply):
+    def crosscheck_reply1_vsiid_mac(self, reply, vsiid, mac):
+        """Cross Check the reply against the input vsiid, mac. """
+        vsiid_reply = reply.partition("uuid = ")[2].split()[0]
+        if vsiid != vsiid_reply:
+            LOG.error("VSIID Reply1 mis-match req vsi %(req)s reply "
+                      "vsi %(rep)s", {'req': vsiid, 'rep': vsiid_reply})
+            return False
+        mac_reply = reply.partition("filter = ")[2].split('-')[1]
+        if mac != mac_reply:
+            LOG.error("VSIID Reply1 mis-match req mac %(req)s reply "
+                      "mac %(rep)s", {'req': mac, 'rep': mac_reply})
+            return False
+        return True
+
+    def crosscheck_reply_vsiid_mac(self, reply, vsiid, mac):
+        """Cross Check the reply against the input vsiid, mac. """
+        vsiid_reply = reply.partition("uuid")[2].split()[0][4:]
+        if vsiid != vsiid_reply:
+            LOG.error("VSIID Reply mis-match req vsi %(req)s reply "
+                      "vsi %(rep)s", {'req': vsiid, 'rep': vsiid_reply})
+            return False
+        mac_reply = reply.partition("filter")[2].split('-')[1]
+        if mac != mac_reply:
+            LOG.error("VSIID Reply mis-match req mac %(req)s reply "
+                      "mac %(rep)s", {'req': mac, 'rep': mac_reply})
+            return False
+        return True
+
+    def get_vlan_from_reply1(self, reply, vsiid, mac):
         '''Parse the reply from VDP daemon to get the VLAN value'''
         try:
+            verify_flag = self.crosscheck_reply1_vsiid_mac(reply, vsiid, mac)
+            if not verify_flag:
+                return constants.INVALID_VLAN
             mode_str = reply.partition("mode = ")[2].split()[0]
             if mode_str != "assoc":
                 return constants.INVALID_VLAN
@@ -556,7 +587,7 @@ class LldpadDriver(object):
             return False
         return True
 
-    def get_vlan_from_reply(self, reply):
+    def get_vlan_from_reply(self, reply, vsiid, mac):
         '''Parse the reply from VDP daemon to get the VLAN value'''
         hints_ret = self.check_hints(reply)
         if not hints_ret:
@@ -579,6 +610,9 @@ class LldpadDriver(object):
             LOG.error("Err: not supported currently")
             return constants.INVALID_VLAN
         try:
+            verify_flag = self.crosscheck_reply_vsiid_mac(reply, vsiid, mac)
+            if not verify_flag:
+                return constants.INVALID_VLAN
             filter_val = reply.partition("filter")[2]
             len_fil = len(filter_val)
             vlan_val = filter_val[4:len_fil].split('-')[0]
@@ -616,14 +650,14 @@ class LldpadDriver(object):
             reply = self.send_vdp_query_msg("assoc", mgrid, typeid, typeid_ver,
                                             vsiid_frmt, vsiid, filter_frmt,
                                             gid, mac, vlan, oui_id, oui_data)
-            vlan_resp = self.get_vlan_from_reply(reply)
+            vlan_resp = self.get_vlan_from_reply(reply, vsiid, mac)
             if vlan_resp != constants.INVALID_VLAN:
                 return vlan_resp
         reply = self.send_vdp_msg("assoc", mgrid, typeid, typeid_ver,
                                   vsiid_frmt, vsiid, filter_frmt, gid, mac,
                                   vlan, oui_id, oui_data, sw_resp)
         if sw_resp:
-            vlan = self.get_vlan_from_reply1(reply)
+            vlan = self.get_vlan_from_reply1(reply, vsiid, mac)
             return vlan
 
     def send_vdp_deassoc(self, vsiid=None, mgrid=None, typeid=None,
@@ -654,7 +688,7 @@ class LldpadDriver(object):
             reply = self.send_vdp_query_msg("assoc", mgrid, typeid, typeid_ver,
                                             vsiid_frmt, vsiid, filter_frmt,
                                             gid, mac, vlan, oui_id, oui_data)
-            vlan_resp = self.get_vlan_from_reply(reply)
+            vlan_resp = self.get_vlan_from_reply(reply, vsi_id, mac)
             # This is to cover cases where the enabler has a different VLAN
             # than LLDPAD. deassoc won't go through if wrong VLAN is passed.
             # Since enabler does not have right VLAN, most likely flows are not
