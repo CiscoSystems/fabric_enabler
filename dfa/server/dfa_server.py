@@ -1294,13 +1294,17 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                 LOG.error("delete_vm_function: port %s does not exist." %
                           port_id)
                 return
+        if constants.IP_DHCP_WAIT in vm.ip:
+            ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
+        else:
+            ipaddr = vm.ip
         vm_info = dict(status='down',
                        vm_mac=vm.mac,
                        segmentation_id=vm.segmentation_id,
                        host=vm.host,
                        port_uuid=vm.port_id,
                        net_uuid=vm.network_id,
-                       oui=dict(ip_addr=vm.ip,
+                       oui=dict(ip_addr=ipaddr,
                                 vm_name=vm.name,
                                 vm_uuid=vm.instance_id,
                                 gw_mac=vm.gw_mac,
@@ -1522,9 +1526,13 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                 rpc.RemoteError):
             # Failed to send info to the agent. Keep the data in the
             # database as failure to send it later.
+            if self.get_vm(port_id):
+                return
             self.add_vms_db(vm_info, constants.CREATE_FAIL)
             LOG.error('Failed to send VM info to agent.')
         else:
+            if self.get_vm(port_id):
+                return
             self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
         return
 
@@ -1561,7 +1569,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             return
         network_processed = []
         wait_dhcp_instances = [(k) for k in instances
-                               if k.ip.endswith(constants.IP_DHCP_WAIT)]
+                               if constants.IP_DHCP_WAIT in k.ip]
         for vm in wait_dhcp_instances:
             net_id = vm.network_id
             if net_id in network_processed:
@@ -1593,7 +1601,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         instances = self.get_vms_for_this_req(**req)
         vm_info = []
         for vm in instances:
-            if vm.ip.endswith(constants.IP_DHCP_WAIT):
+            if constants.IP_DHCP_WAIT in vm.ip:
                 ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
             else:
                 ipaddr = vm.ip

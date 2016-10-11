@@ -275,13 +275,17 @@ class DfaFailureRecovery(object):
         # 3. Try Failure recovery for VM create and delete.
         instances = self.get_vms()
         for vm in instances:
+            if constants.IP_DHCP_WAIT in vm.ip:
+                ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
+            else:
+                ipaddr = vm.ip
             vm_info = dict(status=vm.status,
                            vm_mac=vm.mac,
                            segmentation_id=vm.segmentation_id,
                            host=vm.host,
                            port_uuid=vm.port_id,
                            net_uuid=vm.network_id,
-                           oui=dict(ip_addr=vm.ip,
+                           oui=dict(ip_addr=ipaddr,
                                     vm_name=vm.name,
                                     vm_uuid=vm.instance_id,
                                     gw_mac=vm.gw_mac,
