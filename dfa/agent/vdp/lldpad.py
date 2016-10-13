@@ -688,7 +688,7 @@ class LldpadDriver(object):
             reply = self.send_vdp_query_msg("assoc", mgrid, typeid, typeid_ver,
                                             vsiid_frmt, vsiid, filter_frmt,
                                             gid, mac, vlan, oui_id, oui_data)
-            vlan_resp = self.get_vlan_from_reply(reply, vsi_id, mac)
+            vlan_resp = self.get_vlan_from_reply(reply, vsiid, mac)
             # This is to cover cases where the enabler has a different VLAN
             # than LLDPAD. deassoc won't go through if wrong VLAN is passed.
             # Since enabler does not have right VLAN, most likely flows are not
