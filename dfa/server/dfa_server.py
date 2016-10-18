@@ -1229,7 +1229,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             LOG.debug("Migration: updating VM DB with %s.", params)
 
     def _migrate_from(self, vm, new_host):
-
+        if constants.IP_DHCP_WAIT in vm.ip:
+            ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
+        else:
+            ipaddr = vm.ip
         # Send VM 'down' event to agent that migrated VM resided.
         vm_info = dict(status='down',
                        vm_mac=vm.mac,
@@ -1237,7 +1240,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                        host=vm.host,
                        port_uuid=vm.port_id,
                        net_uuid=vm.network_id,
-                       oui=dict(ip_addr=vm.ip,
+                       oui=dict(ip_addr=ipaddr,
                                 vm_name=vm.name,
                                 vm_uuid=vm.instance_id,
                                 gw_mac=vm.gw_mac,
@@ -1254,7 +1257,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             return constants.DELETE_PENDING
 
     def _migrate_to(self, vm, to_host):
-
+        if constants.IP_DHCP_WAIT in vm.ip:
+            ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
+        else:
+            ipaddr = vm.ip        
         # Send VM 'up' event to agent that VM migrated to.
         vm_info = dict(status='up',
                        vm_mac=vm.mac,
@@ -1262,7 +1268,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                        host=to_host,
                        port_uuid=vm.port_id,
                        net_uuid=vm.network_id,
-                       oui=dict(ip_addr=vm.ip,
+                       oui=dict(ip_addr=ipaddr,
                                 vm_name=vm.name,
                                 vm_uuid=vm.instance_id,
                                 gw_mac=vm.gw_mac,
