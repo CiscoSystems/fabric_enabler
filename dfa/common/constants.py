@@ -94,6 +94,9 @@ ERR_PROC_INTERVAL = 20
 # IF 'down' is seen twice continuously
 UPLINK_DOWN_THRES = 3
 
+# Timer to check for the presence of flows
+FLOW_CHECK_INTERVAL = 60
+
 Q_UPL_PRIO = 1
 Q_VM_PRIO = 2
 
