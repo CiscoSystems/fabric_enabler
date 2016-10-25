@@ -172,9 +172,62 @@ class OVSNeutronVdp(object):
         self.fi_evb_dmac = fi_evb_dmac
         self.ucs_fi = is_ucs_fi
         self.setup_lldpad = self.setup_lldpad_ports()
+        flow_check_periodic_task = sys_utils.PeriodicTask(
+            cconstants.FLOW_CHECK_INTERVAL, self._flow_check_handler)
+        self.flow_check_periodic_task = flow_check_periodic_task
+        flow_check_periodic_task.run()
 
     def is_lldpad_setup_done(self):
         return self.setup_lldpad
+
+    def _check_bridge_flow(self, flow, out_vlan, in_vlan):
+        out_vlan_flow_str = 'dl_vlan=' + str(out_vlan)
+        in_vlan_flow_str = 'actions=mod_vlan_vid:' + str(in_vlan)
+        flow_str = out_vlan_flow_str + ' ' + in_vlan_flow_str
+        flow_partition = flow.partition(flow_str)[1]
+        if not len(flow_partition):
+            return False
+        return True
+
+    def _flow_check_handler_internal(self):
+        """Periodic handler to check if installed flows are present.
+
+        This handler runs periodically to check if installed flows are present.
+        This function cannot detect and delete the stale flows, if present.
+        It requires more complexity to delete stale flows. Generally, stale
+        flows are not present. So, that logic is not put here.
+        """
+        integ_flow = self.integ_br_obj.dump_flows_for(
+            in_port=self.int_peer_port_num)
+        ext_flow = self.ext_br_obj.dump_flows_for(
+            in_port=self.phy_peer_port_num)
+        for net_uuid, lvm in self.local_vlan_map.iteritems():
+            vdp_vlan = lvm.any_consistent_vlan()
+            flow_required = False
+            if vdp_vlan and ovs_lib.is_valid_vlan_tag(vdp_vlan):
+                if not self._check_bridge_flow(integ_flow, vdp_vlan, lvm.lvid):
+                    LOG.error("Flow for VDP Vlan %(vdp_vlan)s, Local vlan "
+                              "%(lvid)s not present on Integ bridge",
+                              {'vdp_vlan': vdp_vlan, 'lvid': lvm.lvid})
+                    flow_required = True
+                if not self._check_bridge_flow(ext_flow, lvm.lvid, vdp_vlan):
+                    LOG.error("Flow for VDP Vlan %(vdp_vlan)s, Local vlan "
+                              "%(lvid)s not present on External bridge",
+                              {'vdp_vlan': vdp_vlan, 'lvid': lvm.lvid})
+                    flow_required = True
+                if flow_required:
+                    LOG.info("Programming flows for lvid %(lvid)s vdp vlan "
+                             "%(vdp)s", {'lvid': lvm.lvid, 'vdp': vdp_vlan})
+                    self.program_vm_ovs_flows(lvm.lvid, 0, vdp_vlan)
+
+    def _flow_check_handler(self):
+        """Top level routine to check OVS flow consistency. """
+        LOG.info("In _flow_check_handler")
+        try:
+            with self.ovs_vdp_lock:
+                self._flow_check_handler_internal()
+        except Exception as e:
+            LOG.error("Exception in _flow_check_handler_internal %s", str(e))
 
     def program_vdp_flows(self, lldp_ovs_portnum, phy_port_num):
         br = self.ext_br_obj
@@ -237,6 +290,7 @@ class OVSNeutronVdp(object):
         LOG.debug("Clearing Uplink Params")
         # How is the IP link/veth going to be removed?? fixme(padkrish)
         # IF the veth is removed, no need to unconfigure lldp/evb
+        self.flow_check_periodic_task.stop()
         self.delete_vdp_flows()
         lldp_ovs_veth_str = constants.LLDPAD_OVS_VETH_PORT + self.uplink
         br = self.ext_br_obj
