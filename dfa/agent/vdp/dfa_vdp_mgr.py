@@ -162,6 +162,9 @@ class VdpMgr(object):
         self.static_uplink_first = True
         self.is_ucs_fi = False
         self.evb_emulator = None
+        self.bulk_vm_rcvd_flag = False
+        self.bulk_vm_check_cnt = 0
+        self.vdp_mgr_lock = utils.lock()
         self.read_static_uplink()
         self.start()
         self.topo_disc = topo_disc.TopoDisc(self.topo_disc_cb,
@@ -582,6 +585,26 @@ class VdpMgr(object):
                 self.que.enqueue(constants.Q_UPL_PRIO, upl_msg)
                 # yield
                 LOG.info("Enqueued Uplink Msg from normal")
+            # Sometimes during upgrades, it was found that due to some race
+            # condition, the server does not send the Bulk VM event.
+            # the bulk VM event sends all the VM's running in this agent.
+            # Whenever, a save_uplink is done by the agent, the server sends
+            # the Bulk VM event. So, having a check here, wherein, during the
+            # 'normal' stage of uplink detection, if Bulk VM event is not
+            # received after an attempt, save_uplink is done to request the
+            # Bulk VM list. It's not protected with a mutex, since worst case,
+            # Bulk VM event will be sent twice, which is not that bad. When
+            # uplink is detected for the first time, it will hit the below
+            # else case and there a save_uplink is anyways done.
+            if not self.bulk_vm_rcvd_flag:
+                if self.bulk_vm_check_cnt >= 1:
+                    self.bulk_vm_check_cnt = 0
+                    self.save_uplink(uplink=self.phy_uplink,
+                                     veth_intf=self.veth_intf)
+                    LOG.info("Doing save_uplink again to request Bulk VM's")
+                else:
+                    LOG.info("Bulk VM not received, incrementing count")
+                    self.bulk_vm_check_cnt += 1
         else:
             LOG.info("In Periodic Uplink Task uplink found %s" % ret)
             bond_intf = sys_utils.get_bond_intf(ret)
@@ -607,6 +630,7 @@ class VdpMgr(object):
             vm_msg = VdpQueMsg(constants.VM_BULK_SYNC_MSG_TYPE,
                                vm_bulk_list=vm_dict_list,
                                phy_uplink=self.phy_uplink)
+            self.bulk_vm_rcvd_flag = True
         else:
             vm_dict = vm_dict_list
             LOG.info("Obtained VM event Enqueueing Status %s MAC %s uuid %s "
@@ -622,11 +646,34 @@ class VdpMgr(object):
                                phy_uplink=self.phy_uplink)
         self.que.enqueue(constants.Q_VM_PRIO, vm_msg)
 
+    def is_uplink_received(self):
+        """Returns whether uplink information is received after restart.
+
+        Not protecting this with a mutex, since this gets called inside the
+        loop from dfa_agent and having a mutex is a overkill. Worst case,
+        during multiple restarts on server and when the corner case is hit,
+        this may return an incorrect value of False when _dfa_uplink_restart
+        is at the middle of execution. Returning an incorrect value of False,
+        may trigger an RPC to the server to retrieve the uplink one extra time.
+        _dfa_uplink_restart will not get executed twice, since that is anyway
+        protected with a mutex.
+        """
+        return self.restart_uplink_called
+
     def dfa_uplink_restart(self, uplink_dict):
+        try:
+            with self.vdp_mgr_lock:
+                if not self.restart_uplink_called:
+                    self._dfa_uplink_restart(uplink_dict)
+        except Exception as exc:
+            LOG.error("Exception in dfa_uplink_restart %s" % str(exc))
+
+    def _dfa_uplink_restart(self, uplink_dict):
         LOG.info("Obtained uplink after restart %s " % uplink_dict)
         # This shouldn't happen
         if self.phy_uplink is not None:
-            LOG.error("Uplink detection already done %s" % self.phy_uplink)
+            LOG.error("Error case: Uplink detection already done %s",
+                      self.phy_uplink)
             return
         uplink = uplink_dict.get('uplink')
         veth_intf = uplink_dict.get('veth_intf')
