@@ -157,6 +157,11 @@ class DfaAgent(object):
         except rpc.MessagingTimeout:
             LOG.error("RPC timeout: Request for uplink info failed.")
 
+    def is_uplink_received(self):
+        """Finds if uplink information is received and processed."""
+
+        return self._vdpm.is_uplink_received()
+
     def setup_rpc(self):
         """Setup RPC server for dfa agent."""
 
@@ -241,7 +246,8 @@ def main():
 
             # If the agent comes up for the fist time (could be after crash),
             # ask for the uplink info.
-            if dfa_agent._need_uplink_info:
+            if dfa_agent._need_uplink_info or (
+               not dfa_agent.is_uplink_received()):
                 dfa_agent.request_uplink_info()
 
             for trd in dfa_agent.agent_task_list:

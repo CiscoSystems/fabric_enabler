@@ -239,6 +239,17 @@ class OVSBridge(BaseOVS):
             return res.strip().split("\n")
         return []
 
+    def dump_flows_for(self, **kwargs):
+        retval = None
+        flow_str = ",".join(
+            "=".join([key, str(val)]) for key, val in kwargs.items())
+
+        flows = self.run_ofctl("dump-flows", [flow_str])
+        if flows:
+            retval = '\n'.join(item for item in flows.splitlines()
+                               if 'NXST' not in item)
+        return retval
+
     def __exit__(self, exc_type, exc_value, exc_tb):
         self.destroy()
 
