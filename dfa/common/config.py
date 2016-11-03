@@ -126,6 +126,7 @@ default_notify_opts = {
 default_loadbalance_opts = {
     'loadbalance': {
         'lb_enabled': False,
+        'lb_native' : True,
         'lb_vrf_profile': 'vrf-common-universal-dynamic-LB-ES',
         'lb_svc_net_profile': 'serviceNetworkUniversalDynamicRoutingLBProfile',
         'lb_svc_net': '199.199.1.0/24',

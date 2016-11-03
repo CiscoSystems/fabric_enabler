@@ -354,8 +354,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         self.ser_q = constants.DFA_SERVER_QUEUE
         self._setup_rpc()
         self._lbMgr = None
-        if (cfg.loadbalance.lb_enabled):
-            LOG.debug("LBaaS is enabled")
+        if (cfg.loadbalance.lb_enabled and not cfg.loadbalance.lb_native):
+            LOG.debug("Vendor LBaaS is enabled")
             lbaas_module = importlib.import_module(
                 'dfa.server.services.loadbalance.lb_mgr')
             self._lbMgr = lbaas_module.LbMgr(cfg, self)
@@ -372,6 +372,15 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                 'enabler_pool_hm_create': self._lbMgr.pool_hm_create_event,
                 'enabler_pool_hm_update': self._lbMgr.pool_hm_update_event,
                 'enabler_pool_hm_delete': self._lbMgr.pool_hm_delete_event,
+            })
+        elif (cfg.loadbalance.lb_enabled and cfg.loadbalance.lb_native):
+            LOG.debug("Native LBaaS is enabled")
+            self.events.update({
+                'vip.create.end': self.vip_create_event,
+                'vip.delete.end': self.vip_delete_event,
+                'listener.create.end': self.listener_create_event,
+                'listener.delete.end': self.listener_delete_event,
+                'loadbalancer.delete.end': self.loadbalancer_delete_event,
             })
         if self.dcnm_dhcp is False:
             self.turn_on_dhcp_check()
@@ -1050,17 +1059,18 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             LOG.exception('dcnm_network_delete_event: Failed to delete '
                           '%(network)s.', {'network': query_net.name})
 
-    def _make_vm_info(self, port, status, dhcp_port=False):
+    def _make_vm_info(self, port, status, vm_prefix=None):
         port_id = port.get('id')
         device_id = port.get('device_id').replace('-', '')
         tenant_id = port.get('tenant_id')
         net_id = port.get('network_id')
         inst_ip = '0.0.0.0'
-        inst_name = self._inst_api.get_instance_for_uuid(device_id,
-                                                         tenant_id)
-
         segid = (net_id in self.network and
                  self.network[net_id].get('segmentation_id')) or 0
+        if not vm_prefix:
+            inst_name = self._inst_api.get_instance_for_uuid(device_id,
+                                                             tenant_id)
+
         fwd_mod = (net_id in self.network and
                    self.network[net_id].get('fwd_mod')) or 'anycast-gateway'
         gw_mac = self._gateway_mac if fwd_mod == 'proxy-gateway' else None
@@ -1068,9 +1078,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         if self.dcnm_dhcp is False:
             fixed_ip = port.get('fixed_ips')
             inst_ip = fixed_ip[0].get('ip_address')
-            if (dhcp_port):
-                inst_name = str(segid)+'_' + fixed_ip[0].get('ip_address')
-                device_id = inst_name
+            if vm_prefix:
+                inst_name = (vm_prefix + str(segid)
+                             + '_' + inst_ip.split(".")[3])
 
         vm_info = dict(status=status,
                        vm_mac=vm_mac,
@@ -1294,39 +1304,35 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                 LOG.error("delete_vm_function: port %s does not exist." %
                           port_id)
                 return
-        if constants.IP_DHCP_WAIT in vm.ip:
-            ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
-        else:
-            ipaddr = vm.ip
+        if not vm.host:
+            LOG.debug("host is empty, delete db right away")
+            self.delete_vm_db(vm.port_id)
+            if vm.port_id in self.port:
+                del self.port[vm.port_id]
+            return
         vm_info = dict(status='down',
                        vm_mac=vm.mac,
                        segmentation_id=vm.segmentation_id,
                        host=vm.host,
                        port_uuid=vm.port_id,
                        net_uuid=vm.network_id,
-                       oui=dict(ip_addr=ipaddr,
+                       oui=dict(ip_addr=vm.ip,
                                 vm_name=vm.name,
                                 vm_uuid=vm.instance_id,
                                 gw_mac=vm.gw_mac,
                                 fwd_mod=vm.fwd_mod,
                                 oui_id='cisco'))
         LOG.debug("deleting port : %s" % vm_info)
-        try:
-            self.neutron_event.send_vm_info(str(vm_info.get('host')),
-                                            str(vm_info))
-        except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
-            params = dict(columns=dict(status='down',
-                                       result=constants.DELETE_FAIL))
-            self.update_vm_db(vm.port_id, **params)
-            LOG.error('Failed to send VM info to agent')
-        else:
-            # Updating the result to delete pending state. The entry should be
-            # removed when agent confirms delete is successful.
+
+        if self.send_vm_info(vm_info):
             params = dict(columns=dict(status='down',
                                        result=constants.DELETE_PENDING))
-            self.update_vm_db(vm.port_id, **params)
             LOG.info('VM %(vm)s is in delete pending state.',
                      {'vm': vm.port_id})
+        else:
+            params = dict(columns=dict(status='down',
+                                       result=constants.DELETE_FAIL))
+        self.update_vm_db(vm.port_id, **params)
 
     def service_vnic_create(self, vnic_info_arg):
         LOG.info("Service vnic create %s", vnic_info_arg)
@@ -1509,31 +1515,47 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         else:
             return False
 
+    def send_vm_info(self, vm_info):
+        """ Send vm info to the compute host.
+        it will return True/False
+        """
+        agent_host = vm_info.get('host')
+        if not agent_host:
+            LOG.info("agent host is empty, not sending vm info")
+            return True
+        ip = vm_info['oui']['ip_addr']
+        if constants.IP_DHCP_WAIT in ip:
+            ipaddr = ip.replace(constants.IP_DHCP_WAIT, '')
+            vm_info['oui'][ip_addr] = ipaddr
+        try:
+            self.neutron_event.send_vm_info(agent_host,
+                                            str(vm_info))
+        except (rpc.MessagingTimeout, rpc.RPCException,
+                rpc.RemoteError):
+            # Failed to send info to the agent. Keep the data in the
+            # database as failure to send it later.
+            LOG.error('Failed to send VM info to agent %s', agent_host)
+            return False
+        else:
+            return True
+
     def add_dhcp_port(self, p):
         port_id = p['id']
         if self.get_vm(port_id):
             LOG.info("dhcp port %s has already been  added" %
                      port_id)
             return
+        d_id = p["device_id"]
+        len = constants.DID_LEN
+        p["device_id"] = d_id[:len] if len(d_id) > len else d_id
 
-        vm_info = self._make_vm_info(p, 'up', dhcp_port=True)
+        vm_info = self._make_vm_info(p, 'up', constants.DHCP_PREFIX)
         LOG.debug("add_dhcp_ports : %s" % vm_info)
         self.port[port_id] = vm_info
-        try:
-            self.neutron_event.send_vm_info(str(vm_info.get('host')),
-                                            str(vm_info))
-        except (rpc.MessagingTimeout, rpc.RPCException,
-                rpc.RemoteError):
-            # Failed to send info to the agent. Keep the data in the
-            # database as failure to send it later.
-            if self.get_vm(port_id):
-                return
-            self.add_vms_db(vm_info, constants.CREATE_FAIL)
-            LOG.error('Failed to send VM info to agent.')
-        else:
-            if self.get_vm(port_id):
-                return
+        if self.send_vm_info(vm_info):
             self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
+        else:
+            self.add_vms_db(vm_info, constants.CREATE_FAIL)
         return
 
     def correct_dhcp_ports(self, net_id):
@@ -1817,6 +1839,95 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         """Process dhcp agent net remove event.
         """
         self.turn_on_dhcp_check()
+
+    def add_lbaas_port(self, port_id, lb_id):
+        """Give port id, get port info and send vm info to agent,
+        lb_id will be the vip id for v1 and lbaas_id for v2
+        """
+        port_info = self.neutronclient.show_port(port_id)
+        port = port_info.get('port')
+        if not port:
+            LOG.error("Can not retrieve port info for port %s" % port_id)
+            return
+        LOG.debug("lbaas add port, %s", port)
+        port["device_id"] = lb_id
+
+        vm_info = self._make_vm_info(port, 'up', constants.LBAAS_PREFIX)
+        self.port[port_id] = vm_info
+        if self.send_vm_info(vm_info):
+            self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
+        else:
+            self.add_vms_db(vm_info, constants.CREATE_FAIL)
+        return
+
+    def delete_lbaas_port(self, lb_id):
+        """Given lbaas id , send vm down event and delete db
+        """
+        lb_id = lb_id.replace('-', '')
+        req = dict(instance_id=lb_id)
+        instances = self.get_vms_for_this_req(**req)
+        for vm in instances:
+            LOG.info("deleting lbaas vm %s " % vm.name)
+            self.delete_vm_function(vm.port_id, vm)
+
+    def vip_create_event(self, vip_info):
+        """Process vip create event
+        """
+        vip_data = vip_info.get('vip')
+        port_id = vip_data.get('port_id')
+        vip_id = vip_data.get('id')
+        self.add_lbaas_port(port_id, vip_id)
+
+    def vip_delete_event(self, vip_info):
+        """Process vip delete event
+        """
+        vip_id = vip_info.get('vip_id')
+        self.delete_lbaas_port(vip_id)
+
+    def listener_create_event(self, listener_info):
+        """ Process listener create event
+        This is lbaas v2
+        vif will be plugged into ovs when first
+        listener is created and unpluged from ovs
+        when last listener is deleted
+        """
+        listener_data = listener_info.get('listener')
+        lb_list = listener_data.get('loadbalancers')
+        for lb in lb_list:
+            lb_id = lb.get('id')
+            req = dict(instance_id=(lb_id.replace('-', '')))
+            instances = self.get_vms_for_this_req(**req)
+            if not instances:
+                lb_info = self.neutronclient.show_loadbalancer(lb_id)
+                if lb_info:
+                    port_id = lb_info["loadbalancer"]["vip_port_id"]
+                    self.add_lbaas_port(port_id, lb_id)
+            else:
+                LOG.info("lbaas port for lb %s already added" % lb_id)
+
+    def listener_delete_event(self, listener_info):
+        """ Process listener delete event
+        This is lbaas v2
+        vif will be plugged into ovs when first
+        listener is created and unpluged from ovs
+        when last listener is created.
+        as the data only contains listener id, we will
+        scan all loadbalancers from db and delete the vdp
+        if there admin state is down in that loadbalancer
+        """
+        lb_list = self.neutronclient.list_loadbalancers()
+        for lb in lb_list.get('loadbalancers'):
+            if not lb.get("listeners"):
+                lb_id = lb.get('id')
+                LOG.info("Deleting lb %s port" % lb_id)
+                self.delete_lbaas_port(lb_id)
+
+    def loadbalancer_delete_event(self, lb_info):
+        """ Process loadbalancer delete event
+        This is lbaas v2
+        """
+        lb_id = lb_info.get('loadbalancer_id')
+        self.delete_lbaas_port(lb_id)
 
     def create_threads(self):
         """Create threads on server."""
