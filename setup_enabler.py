@@ -562,12 +562,13 @@ class NexusFabricEnablerInstaller(object):
             'fabric-enabler-server':
             ["pcs resource create fabric-enabler-server systemd:fabric-enabler-server",
              "pcs resource meta fabric-enabler-server migration-threshold=1",
-             "pcs constraint order start galera-master then start fabric-enabler-server",
+             "pcs constraint order promote galera-master then start fabric-enabler-server",
              "pcs constraint order start rabbitmq-clone then start fabric-enabler-server",
              "pcs resource enable fabric-enabler-server"],
                 'fabric-enabler-agent':
             ["pcs resource create fabric-enabler-agent systemd:fabric-enabler-agent --clone  interleave=true",
              "pcs constraint order start rabbitmq-clone then start fabric-enabler-agent-clone",
+             "pcs constraint order start neutron-openvswitch-agent-clone then start fabric-enabler-agent-clone",
              "pcs resource enable fabric-enabler-agent"],
             'lldpad':
             ["pcs resource create lldpad systemd:lldpad --clone interleave=true",
