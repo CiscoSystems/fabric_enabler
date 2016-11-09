@@ -20,6 +20,7 @@ import sys
 import time
 
 from dfa.common import dfa_logger as logging
+from dfa.common import dfa_sys_lib as dfa_sys_lib
 
 LOG = logging.getLogger(__name__)
 
@@ -59,9 +60,7 @@ def read_file(file_name):
 
 
 def find_uplink(root_helper):
-    intf_cmd_list = ("ip link |grep 'state UP' | awk '{print $2}' "
-                     "| sed 's/://'|grep ^[epb]")
-    intf_net_addr = "ifconfig %s | grep 'inet addr'"
+    intf_list = dfa_sys_lib.get_all_run_phy_intf()
     lldptoolbin = root_helper + ' lldptool' if root_helper else (
         'lldptool')
     en_rxtx = (lldptoolbin + ' -i %s -g "ncb" -L adminStatus=rxtx')
@@ -69,10 +68,9 @@ def find_uplink(root_helper):
     mod_brdg = (lldptoolbin + ' -i %s -g "ncb" -t -n -V evb | '
                 'grep "mode:bridge"')
 
-    intf_list, returncode = run_cmd_line(intf_cmd_list)
-    for intf in intf_list.split():
-        intf_out, retcode = run_cmd_line(intf_net_addr % intf)
-        if intf_out is None:
+    for intf in intf_list:
+        is_ip_addr_cfgd = dfa_sys_lib.is_phy_intf_ipv4_cfgd(intf)
+        if not is_ip_addr_cfgd:
             out, ret = run_cmd_line(en_rxtx % intf)
             time.sleep(40)
             out, ret = run_cmd_line(mod_brdg % intf)
