@@ -1098,6 +1098,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                 port.get('binding:vif_type').lower() == 'unbound'):
             # A port is created without binding host, vif_type,...
             # Keep the info in the database.
+            vm_info['oui']["ip_addr"] += constants.IP_DHCP_WAIT
             self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
 
             LOG.debug('Port %s created with no binding host and vif_type.')
@@ -1260,7 +1261,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         if constants.IP_DHCP_WAIT in vm.ip:
             ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
         else:
-            ipaddr = vm.ip        
+            ipaddr = vm.ip
         # Send VM 'up' event to agent that VM migrated to.
         vm_info = dict(status='up',
                        vm_mac=vm.mac,
@@ -1901,10 +1902,14 @@ def dfa_server():
         dfa.create_threads()
         while True:
             time.sleep(constants.MAIN_INTERVAL)
-            if dfa.dcnm_dhcp:
-                dfa.update_port_ip_address()
-            else:
-                dfa.check_dhcp_ports()
+            try:
+                if dfa.dcnm_dhcp:
+                    dfa.update_port_ip_address()
+                else:
+                    dfa.check_dhcp_ports()
+            except Exception as exc:
+                LOG.error("Exception %s occured " % exc.__class__)
+
             for trd in dfa.dfa_threads:
                 if not trd.am_i_active:
                     LOG.info("Thread %s is not active.", trd.name)
