@@ -20,6 +20,7 @@
 import os
 import shlex
 from eventlet import greenthread
+import netifaces
 import signal
 from dfa.common import constants as q_const
 from eventlet.green import subprocess
@@ -505,18 +506,25 @@ def get_all_run_phy_intf():
     return intf_list
 
 
-def is_phy_intf_ipv4_cfgd(intf):
-    cmd = ["ip", "address", "show", "dev", intf]
+def get_intf_ipv4_addr(intf):
+    """Retrieves the IPV4 address associated with an interface. """
+
     try:
-        output = execute(cmd)
+        interface_addrs = netifaces.ifaddresses(intf)
+        if netifaces.AF_INET in interface_addrs:
+            return interface_addrs[netifaces.AF_INET][0]['addr']
     except Exception as e:
-        LOG.error("Unable to get IP address for %s", intf)
-        return False
-    inet_len = output.split('inet ')
-    if inet_len < 2:
-        return False
-    else:
+        LOG.error("Unable to get IP address for %(intf)s, exception %(exc)s",
+                  {'intf': intf, 'exc': str(e)})
+
+
+def is_phy_intf_ipv4_cfgd(intf):
+    """Checks if the interface has IP address configured. """
+
+    ipv4_addr = get_intf_ipv4_addr(intf)
+    if ipv4_addr:
         return True
+    return False
 
 
 def is_intf_up(intf):
