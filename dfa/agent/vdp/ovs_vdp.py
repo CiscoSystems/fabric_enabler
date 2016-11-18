@@ -596,7 +596,7 @@ class OVSNeutronVdp(object):
                                                 segmentation_id, oui)
         else:
             if self.vdp_mode == constants.VDP_SEGMENT_MODE:
-                LOG.info("Status down for portname for uuid %s is ", port_uuid)
+                LOG.info("Status down for portname uuid %s", port_uuid)
                 ret = self.port_down_segment_mode(lldpad_port, port_uuid,
                                                   mac, net_uuid,
                                                   segmentation_id, oui)
