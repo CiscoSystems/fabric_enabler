@@ -1526,7 +1526,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         ip = vm_info['oui']['ip_addr']
         if constants.IP_DHCP_WAIT in ip:
             ipaddr = ip.replace(constants.IP_DHCP_WAIT, '')
-            vm_info['oui'][ip_addr] = ipaddr
+            vm_info['oui']['ip_addr'] = ipaddr
         try:
             self.neutron_event.send_vm_info(agent_host,
                                             str(vm_info))
