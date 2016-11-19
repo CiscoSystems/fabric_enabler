@@ -1546,8 +1546,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                      port_id)
             return
         d_id = p["device_id"]
-        len = constants.DID_LEN
-        p["device_id"] = d_id[:len] if len(d_id) > len else d_id
+        l = constants.DID_LEN
+        p["device_id"] = d_id[:l] if len(d_id) > l else d_id
 
         vm_info = self._make_vm_info(p, 'up', constants.DHCP_PREFIX)
         LOG.debug("add_dhcp_ports : %s" % vm_info)
