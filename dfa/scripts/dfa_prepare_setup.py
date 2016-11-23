@@ -410,13 +410,15 @@ if __name__ == '__main__':
     parser.add_option('--vendor-os-release',
                       type='string', dest='vendor_os_release', default=None,
                       help='Vendor specific OS release, e.g. rhel-osp7')
-    parser.add_option('--upgrade', default=False,
+    parser.add_option('--upgrade', default=None,
                       help='Set to True if upgrading an existing installation')
     (options, args) = parser.parse_args()
 
     node = options.node_function.lower()
+    upgrade = True if options.upgrade is not None \
+              and options.upgrade.lower() == 'true' else False
 
-    if options.upgrade:
+    if upgrade:
         if node == 'control':
             upgrade_database(root_helper)
     else:
