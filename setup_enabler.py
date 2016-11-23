@@ -88,12 +88,11 @@ class NexusFabricEnablerInstaller(object):
             self.src_dir, self.uplink_file)
         self.run_dfa_prep_on_control = (
             '%s python %s/dfa_prepare_setup.py --node-function=control '
-            '%s %s %s %s' % (
+            '%s %s %s' % (
                 self.root_helper, self.script_dir,
                 '--mysql-user=' + mysql_user if mysql_user else '',
                 '--mysql-password=' + mysql_passwd if mysql_passwd else '',
-                '--mysql-host=' + mysql_host if mysql_host else '',
-                '--upgrade=True'))
+                '--mysql-host=' + mysql_host if mysql_host else ''))
         self.run_dfa_prep_on_hacontrol = (
             '%s python %s/dfa_prepare_setup.py --node-function=ha-control '
             '%s %s %s' % (
@@ -281,14 +280,16 @@ class NexusFabricEnablerInstaller(object):
         if self.vendor_os_rel == 'rhel-osp7':
             self.rhel_osp7_setup(hamode)
         else:
-            print "restarting keystone"
-            self.restart_keystone_process()
-            time.sleep(10)
-            self.restart_neutron_processes()
-            time.sleep(10)
-            if hamode is False:
-                self.restart_fabric_enabler_server()
-            self.restart_fabric_enabler_agent()
+            if not self.upgrade:
+                print "restarting keystone"
+                self.restart_keystone_process()
+                time.sleep(10)
+                self.restart_neutron_processes()
+                time.sleep(10)
+            if not self.upgrade or (self.upgrade and self.restart_on_upgrades):
+                if hamode is False:
+                    self.restart_fabric_enabler_server()
+                self.restart_fabric_enabler_agent()
 
     def install_remote(self, command, host, user, password=None):
         """Run script on remote node."""
@@ -348,7 +349,7 @@ class NexusFabricEnablerInstaller(object):
             cmd += "https_proxy=%s " % (self.https_proxy)
         cmd += "python setup_enabler.py --compute-local=True "
         if compute_uplink is not None:
-            cmd += "--uplink=%s" % (compute_uplink)
+            cmd += "--uplink=%s " % (compute_uplink)
         if self.vendor_os_rel is not None:
             cmd += "--vendor-os-release=%s " % (self.vendor_os_rel)
         if self.upgrade:
