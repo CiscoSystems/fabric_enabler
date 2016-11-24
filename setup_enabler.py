@@ -73,6 +73,9 @@ class NexusFabricEnablerInstaller(object):
         self.http_proxy = None
         self.https_proxy = None
         self.vendor_os_rel = None
+        self.upgrade = False
+        self.restart_on_upgrades = True
+        self.restart_lldpad_on_upgrades = False
         self.root_helper = '' if os.geteuid() == 0 else 'sudo '
         self.src_dir = os.path.basename(
             os.path.dirname(os.path.realpath(__file__)))
@@ -266,25 +269,30 @@ class NexusFabricEnablerInstaller(object):
         print output
         output, returncode = self.run_cmd_line(self.install_pkg, shell=True)
         print output
-        output, returncode = self.run_cmd_line(self.run_lldpad, shell=True, check_result=False)
-        print output
+        
+        if not self.upgrade or (self.upgrade and self.restart_lldpad_on_upgrades):
+            output, returncode = self.run_cmd_line(self.run_lldpad, shell=True, check_result=False)
+            print output
+
         output, returncode = self.run_cmd_line(self.cleanup, shell=True, check_result=False)
         print output
 
         if self.vendor_os_rel == 'rhel-osp7':
             self.rhel_osp7_setup(hamode)
         else:
-            print "restarting keystone"
-            self.restart_keystone_process()
-            time.sleep(10)
-            self.restart_neutron_processes()
-            time.sleep(10)
-            if hamode is False:
-                self.restart_fabric_enabler_server()
-            self.restart_fabric_enabler_agent()
+            if not self.upgrade:
+                print "restarting keystone"
+                self.restart_keystone_process()
+                time.sleep(10)
+                self.restart_neutron_processes()
+                time.sleep(10)
+            if not self.upgrade or (self.upgrade and self.restart_on_upgrades):
+                if hamode is False:
+                    self.restart_fabric_enabler_server()
+                self.restart_fabric_enabler_agent()
 
     def install_remote(self, command, host, user, password=None):
-        """Invoke installation script on remote node."""
+        """Run script on remote node."""
 
         print("Invoking installation on %s, please wait..." % (host))
         c = self.create_sshClient(host, user, password)
@@ -292,6 +300,7 @@ class NexusFabricEnablerInstaller(object):
             print "Could not connect to remote host %s" % (host)
             return
         c.get_transport().open_session().set_combine_stderr(True)
+        print("CMD: %s" % command)
         ssh_stdin, ssh_stdout, ssh_stderr = c.exec_command(command,
                                                            get_pty=True)
         for i in ssh_stdout.readlines():
@@ -317,6 +326,10 @@ class NexusFabricEnablerInstaller(object):
             cmd += "--mysql-host=%s " % (self.mysql_host)
         if self.vendor_os_rel is not None:
             cmd += "--vendor-os-release=%s " % (self.vendor_os_rel)
+        if self.upgrade:
+            cmd += "--upgrade=True "
+            cmd += "--restart=%s " % (self.restart_on_upgrades)
+            cmd += "--restart-lldpad=%s " % (self.restart_lldpad_on_upgrades)
         cmd += "--controller-only=True "
         if ha_mode:
             cmd += "--ha-mode=True"
@@ -336,19 +349,34 @@ class NexusFabricEnablerInstaller(object):
             cmd += "https_proxy=%s " % (self.https_proxy)
         cmd += "python setup_enabler.py --compute-local=True "
         if compute_uplink is not None:
-            cmd += "--uplink=%s" % (compute_uplink)
+            cmd += "--uplink=%s " % (compute_uplink)
         if self.vendor_os_rel is not None:
             cmd += "--vendor-os-release=%s " % (self.vendor_os_rel)
+        if self.upgrade:
+            cmd += "--upgrade=True "
+            cmd += "--restart=%s " % (self.restart_on_upgrades)
+            cmd += "--restart-lldpad=%s " % (self.restart_lldpad_on_upgrades)
         self.install_remote(cmd, compute_name, compute_user, compute_password)
 
     def setup_compute_local(self, input_compute_uplink):
         """Install Enabler on  local compute node"""
-
-        script_list = [self.rm_uplink, self.cp_uplink,
-                       self.run_dfa_prep_on_compute,
-                       self.add_req_txt, self.install_pkg,
-                       self.stop_agent, self.start_agent,
-                       self.run_lldpad, self.cleanup]
+        
+        if self.upgrade:
+            script_list = [ self.run_dfa_prep_on_compute,
+                            self.add_req_txt, self.install_pkg ]
+            if self.restart_on_upgrades:
+                script_list.extend([ self.stop_agent,
+                                     self.start_agent])
+            if self.restart_lldpad_on_upgrades:
+                script_list.append(" ".join((self.run_lldpad, "restart")))
+                                   
+            script_list.append(self.cleanup)
+        else:
+            script_list = [self.rm_uplink, self.cp_uplink,
+                           self.run_dfa_prep_on_compute,
+                           self.add_req_txt, self.install_pkg,
+                           self.stop_agent, self.start_agent,
+                           self.run_lldpad, self.cleanup]
 
         if input_compute_uplink is None:
             input_compute_uplink = 'auto'
@@ -480,7 +508,47 @@ class NexusFabricEnablerInstaller(object):
         self.run_dfa_prep_on_hacontrol += o
         self.run_dfa_prep_on_compute += o
 
+    def set_upgrade(self, upgrade):
+        # Save value...
+        self.upgrade = upgrade
+
+        # ...and modify commands run locally
+        o = ' --upgrade=%s' % ("True" if upgrade else "False")
+        self.run_dfa_prep_on_control += o
+        self.run_dfa_prep_on_hacontrol += o
+        self.run_dfa_prep_on_compute += o
+
+    def set_restart_on_upgrades(self, restart):
+        self.restart_on_upgrades = restart
+
+    def set_restart_lldpad_on_upgrades(self, restart):
+        self.restart_lldpad_on_upgrades = restart
+
     def rhel_osp7_setup(self, hamode):
+        # If upgrading restart only Fabric Enabler Server and Agent resource only
+        if self.upgrade:
+            pcs_resources_restart = []
+            if self.restart_on_upgrades:
+                pcs_resources_restart.extend(['fabric-enabler-server',
+                                             'fabric-enabler-agent'])
+            if self.restart_lldpad_on_upgrades:
+                pcs_resources_restart.append('lldpad')
+            
+            for resource in pcs_resources_restart:
+                cmd = "%s pcs resource restart %s" % \
+                      (self.root_helper, resource)
+                o, rc = self.run_cmd_line(cmd, check_result=False)
+                print(o)
+                if rc != 0:
+                    cmd = "%s pcs resource cleanup %s" % \
+                          (self.root_helper, resource)
+                    o, rc = self.run_cmd_line(cmd, check_result=False)
+                    print(o)
+            return
+
+        if hamode:
+            return
+
         # Restart keystone/neutron
         print("Restarting keystone and neutron")
         cmds = ["pcs resource restart openstack-keystone",
@@ -495,35 +563,30 @@ class NexusFabricEnablerInstaller(object):
             'fabric-enabler-server':
             ["pcs resource create fabric-enabler-server systemd:fabric-enabler-server",
              "pcs resource meta fabric-enabler-server migration-threshold=1",
-             "pcs constraint order start galera-master then start fabric-enabler-server",
+             "pcs constraint order promote galera-master then start fabric-enabler-server",
              "pcs constraint order start rabbitmq-clone then start fabric-enabler-server",
              "pcs resource enable fabric-enabler-server"],
                 'fabric-enabler-agent':
             ["pcs resource create fabric-enabler-agent systemd:fabric-enabler-agent --clone  interleave=true",
              "pcs constraint order start rabbitmq-clone then start fabric-enabler-agent-clone",
+             "pcs constraint order start neutron-openvswitch-agent-clone then start fabric-enabler-agent-clone",
              "pcs resource enable fabric-enabler-agent"],
             'lldpad':
             ["pcs resource create lldpad systemd:lldpad --clone interleave=true",
              "pcs resource enable lldpad"]
         }
-        if not hamode:
-            print("Setting up and starting Pacemaker resources")
-            for resource in pcs_resources:
-                cmd = "%s pcs resource show %s 2>/dev/null" % \
-                      (self.root_helper, resource)
-                o, rc = self.run_cmd_line(cmd, check_result=False, shell=True)
-                if o is None:
-                    for c in pcs_resources[resource]:
-                        cmd = "%s %s" % (self.root_helper, c)
-                        o, rc = self.run_cmd_line(cmd, check_result=False)
-                        print(o)
-                else:
+
+        print("Setting up and starting Pacemaker resources")
+        for resource in pcs_resources:
+            cmd = "%s pcs resource show %s 2>/dev/null" % \
+                  (self.root_helper, resource)
+            o, rc = self.run_cmd_line(cmd, check_result=False, shell=True)
+            if o is None:
+                for c in pcs_resources[resource]:
+                    cmd = "%s %s" % (self.root_helper, c)
+                    o, rc = self.run_cmd_line(cmd, check_result=False)
                     print(o)
-        else:
-            for resource in pcs_resources:
-                cmd = "%s pcs resource cleanup %s" % \
-                      (self.root_helper, resource)
-                o, rc = self.run_cmd_line(cmd, check_result=False)
+            else:
                 print(o)
 
 if __name__ == '__main__':
@@ -562,6 +625,12 @@ if __name__ == '__main__':
                         "(only for control node)")
     parser.add_argument("--vendor-os-release", default=None,
                         help="Vendor specific OS release, e.g. rhel-osp7.")
+    parser.add_argument("--upgrade", default=None,
+                        help="Set to True if upgrading an existing installation")
+    parser.add_argument("--restart", default=None,
+                        help="Set to True to restart Fabric Enabler Server/Agent on upgrades")
+    parser.add_argument("--restart-lldpad", default=None,
+                        help="Set to True to restart LLDPAD on upgrades")
 
     args = parser.parse_args()
     input_compute_name = args.compute_name
@@ -581,6 +650,12 @@ if __name__ == '__main__':
                    "remote" if args.vendor_os_release == 'rhel-osp7' and \
                    not args.controller_only \
                    else "local"
+    upgrade = True if args.upgrade is not None \
+              and args.upgrade.lower() == 'true' else False
+    restart = True if args.restart is None \
+              or args.restart.lower() == 'true' else False
+    restart_lldpad = True if args.restart_lldpad is not None \
+                     and args.restart_lldpad.lower() == 'true' else False
 
     if args.vendor_os_release == 'rhel-osp7' and \
        not local_compute and not controller_only \
@@ -599,15 +674,27 @@ if __name__ == '__main__':
                         if args.compute_name is not None \
                         else "as per enabler_conf.ini"
 
-    print("This script will install the Openstack Fabric Enabler as follows:")
-    print(" - install on control node: %s" % \
-          ("yes" if install_control else "no"))
+    op = "upgrade" if upgrade else "install"
+
+    print("This script will %s the Openstack Fabric Enabler as follows:" % (op))
+    print(" - %s on control node: %s" % \
+          (op, "yes" if install_control else "no"))
     print(" - control node(s): %s" % (control_node))
     print(" - control HA mode: %s" % (control_ha_mode))
-    print(" - install on compute nodes: %s" %
-        ("no" if controller_only else "yes"))
+    print(" - %s on compute nodes: %s" %
+        (op, "no" if controller_only else "yes"))
     print(" - compute node(s): %s" % (compute_nodes))
     print(" - uplink: %s" % ("auto" if input_uplink is None else input_uplink))
+
+    if upgrade:
+        print(" - restart agent/server: %s" % ("yes" if restart else "no"))
+        print(" - restart LLDPAD: %s" % ("yes" if restart_lldpad else "no"))
+
+        print("\n!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print("Upgrade will overwrite /etc/saf/enabler_conf.ini")
+        print("Please make sure your local enabler_conf.ini is up to date")
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
+
     try: 
         user_answer = raw_input("Would you like to continue(y/n)? ").lower()
         if user_answer.startswith('n'):
@@ -623,6 +710,9 @@ if __name__ == '__main__':
     fabric_inst.set_http_proxy(args.http_proxy)
     fabric_inst.set_https_proxy(args.https_proxy)
     fabric_inst.set_vendor_os_release(args.vendor_os_release)
+    fabric_inst.set_upgrade(upgrade)
+    fabric_inst.set_restart_on_upgrades(restart)
+    fabric_inst.set_restart_lldpad_on_upgrades(restart_lldpad)
 
     # RHEL-OSP7 specific behavior
     if args.vendor_os_release == 'rhel-osp7':
@@ -635,33 +725,34 @@ if __name__ == '__main__':
         pkgs = ["lldpad.x86_64",
                 "libconfig.x86_64"]
 
-        if local_compute or (args.control_name is None and controller_only):
-            # Install RPMs in extra_rpms_dir
-            cmd = "%s rpm -ihv %s/*" % (root_helper, extra_rpms_dir)
-            o, rc = fabric_inst .run_cmd_line(cmd, shell=True,
-                                              check_result=False)
-            if o is not None:
-                print(o)
-        else:
-            # Get extra RPMs
-            try:
-                os.mkdir(extra_rpms_dir)
-            except OSError as e:
-                if e.errno != errno.EEXIST:
-                    raise exc
-            os.chdir(extra_rpms_dir)
-            cmd = "%s yumdownloader %s" % (root_helper, " ".join(pkgs))
-            o, rc = fabric_inst.run_cmd_line(cmd, check_result=True)
-            if o is not None:
-                print(o)
-            os.chdir("../")
+        if not upgrade:
+            if local_compute or (args.control_name is None and controller_only):
+                # Install RPMs in extra_rpms_dir
+                cmd = "%s rpm -ihv %s/*" % (root_helper, extra_rpms_dir)
+                o, rc = fabric_inst .run_cmd_line(cmd, shell=True,
+                                                check_result=False)
+                if o is not None:
+                    print(o)
+            else:
+                # Get extra RPMs
+                try:
+                    os.mkdir(extra_rpms_dir)
+                except OSError as e:
+                    if e.errno != errno.EEXIST:
+                        raise exc
+                os.chdir(extra_rpms_dir)
+                cmd = "%s yumdownloader %s" % (root_helper, " ".join(pkgs))
+                o, rc = fabric_inst.run_cmd_line(cmd, check_result=False)
+                if len(os.listdir(".")) < 1:
+                    print("Could not download rpms and %s is empty!" % extra_rpms_dir)
+                    sys.exit(1)
+                os.chdir("../")
 
         if not local_compute and not controller_only \
            and args.control_name is None \
            and args.compute_name is None:
             # Install Fabric Enabler on controllers and computes
             os.chdir("../")
-            first_controller = True
             cmd = "nova list | grep ctlplane= "
             o, rc = fabric_inst.run_cmd_line(cmd, shell=True,
                                              check_result=False)
@@ -673,28 +764,36 @@ if __name__ == '__main__':
                 print '        is sourced before running this command. Thank you.'
                 sys.exit(1)
             print(o)
+            nodes = { 'compute': [], 'controller': [] }
             for l in o.splitlines():
-                node_type = None
                 node_ip = None
                 s = l.split('|')
-                if 'compute' in s[2]:
-                    node_type = 'compute'
-                elif 'controller' in s[2]:
-                    node_type = 'controller'
                 node_ip = s[6].split('=')[1]
-                print 'Installing Fabric Enabler on', node_type, node_ip
-                if node_type == 'controller':
-                    fabric_inst.setup_control_remote(node_ip,
-                                                     args.remote_user,
-                                                     args.remote_password,
-                                                     not first_controller)
-                    first_controller = False
-                elif node_type == 'compute':
-                    fabric_inst.setup_compute_remote(node_ip, input_uplink,
-                                                     args.remote_user,
-                                                     args.remote_password)
+                node_type = 'compute' if 'compute' in s[2] else \
+                            'controller' if 'controller' in s[2] else None
+                if node_type == 'compute' or node_type == 'controller':
+                    nodes[node_type].append(node_ip)
+
+            for node_ip in nodes['compute']:
+                print 'Installing Fabric Enabler on compute', node_ip
+                fabric_inst.setup_compute_remote(node_ip, input_uplink,
+                                                 args.remote_user,
+                                                 args.remote_password)
+
+            cn = len(nodes['controller'])
+            for node_ip in nodes['controller']:
+                print 'Installing Fabric Enabler on controller', node_ip
+                if cn == 1:
+                    fabric_inst.set_restart_on_upgrades(restart)
+                    fabric_inst.set_restart_lldpad_on_upgrades(restart_lldpad)
                 else:
-                    print('WARNING: unknown node type for', node_ip)
+                    fabric_inst.set_restart_on_upgrades(False)
+                    fabric_inst.set_restart_lldpad_on_upgrades(False)
+                fabric_inst.setup_control_remote(node_ip,
+                                                 args.remote_user,
+                                                 args.remote_password,
+                                                 cn != 1)
+                cn -= 1
             # Done!
             sys.exit(0)
     elif args.vendor_os_release is not None:

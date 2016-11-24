@@ -373,6 +373,9 @@ def do_rhel_osp7_customization(root_helper):
     cmd = "%s systemctl restart haproxy" % (root_helper)
     get_cmd_output(cmd)
 
+def upgrade_database(root_helper):
+    pass
+
 usage = ('\n'
          'python dfa_prepare_setup.py --dir-path filepath1[,filepath2,...]'
          '--node-function [control | compute]\n')
@@ -407,29 +410,38 @@ if __name__ == '__main__':
     parser.add_option('--vendor-os-release',
                       type='string', dest='vendor_os_release', default=None,
                       help='Vendor specific OS release, e.g. rhel-osp7')
+    parser.add_option('--upgrade', default=None,
+                      help='Set to True if upgrading an existing installation')
     (options, args) = parser.parse_args()
 
     node = options.node_function.lower()
-    if node == 'control':
-        if options.mysql_host is None or options.mysql_user is None:
-            mysqlconf = os.path.join(os.path.expanduser('~'), mysqlcnf)
-            print("Cannot find %s" % mysqlconf)
-            print("MySQL credentials must be provided when setting up "
-                  "a controller node.\nUse --help for more help.")
-            sys.exit(1)
+    upgrade = True if options.upgrade is not None \
+              and options.upgrade.lower() == 'true' else False
 
-        find_conf_and_modify(options.dir_path.lower(), root_helper)
-        prepare_db(options.mysql_user, options.mysql_pass, options.mysql_host)
-    if node == 'ha-control':
-        find_conf_and_modify(options.dir_path.lower(), root_helper)
-	node = 'control'
+    if upgrade:
+        if node == 'control':
+            upgrade_database(root_helper)
+    else:
+        if node == 'control':
+            if options.mysql_host is None or options.mysql_user is None:
+                mysqlconf = os.path.join(os.path.expanduser('~'), mysqlcnf)
+                print("Cannot find %s" % mysqlconf)
+                print("MySQL credentials must be provided when setting up "
+                      "a controller node.\nUse --help for more help.")
+                sys.exit(1)
 
-    if (node == 'control' or node == 'ha-control') \
-       and options.vendor_os_release == "rhel-osp7":
-        dist = platform.dist()[0].lower()
-        if dist == 'redhat':
-            do_rhel_osp7_customization(root_helper)
-        else:
-            print("WARNING: no RedHat system, customization skipped.")
+            find_conf_and_modify(options.dir_path.lower(), root_helper)
+            prepare_db(options.mysql_user, options.mysql_pass, options.mysql_host)
+        if node == 'ha-control':
+            find_conf_and_modify(options.dir_path.lower(), root_helper)
+            node = 'control'
 
-    copy_init_conf_files(node, root_helper)
+        if (node == 'control' or node == 'ha-control') \
+           and options.vendor_os_release == "rhel-osp7":
+            dist = platform.dist()[0].lower()
+            if dist == 'redhat':
+                do_rhel_osp7_customization(root_helper)
+            else:
+                print("WARNING: no RedHat system, customization skipped.")
+
+        copy_init_conf_files(node, root_helper)
