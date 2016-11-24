@@ -1111,6 +1111,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                 port.get('binding:vif_type').lower() == 'unbound'):
             # A port is created without binding host, vif_type,...
             # Keep the info in the database.
+            vm_info['oui']["ip_addr"] += constants.IP_DHCP_WAIT
             self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
 
             LOG.debug('Port %s created with no binding host and vif_type.')
@@ -1242,7 +1243,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             LOG.debug("Migration: updating VM DB with %s.", params)
 
     def _migrate_from(self, vm, new_host):
-
+        if constants.IP_DHCP_WAIT in vm.ip:
+            ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
+        else:
+            ipaddr = vm.ip
         # Send VM 'down' event to agent that migrated VM resided.
         vm_info = dict(status='down',
                        vm_mac=vm.mac,
@@ -1250,7 +1254,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                        host=vm.host,
                        port_uuid=vm.port_id,
                        net_uuid=vm.network_id,
-                       oui=dict(ip_addr=vm.ip,
+                       oui=dict(ip_addr=ipaddr,
                                 vm_name=vm.name,
                                 vm_uuid=vm.instance_id,
                                 gw_mac=vm.gw_mac,
@@ -1267,7 +1271,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             return constants.DELETE_PENDING
 
     def _migrate_to(self, vm, to_host):
-
+        if constants.IP_DHCP_WAIT in vm.ip:
+            ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
+        else:
+            ipaddr = vm.ip
         # Send VM 'up' event to agent that VM migrated to.
         vm_info = dict(status='up',
                        vm_mac=vm.mac,
@@ -1275,7 +1282,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                        host=to_host,
                        port_uuid=vm.port_id,
                        net_uuid=vm.network_id,
-                       oui=dict(ip_addr=vm.ip,
+                       oui=dict(ip_addr=ipaddr,
                                 vm_name=vm.name,
                                 vm_uuid=vm.instance_id,
                                 gw_mac=vm.gw_mac,
@@ -1311,13 +1318,17 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             if vm.port_id in self.port:
                 del self.port[vm.port_id]
             return
+        if constants.IP_DHCP_WAIT in vm.ip:
+            ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
+        else:
+            ipaddr = vm.ip
         vm_info = dict(status='down',
                        vm_mac=vm.mac,
                        segmentation_id=vm.segmentation_id,
                        host=vm.host,
                        port_uuid=vm.port_id,
                        net_uuid=vm.network_id,
-                       oui=dict(ip_addr=vm.ip,
+                       oui=dict(ip_addr=ipaddr,
                                 vm_name=vm.name,
                                 vm_uuid=vm.instance_id,
                                 gw_mac=vm.gw_mac,
@@ -1547,8 +1558,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                      port_id)
             return
         d_id = p["device_id"]
-        len = constants.DID_LEN
-        p["device_id"] = d_id[:len] if len(d_id) > len else d_id
+        l = constants.DID_LEN
+        p["device_id"] = d_id[:l] if len(d_id) > l else d_id
 
         vm_info = self._make_vm_info(p, 'up', constants.DHCP_PREFIX)
         LOG.debug("add_dhcp_ports : %s" % vm_info)
@@ -2023,10 +2034,14 @@ def dfa_server():
         dfa.create_threads()
         while True:
             time.sleep(constants.MAIN_INTERVAL)
-            if dfa.dcnm_dhcp:
-                dfa.update_port_ip_address()
-            else:
-                dfa.check_dhcp_ports()
+            try:
+                if dfa.dcnm_dhcp:
+                    dfa.update_port_ip_address()
+                else:
+                    dfa.check_dhcp_ports()
+            except Exception as exc:
+                LOG.error("Exception %s occured " % exc.__class__)
+
             for trd in dfa.dfa_threads:
                 if not trd.am_i_active:
                     LOG.info("Thread %s is not active.", trd.name)
