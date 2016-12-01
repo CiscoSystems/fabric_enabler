@@ -189,13 +189,15 @@ class VdpMgr(object):
         return self.save_topo_disc_params(intf, topo_disc_obj)
 
     def update_vm_result(self, port_uuid, result, lvid=None,
-                         vdp_vlan=None):
+                         vdp_vlan=None, fail_reason=None):
         context = {'agent': self.host_id}
         if lvid is None or vdp_vlan is None:
-            args = json.dumps(dict(port_uuid=port_uuid, result=result))
+            args = json.dumps(dict(port_uuid=port_uuid, result=result,
+                                   fail_reason=fail_reason))
         else:
             args = json.dumps(dict(port_uuid=port_uuid, local_vlan=lvid,
-                                   vdp_vlan=vdp_vlan, result=result))
+                                   vdp_vlan=vdp_vlan, result=result,
+                                   fail_reason=fail_reason))
         msg = self.rpc_clnt.make_msg('update_vm_result', context, msg=args)
         try:
             resp = self.rpc_clnt.call(msg)
@@ -203,7 +205,7 @@ class VdpMgr(object):
         except rpc.MessagingTimeout:
             LOG.error("RPC timeout: Failed to update VM result on the server")
 
-    def vdp_vlan_change_cb(self, port_uuid, lvid, vdp_vlan):
+    def vdp_vlan_change_cb(self, port_uuid, lvid, vdp_vlan, fail_reason):
         '''
             Callback function for updating the VDP VLAN in DB,
             called by VDP
@@ -211,7 +213,8 @@ class VdpMgr(object):
         LOG.info("Vlan change CB lvid %(lvid)s VDP %(vdp)s",
                  {'lvid': lvid, 'vdp': vdp_vlan})
         self.update_vm_result(port_uuid, constants.RESULT_SUCCESS,
-                              lvid=lvid, vdp_vlan=vdp_vlan)
+                              lvid=lvid, vdp_vlan=vdp_vlan,
+                              fail_reason=fail_reason)
 
     def process_vm_event(self, msg, phy_uplink):
         LOG.info("In processing VM Event status %s for MAC %s UUID %s oui %s"
@@ -228,22 +231,22 @@ class VdpMgr(object):
             self.update_vm_result(msg.get_port_uuid(), res_fail)
             return
         ovs_vdp_obj = self.ovs_vdp_obj_dict[phy_uplink]
-        ret = ovs_vdp_obj.send_vdp_port_event(msg.get_port_uuid(),
-                                              msg.get_mac(),
-                                              msg.get_net_uuid(),
-                                              msg.get_segmentation_id(),
-                                              msg.get_status(),
-                                              msg.get_oui())
-        if not ret:
+        port_event_reply = ovs_vdp_obj.send_vdp_port_event(
+            msg.get_port_uuid(), msg.get_mac(), msg.get_net_uuid(),
+            msg.get_segmentation_id(), msg.get_status(), msg.get_oui())
+        if not port_event_reply.get('result'):
             LOG.error("Error in VDP port event, Err Queue enq")
-            self.update_vm_result(msg.get_port_uuid(), res_fail)
+            self.update_vm_result(
+                msg.get_port_uuid(), res_fail,
+                fail_reason=port_event_reply.get('fail_reason'))
         else:
             LOG.error("Success in VDP port event")
             lvid, vdp_vlan = ovs_vdp_obj.get_lvid_vdp_vlan(msg.get_net_uuid(),
                                                            msg.get_port_uuid())
-            self.update_vm_result(msg.get_port_uuid(),
-                                  constants.RESULT_SUCCESS,
-                                  lvid=lvid, vdp_vlan=vdp_vlan)
+            self.update_vm_result(
+                msg.get_port_uuid(), constants.RESULT_SUCCESS,
+                lvid=lvid, vdp_vlan=vdp_vlan,
+                fail_reason=port_event_reply.get('fail_reason'))
 
     def process_bulk_vm_event(self, msg, phy_uplink):
         LOG.info("In processing Bulk VM Event status %s", msg)

@@ -139,7 +139,6 @@ class LldpadDriver(object):
             LOG.error("GPID cannot be set on NB")
             return False
 
-    # fixme(padkrish)
     def _vdp_refrsh_hndlr(self):
         '''Periodic refresh of vNIC events to VDP
 
@@ -173,7 +172,7 @@ class LldpadDriver(object):
                     # lldpad sending right VLAN in keepalives is ok.
                     if key in self.vdp_vif_map:
                         LOG.debug("Sending Refresh for VSI %s" % lvdp_dict)
-                        vdp_vlan = self.send_vdp_assoc(
+                        vdp_vlan, fail_reason = self.send_vdp_assoc(
                             vsiid=lvdp_dict.get('vsiid'),
                             mgrid=lvdp_dict.get('mgrid'),
                             typeid=lvdp_dict.get('typeid'),
@@ -191,15 +190,23 @@ class LldpadDriver(object):
                     # Need to invoke CB. So no return here.
                     vdp_vlan = 0
                 exist_vdp_vlan = lvdp_dict.get('vdp_vlan')
+                exist_fail_reason = lvdp_dict.get('fail_reason')
+                callback_count = lvdp_dict.get('callback_count')
                 # Condition will be hit only during error cases when switch
                 # reloads or when compute reloads
-                if vdp_vlan != exist_vdp_vlan:
+                if vdp_vlan != exist_vdp_vlan or (
+                   fail_reason != exist_fail_reason or
+                   callback_count > vdp_const.CALLBACK_THRESHOLD):
                     # Invoke the CB Function
                     cb_fn = lvdp_dict.get('vsw_cb_fn')
                     cb_data = lvdp_dict.get('vsw_cb_data')
                     if cb_fn:
-                        cb_fn(cb_data, vdp_vlan)
+                        cb_fn(cb_data, vdp_vlan, fail_reason)
                     lvdp_dict['vdp_vlan'] = vdp_vlan
+                    lvdp_dict['fail_reason'] = fail_reason
+                    lvdp_dict['callback_count'] = 0
+                else:
+                    lvdp_dict['callback_count'] += 1
         except Exception as e:
             LOG.error("Exception in Refrsh %s" % str(e))
 
@@ -226,7 +233,7 @@ class LldpadDriver(object):
     def store_vdp_vsi(self, port_uuid, mgrid, typeid, typeid_ver,
                       vsiid_frmt, vsiid, filter_frmt, gid, mac, vlan,
                       new_network, reply, oui_id, oui_data, vsw_cb_fn,
-                      vsw_cb_data):
+                      vsw_cb_data, reason):
         '''Stores the vNIC specific info for VDP Refresh
 
         :param uuid: vNIC UUID
@@ -263,7 +270,9 @@ class LldpadDriver(object):
                     'mac': mac,
                     'gid': gid,
                     'vsw_cb_fn': vsw_cb_fn,
-                    'vsw_cb_data': vsw_cb_data}
+                    'vsw_cb_data': vsw_cb_data,
+                    'fail_reason': reason,
+                    'callback_count': 0}
         self.vdp_vif_map[port_uuid] = vdp_dict
         LOG.debug("Storing VDP VSI MAC %s UUID %s VDP VLAN %s" %
                   (mac, vsiid, vdp_vlan))
@@ -496,84 +505,111 @@ class LldpadDriver(object):
         """Cross Check the reply against the input vsiid, mac. """
         vsiid_reply = reply.partition("uuid = ")[2].split()[0]
         if vsiid != vsiid_reply:
-            LOG.error("VSIID Reply1 mis-match req vsi %(req)s reply "
-                      "vsi %(rep)s", {'req': vsiid, 'rep': vsiid_reply})
-            return False
+            fail_reason = vdp_const.vsi_mismatch_failure_reason % (
+                vsiid, vsiid_reply)
+            LOG.error(fail_reason)
+            return False, fail_reason
         mac_reply = reply.partition("filter = ")[2].split('-')[1]
         if mac != mac_reply:
-            LOG.error("VSIID Reply1 mis-match req mac %(req)s reply "
-                      "mac %(rep)s", {'req': mac, 'rep': mac_reply})
-            return False
-        return True
+            fail_reason = vdp_const.mac_mismatch_failure_reason % (
+                mac, mac_reply)
+            LOG.error(fail_reason)
+            return False, fail_reason
+        return True, None
 
     def crosscheck_reply_vsiid_mac(self, reply, vsiid, mac):
         """Cross Check the reply against the input vsiid, mac. """
         vsiid_reply = reply.partition("uuid")[2].split()[0][4:]
         if vsiid != vsiid_reply:
-            LOG.error("VSIID Reply mis-match req vsi %(req)s reply "
-                      "vsi %(rep)s", {'req': vsiid, 'rep': vsiid_reply})
-            return False
+            fail_reason = vdp_const.vsi_mismatch_failure_reason % (
+                vsiid, vsiid_reply)
+            LOG.error(fail_reason)
+            return False, fail_reason
         mac_reply = reply.partition("filter")[2].split('-')[1]
         if mac != mac_reply:
-            LOG.error("VSIID Reply mis-match req mac %(req)s reply "
-                      "mac %(rep)s", {'req': mac, 'rep': mac_reply})
-            return False
-        return True
+            fail_reason = vdp_const.mac_mismatch_failure_reason % (
+                mac, mac_reply)
+            LOG.error(fail_reason)
+            return False, fail_reason
+        return True, None
+
+    def get_vdp_failure_reason(self, reply):
+        """Parse the failure reason from VDP. """
+        try:
+            fail_reason = reply.partition(
+                "filter")[0].replace('\t', '').split('\n')[-2]
+        except Exception as exc:
+            fail_reason = vdp_const.retrieve_failure_reason % (reply)
+        return fail_reason
+
+    def check_filter_validity(self, reply, filter_str):
+        '''Check for the validify of the filter. '''
+        try:
+            f_ind = reply.index(filter_str)
+        except Exception:
+            fail_reason = vdp_const.filter_failure_reason % (reply)
+            LOG.error(fail_reason)
+            return False, fail_reason
+        try:
+            l_ind = reply.rindex(filter_str)
+        except Exception:
+            fail_reason = vdp_const.filter_failure_reason % (reply)
+            LOG.error(fail_reason)
+            return False, fail_reason
+        if f_ind != l_ind:
+            # Currently not supported if reply contains a filter keyword
+            fail_reason = vdp_const.multiple_filter_failure_reason % (reply)
+            LOG.error(fail_reason)
+            return False, fail_reason
+        return True, None
 
     def get_vlan_from_reply1(self, reply, vsiid, mac):
         '''Parse the reply from VDP daemon to get the VLAN value'''
         try:
-            verify_flag = self.crosscheck_reply1_vsiid_mac(reply, vsiid, mac)
+            verify_flag, fail_reason = self.crosscheck_reply1_vsiid_mac(
+                reply, vsiid, mac)
             if not verify_flag:
-                return constants.INVALID_VLAN
+                return constants.INVALID_VLAN, fail_reason
             mode_str = reply.partition("mode = ")[2].split()[0]
             if mode_str != "assoc":
-                return constants.INVALID_VLAN
+                fail_reason = self.get_vdp_failure_reason(reply)
+                return constants.INVALID_VLAN, fail_reason
         except Exception:
-            LOG.error("Incorrect Reply,no mode information found: %s" % reply)
-            return constants.INVALID_VLAN
-        try:
-            f_ind = reply.index("filter = ")
-        except Exception:
-            LOG.error("Incorrect Reply,no filter information found: %s"
-                      % reply)
-            return constants.INVALID_VLAN
-        try:
-            l_ind = reply.rindex("filter = ")
-        except Exception:
-            LOG.error("Incorrect Reply,no filter information found: %s"
-                      % reply)
-            return constants.INVALID_VLAN
-        if f_ind != l_ind:
-            # Currently not supported if reply contains a filter keyword
-            LOG.error("Err: not supported currently")
-            return constants.INVALID_VLAN
+            fail_reason = vdp_const.mode_failure_reason % (reply)
+            LOG.error(fail_reason)
+            return constants.INVALID_VLAN, fail_reason
+        check_filter, fail_reason = self.check_filter_validity(
+            reply, "filter = ")
+        if not check_filter:
+            return constants.INVALID_VLAN, fail_reason
         try:
             vlan_val = reply.partition("filter = ")[2].split('-')[0]
             vlan = int(vlan_val)
         except ValueError:
-            LOG.error("Reply not formatted correctly: %s", reply)
-            return constants.INVALID_VLAN
-        return vlan
+            fail_reason = vdp_const.format_failure_reason % (reply)
+            LOG.error(fail_reason)
+            return constants.INVALID_VLAN, fail_reason
+        return vlan, None
 
     def check_hints(self, reply):
         '''Parse the hints to check for errors'''
         try:
             f_ind = reply.index("hints")
         except Exception:
-            LOG.error("Incorrect Reply, no hints information found %s"
-                      % reply)
-            return False
+            fail_reason = vdp_const.hints_failure_reason % (reply)
+            LOG.error(fail_reason)
+            return False, fail_reason
         try:
             l_ind = reply.rindex("hints")
         except Exception:
-            LOG.error("Incorrect Reply, no hints information found %s"
-                      % reply)
-            return False
+            fail_reason = vdp_const.hints_failure_reason % (reply)
+            LOG.error(fail_reason)
+            return False, fail_reason
         if f_ind != l_ind:
             # Currently not supported if reply contains a filter keyword
-            LOG.error("Err: not supported currently")
-            return False
+            fail_reason = vdp_const.multiple_hints_failure_reason % (reply)
+            LOG.error(fail_reason)
+            return False, fail_reason
         try:
             hints_compl = reply.partition("hints")[2]
             hints_val = reply.partition("hints")[2][0:4]
@@ -581,46 +617,37 @@ class LldpadDriver(object):
             hints_val = hints_compl[4:4 + len_hints]
             hints = int(hints_val)
             if hints != 0:
-                return False
+                fail_reason = vdp_const.nonzero_hints_failure % (hints)
+                return False, fail_reason
         except ValueError:
-            LOG.error("Reply not formatted correctly %s" % reply)
-            return False
-        return True
+            fail_reason = vdp_const.format_failure_reason % (reply)
+            LOG.error(fail_reason)
+            return False, fail_reason
+        return True, None
 
     def get_vlan_from_reply(self, reply, vsiid, mac):
         '''Parse the reply from VDP daemon to get the VLAN value'''
-        hints_ret = self.check_hints(reply)
+        hints_ret, fail_reason = self.check_hints(reply)
         if not hints_ret:
             LOG.error("Incorrect hints found %s", reply)
-            return constants.INVALID_VLAN
+            return constants.INVALID_VLAN, fail_reason
+        check_filter, fail_reason = self.check_filter_validity(reply, "filter")
+        if not check_filter:
+            return constants.INVALID_VLAN, fail_reason
         try:
-            f_ind = reply.index("filter")
-        except Exception:
-            LOG.error("Incorrect Reply, no filter information found %s"
-                      % reply)
-            return constants.INVALID_VLAN
-        try:
-            l_ind = reply.rindex("filter")
-        except Exception:
-            LOG.error("Incorrect Reply, no filter information found %s"
-                      % reply)
-            return constants.INVALID_VLAN
-        if f_ind != l_ind:
-            # Currently not supported if reply contains a filter keyword
-            LOG.error("Err: not supported currently")
-            return constants.INVALID_VLAN
-        try:
-            verify_flag = self.crosscheck_reply_vsiid_mac(reply, vsiid, mac)
+            verify_flag, fail_reason = self.crosscheck_reply_vsiid_mac(
+                reply, vsiid, mac)
             if not verify_flag:
-                return constants.INVALID_VLAN
+                return constants.INVALID_VLAN, fail_reason
             filter_val = reply.partition("filter")[2]
             len_fil = len(filter_val)
             vlan_val = filter_val[4:len_fil].split('-')[0]
             vlan = int(vlan_val)
         except ValueError:
-            LOG.error("Reply not formatted correctly %s" % reply)
-            return constants.INVALID_VLAN
-        return vlan
+            fail_reason = vdp_const.format_failure_reason % (reply)
+            LOG.error(fail_reason)
+            return constants.INVALID_VLAN, fail_reason
+        return vlan, None
 
     def send_vdp_assoc(self, vsiid=None, mgrid=None, typeid=None,
                        typeid_ver=None, vsiid_frmt=vdp_const.VDP_VSIFRMT_UUID,
@@ -650,15 +677,17 @@ class LldpadDriver(object):
             reply = self.send_vdp_query_msg("assoc", mgrid, typeid, typeid_ver,
                                             vsiid_frmt, vsiid, filter_frmt,
                                             gid, mac, vlan, oui_id, oui_data)
-            vlan_resp = self.get_vlan_from_reply(reply, vsiid, mac)
+            vlan_resp, fail_reason = self.get_vlan_from_reply(
+                reply, vsiid, mac)
             if vlan_resp != constants.INVALID_VLAN:
-                return vlan_resp
+                return vlan_resp, fail_reason
         reply = self.send_vdp_msg("assoc", mgrid, typeid, typeid_ver,
                                   vsiid_frmt, vsiid, filter_frmt, gid, mac,
                                   vlan, oui_id, oui_data, sw_resp)
         if sw_resp:
-            vlan = self.get_vlan_from_reply1(reply, vsiid, mac)
-            return vlan
+            vlan, fail_reason = self.get_vlan_from_reply1(reply, vsiid, mac)
+            return vlan, fail_reason
+        return None, None
 
     def send_vdp_deassoc(self, vsiid=None, mgrid=None, typeid=None,
                          typeid_ver=None,
@@ -688,7 +717,8 @@ class LldpadDriver(object):
             reply = self.send_vdp_query_msg("assoc", mgrid, typeid, typeid_ver,
                                             vsiid_frmt, vsiid, filter_frmt,
                                             gid, mac, vlan, oui_id, oui_data)
-            vlan_resp = self.get_vlan_from_reply(reply, vsiid, mac)
+            vlan_resp, fail_reason = self.get_vlan_from_reply(
+                reply, vsiid, mac)
             # This is to cover cases where the enabler has a different VLAN
             # than LLDPAD. deassoc won't go through if wrong VLAN is passed.
             # Since enabler does not have right VLAN, most likely flows are not
@@ -734,18 +764,15 @@ class LldpadDriver(object):
         if 'oui_id' in oui:
             oui_id = oui['oui_id']
             oui_data = oui
-        reply = self.send_vdp_assoc(vsiid=vsiid, mgrid=mgrid, typeid=typeid,
-                                    typeid_ver=typeid_ver,
-                                    vsiid_frmt=vsiid_frmt,
-                                    filter_frmt=filter_frmt, gid=gid, mac=mac,
-                                    vlan=vlan, oui_id=oui_id,
-                                    oui_data=oui_data, sw_resp=new_network)
+        reply, fail_reason = self.send_vdp_assoc(
+            vsiid=vsiid, mgrid=mgrid, typeid=typeid, typeid_ver=typeid_ver,
+            vsiid_frmt=vsiid_frmt, filter_frmt=filter_frmt, gid=gid, mac=mac,
+            vlan=vlan, oui_id=oui_id, oui_data=oui_data, sw_resp=new_network)
         self.store_vdp_vsi(port_uuid, mgrid, typeid, typeid_ver,
                            vsiid_frmt, vsiid, filter_frmt, gid, mac, vlan,
                            new_network, reply, oui_id, oui_data, vsw_cb_fn,
-                           vsw_cb_data)
-        if new_network:
-            return reply
+                           vsw_cb_data, fail_reason)
+        return reply, fail_reason
 
     def send_vdp_vnic_down(self, port_uuid=None, vsiid=None, mgrid=None,
                            typeid=None, typeid_ver=None,

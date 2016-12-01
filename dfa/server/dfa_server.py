@@ -276,6 +276,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         self.network = {}
         self.subnet = {}
         self.port = {}
+        self.port_result = {}
         self.dfa_threads = []
         self.agents_status_table = {}
 
@@ -1796,6 +1797,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                     LOG.info('Deleted VM %(vm)s from DB.', {'vm': vm.name})
                     if vm.port_id in self.port:
                         del self.port[vm.port_id]
+                    if vm.port_id in self.port_result:
+                        del self.port_result[vm.port_id]
                     return
                 res = constants.RESULTS_MAP.get((result, vm.result))
                 final_res = res if res else vm.result
@@ -1812,6 +1815,18 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                 LOG.debug("vm_result_update: port_id: %(pid)s, params: %(pr)s",
                           {'pid': port_id, 'pr': params})
                 self.update_vm_db(port_id, **params)
+            if port_id in self.port_result:
+                self.port_result[port_id].update(
+                    {'local_vlan': payload.get('local_vlan'),
+                     'vdp_vlan': payload.get('vdp_vlan'),
+                     'result': result,
+                     'fail_reason': payload.get('fail_reason')})
+            else:
+                self.port_result[port_id] = {
+                    'local_vlan': payload.get('local_vlan'),
+                    'vdp_vlan': payload.get('vdp_vlan'),
+                    'result': result,
+                    'fail_reason': payload.get('fail_reason')}
 
     def dhcp_agent_network_add(self, dhcp_net_info):
         """Process dhcp agent net add event.
