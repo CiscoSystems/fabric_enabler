@@ -120,6 +120,12 @@ class RpcCallBacks(object):
         uplink = args.get('uplink')
         veth_intf = args.get('veth_intf')
         memb_port_list = args.get('memb_port_list')
+        fail_reason = args.get('fail_reason')
+        if agent not in self.obj.agents_status_table:
+            self.obj.agents_status_table[agent] = {'fail_reason': fail_reason}
+        else:
+            self.obj.agents_status_table[agent].update(
+                {'fail_reason': fail_reason})
         configs = self.obj.get_agent_configurations(agent)
         if configs:
             # Update the agents database.
@@ -462,7 +468,11 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         self.server.stop()
 
     def update_agent_status(self, agent, ts):
-        self.agents_status_table[agent] = dict(timestamp=ts, fail_count=0)
+        if agent not in self.agents_status_table:
+            self.agents_status_table[agent] = dict(timestamp=ts, fail_count=0)
+        else:
+            self.agents_status_table[agent].update({'timestamp': ts,
+                                                    'fail_count': 0})
 
     def update_project_info_cache(self, pid, dci_id=None,
                                   name=None, opcode='add',
