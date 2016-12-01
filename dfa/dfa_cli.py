@@ -122,7 +122,7 @@ class ListProfile(Lister):
 
         if parsed_args.name:
             data = [(p.get('profileName'), p.get('profileType')) for p in resp
-                if p.get('profileName') == parsed_args.name]
+                    if p.get('profileName') == parsed_args.name]
         else:
             data = [(p.get('profileName'), p.get('profileType')) for p in resp]
 
@@ -149,9 +149,11 @@ class ListInstance(Lister):
         parser.add_argument('--seg_id', type=int,
                             help=_('Filter instances based on Segment id'))
         parser.add_argument('--vdp_vlan', type=int,
-                           help=_('Filter instances based on Link Local Vlan'))
+                            help=_('Filter instances based on Link Local
+                                   Vlan'))
         parser.add_argument('--local_vlan', type=int,
-                            help=_('Filter instances based on Server Local Vlan'))
+                            help=_('Filter instances based on Server Local
+                                   Vlan'))
         parser.add_argument('--port_id',
                             help=argparse.SUPPRESS)
         parser.add_argument('-D', '--show-details',
@@ -175,7 +177,8 @@ class ListInstance(Lister):
 
     def take_action(self, parsed_args):
         resp = self.cli_get_instances({'name': parsed_args.name,
-                                       'network_name': parsed_args.network_name,
+                                       'network_name':
+                                           parsed_args.network_name,
                                        'tenant_id': parsed_args.tenant_id,
                                        'tenant_name': parsed_args.tenant_name,
                                        'seg_id': parsed_args.seg_id,
@@ -298,8 +301,8 @@ class ShowNetwork(ShowOne):
     def take_action(self, parsed_args):
         HEX_ELEM = '[0-9A-Fa-f]'
         UUID_PATTERN = '-'.join([HEX_ELEM + '{8}', HEX_ELEM + '{4}',
-                         HEX_ELEM + '{4}', HEX_ELEM + '{4}',
-                         HEX_ELEM + '{12}'])
+                                 HEX_ELEM + '{4}', HEX_ELEM + '{4}',
+                                 HEX_ELEM + '{12}'])
         match = re.match(UUID_PATTERN, parsed_args.NETWORK)
         net_id = None
         name = None
@@ -319,7 +322,7 @@ class ShowNetwork(ShowOne):
 
         if len(data) > 1:
             print(("Multiple Records found with the name: ") +
-                parsed_args.NETWORK + (", displaying first record"))
+                  parsed_args.NETWORK + (", displaying first record"))
 
         if data:
             return (columns, data[0])
@@ -390,8 +393,8 @@ class ShowInstance(ShowOne):
     def take_action(self, parsed_args):
         HEX_ELEM = '[0-9A-Fa-f]'
         UUID_PATTERN = '-'.join([HEX_ELEM + '{8}', HEX_ELEM + '{4}',
-                         HEX_ELEM + '{4}', HEX_ELEM + '{4}',
-                         HEX_ELEM + '{12}'])
+                                 HEX_ELEM + '{4}', HEX_ELEM + '{4}',
+                                 HEX_ELEM + '{12}'])
         match = re.match(UUID_PATTERN, parsed_args.INSTANCE)
         port_id = None
         name = None
@@ -413,12 +416,12 @@ class ShowInstance(ShowOne):
 
         if len(data) > 1:
             print(("Multiple Records found with the name: ") +
-                parsed_args.INSTANCE + (", displaying first record"))
+                  parsed_args.INSTANCE + (", displaying first record"))
 
         if data:
             return (columns, data[0])
         print(("Unable to find instance with name or portid: ") +
-            parsed_args.INSTANCE)
+              parsed_args.INSTANCE)
         return (columns, data)
 
 
@@ -521,12 +524,13 @@ class AssociateProfile(ShowOne):
         context = {}
         args = jsonutils.dumps(network)
         msg = self.app.clnt.make_msg('associate_profile_with_network', context,
-                                 msg=args)
+                                     msg=args)
         try:
             resp = self.app.clnt.call(msg)
             return resp
         except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError) as e:
-            print("RPC: Associate request to Enabler failed. Reason: %s" % e.message)
+            print("RPC: Associate request to Enabler failed. Reason: %s" %
+                  e.message)
 
     def cli_get_networks(self, parsed_args):
         '''Get all networks for a tenant from the Fabric Enabler. '''
@@ -566,7 +570,7 @@ class EnablerVersion(ShowOne):
     """Prints nexus fabric enabler version. """
 
     def take_action(self, parsed_args):
-        return (['version'],[constants.VERSION])
+        return (['version'], [constants.VERSION])
 
 
 COMMAND_V2 = {
