@@ -32,7 +32,10 @@ from dfa.common import config
 from dfa.common import constants
 from dfa.common import rpc
 
-from neutronclient._i18n import _
+try:
+    from neutronclient._i18n import _
+except ImportError:
+    from neutronclient.i18n import _
 
 DFA_API_VERSION = '2.0'
 
@@ -148,11 +151,11 @@ class ListInstance(Lister):
         parser.add_argument('--seg_id', type=int,
                             help=_('Filter instances based on Segment id'))
         parser.add_argument('--vdp_vlan', type=int,
-                            help=_('Filter instances based on Link Local
-                                   Vlan'))
+                            help=_('Filter instances based on Link Local' +
+                                   'Vlan'))
         parser.add_argument('--local_vlan', type=int,
-                            help=_('Filter instances based on Server Local
-                                   Vlan'))
+                            help=_('Filter instances based on Server Local' +
+                                   'Vlan'))
         parser.add_argument('--port_id',
                             help=argparse.SUPPRESS)
         parser.add_argument('-D', '--show-details',
