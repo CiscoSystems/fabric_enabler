@@ -284,6 +284,7 @@ class VdpMgr(object):
                  (msg.get_status(), phy_uplink))
         if msg.get_status() == 'up':
             ovs_exc_raised = False
+            ovs_exc_reason = ""
             try:
                 self.ovs_vdp_obj_dict[phy_uplink] = ovs_vdp.OVSNeutronVdp(
                     phy_uplink, msg.get_integ_br(), msg.get_ext_br(),
@@ -291,13 +292,22 @@ class VdpMgr(object):
                     is_ucs_fi=self.is_ucs_fi,
                     fi_evb_dmac=self.ucs_fi_evb_dmac)
             except Exception as exc:
-                LOG.error("OVS VDP Object creation failed %s" % str(exc))
+                ovs_exc_reason = str(exc)
+                LOG.error("OVS VDP Object creation failed %s" % ovs_exc_reason)
                 ovs_exc_raised = True
             if (ovs_exc_raised or not self.ovs_vdp_obj_dict[phy_uplink].
                     is_lldpad_setup_done()):
                 # Is there a way to delete the object??
-                LOG.error("UP Event Processing NOT Complete")
+                if not ovs_exc_reason:
+                    uplink_fail_reason = (self.ovs_vdp_obj_dict[phy_uplink].
+                                          get_uplink_fail_reason())
+                else:
+                    uplink_fail_reason = ovs_exc_reason
+                LOG.error("UP Event Processing NOT Complete: %s",
+                          uplink_fail_reason)
                 self.err_que.enqueue(constants.Q_UPL_PRIO, msg)
+                self.save_uplink(uplink=self.phy_uplink,
+                                 fail_reason=uplink_fail_reason)
             else:
                 self.uplink_det_compl = True
                 veth_intf = (self.ovs_vdp_obj_dict[self.phy_uplink].
@@ -314,7 +324,7 @@ class VdpMgr(object):
             else:
                 ovs_vdp.delete_uplink_and_flows(self.root_helper, self.br_ex,
                                                 phy_uplink, self.is_ucs_fi)
-            self.save_uplink()
+            self.save_uplink(fail_reason=constants.uplink_down_reason)
             self.topo_disc.uncfg_intf(self.veth_intf)
             self.topo_disc.cfg_intf(phy_uplink)
 
@@ -385,14 +395,15 @@ class VdpMgr(object):
         except Exception as e:
             LOG.error("VDP uplink proc exception %s" % e)
 
-    def save_uplink(self, uplink="", veth_intf=""):
+    def save_uplink(self, uplink="", veth_intf="", fail_reason=""):
         context = {}
         # If uplink physical interface is a part of bond, then this function
         # will be called with uplink=bond0, as an example
         memb_port_list = sys_utils.get_member_ports(uplink)
         args = json.dumps(dict(agent=self.host_id, uplink=uplink,
                                veth_intf=veth_intf,
-                               memb_port_list=memb_port_list))
+                               memb_port_list=memb_port_list,
+                               fail_reason=fail_reason))
         msg = self.rpc_clnt.make_msg('save_uplink', context, msg=args)
         try:
             resp = self.rpc_clnt.call(msg)
@@ -517,7 +528,7 @@ class VdpMgr(object):
                 LOG.error("Wrong status None")
                 return
             # Call API to set the uplink as "" Uplink not discovered yet
-            self.save_uplink()
+            self.save_uplink(fail_reason=constants.uplink_undiscovered_reason)
         elif ret is 'normal':
             if self.veth_intf is None:
                 LOG.error("Wrong status Normal")
@@ -542,7 +553,8 @@ class VdpMgr(object):
             # 'get_bond_intf' will return False, when the argument is 'bond0'.
             bond_intf = sys_utils.get_bond_intf(self.phy_uplink)
             if bond_intf is not None:
-                self.save_uplink()
+                self.save_uplink(
+                    fail_reason=constants.port_transition_bond_down_reason)
                 self.process_uplink_ongoing = True
                 upl_msg = VdpQueMsg(constants.UPLINK_MSG_TYPE,
                                     status='down',
@@ -555,7 +567,9 @@ class VdpMgr(object):
                 self.uplink_det_compl = False
 
                 # No veth interface
-                self.save_uplink(uplink=bond_intf)
+                self.save_uplink(
+                    uplink=bond_intf,
+                    fail_reason=constants.port_transition_bond_up_reason)
                 self.phy_uplink = bond_intf
                 self.process_uplink_ongoing = True
                 upl_msg = VdpQueMsg(constants.UPLINK_MSG_TYPE,

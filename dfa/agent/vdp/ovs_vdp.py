@@ -186,7 +186,10 @@ class OVSNeutronVdp(object):
         self.vdp_vlan_cb = vdp_vlan_cb
         self.fi_evb_dmac = fi_evb_dmac
         self.ucs_fi = is_ucs_fi
+        self.uplink_fail_reason = ""
         self.setup_lldpad = self.setup_lldpad_ports()
+        if not self.setup_lldpad:
+            return
         flow_check_periodic_task = sys_utils.PeriodicTask(
             cconstants.FLOW_CHECK_INTERVAL, self._flow_check_handler)
         self.flow_check_periodic_task = flow_check_periodic_task
@@ -361,8 +364,10 @@ class OVSNeutronVdp(object):
         # Openstack
         ovs_bridges = ovs_lib.get_bridges(self.root_helper)
         if self.ext_br not in ovs_bridges or self.integ_br not in ovs_bridges:
-            LOG.error("Integ or Physical Bridge not configured by Openstack")
-            raise dfae.DfaAgentFailed(reason="Bridge Unavailable")
+            self.uplink_fail_reason = cconstants.bridge_not_cfgd_reason % (
+                ovs_bridges, self.integ_br, self.ext_br)
+            LOG.error(self.uplink_fail_reason)
+            raise dfae.DfaAgentFailed(reason=self.uplink_fail_reason)
         br = ovs_lib.OVSBridge(self.ext_br, root_helper=self.root_helper)
         self.ext_br_obj = br
         int_br = ovs_lib.OVSBridge(self.integ_br, root_helper=self.root_helper)
@@ -370,9 +375,10 @@ class OVSNeutronVdp(object):
 
         self.phy_peer_port, self.int_peer_port = self.find_interconnect_ports()
         if self.phy_peer_port is None or self.int_peer_port is None:
-            LOG.error("Integ or Physical Patch/Veth Ports not configured by "
-                      "Openstack")
-            raise dfae.DfaAgentFailed(reason="Ports Unconfigured")
+            self.uplink_fail_reason = cconstants.veth_not_cfgd_reason % (
+                self.phy_peer_port, self.int_peer_port)
+            LOG.error(self.uplink_fail_reason)
+            raise dfae.DfaAgentFailed(reason=self.uplink_fail_reason)
 
         lldp_ovs_veth_str = constants.LLDPAD_OVS_VETH_PORT + self.uplink
         if len(lldp_ovs_veth_str) > constants.MAX_VETH_NAME:
@@ -413,14 +419,16 @@ class OVSNeutronVdp(object):
         else:
             phy_port_num = br.get_port_ofport(self.uplink)
         if phy_port_num == cconstants.INVALID_OFPORT:
-            LOG.error("Uplink port not detected on external bridge")
+            self.uplink_fail_reason = cconstants.invalid_uplink_ofport_reason
+            LOG.error(self.uplink_fail_reason)
             return False
         if not br.port_exists(lldp_ovs_veth_str):
             lldp_ovs_portnum = br.add_port(lldp_ovs_veth)
         else:
             lldp_ovs_portnum = br.get_port_ofport(lldp_ovs_veth)
         if lldp_ovs_portnum == cconstants.INVALID_OFPORT:
-            LOG.error("lldp veth port not detected on external bridge")
+            self.uplink_fail_reason = cconstants.lldp_ofport_not_detect_reason
+            LOG.error(self.uplink_fail_reason)
             return False
         lldp_loc_veth.link.set_up()
         lldp_ovs_veth.link.set_up()
@@ -431,20 +439,24 @@ class OVSNeutronVdp(object):
         self.int_peer_port_num = int_br.get_port_ofport(self.int_peer_port)
         if self.phy_peer_port_num == cconstants.INVALID_OFPORT or\
            self.int_peer_port_num == cconstants.INVALID_OFPORT:
-            LOG.error("int or phy peer OF Port not detected on Int or"
-                      "Phy Bridge %s %s" %
-                      (self.phy_peer_port_num, self.int_peer_port_num))
+            self.uplink_fail_reason = cconstants.invalid_peer_ofport_reason % (
+                self.phy_peer_port_num, self.int_peer_port_num)
+            LOG.error(self.uplink_fail_reason)
             return False
         self.lldpad_info = (lldpad.LldpadDriver(lldp_loc_veth_str, self.uplink,
                                                 self.root_helper))
         ret = self.lldpad_info.enable_evb()
         if not ret:
-            LOG.error("Unable to cfg EVB")
+            self.uplink_fail_reason = cconstants.evb_cfg_fail_reason
+            LOG.error(self.uplink_fail_reason)
             return False
         self.lldp_local_veth_port = lldp_loc_veth_str
         self.lldp_ovs_veth_port = lldp_ovs_veth_str
         LOG.info("Setting up lldpad ports complete")
         return True
+
+    def get_uplink_fail_reason(self):
+        return self.uplink_fail_reason
 
     def get_lldp_local_bridge_port(self):
         return self.lldp_local_veth_port
