@@ -257,11 +257,17 @@ class DFARESTClient(object):
         if self._is_iplus:
             # Need to add extra payload for the new version.
             enable_dci = "true" if dci_id and int(dci_id) != 0 else "false"
+            cfg_args = [
+                "$vrfName=" + org_name + ':' + part_name
+            ]
+            cfg_args = ';'.join(cfg_args)
             extra_payload = {
                 "vrfProfileName": vrf_prof,
                 "vrfName": ':'.join((org_name, part_name)),
                 "dciId": dci_id,
-                "enableDCIExtension": enable_dci}
+                "enableDCIExtension": enable_dci,
+                "configArg": cfg_args}
+
             payload.update(extra_payload)
 
         return self._send_request(operation, url, payload, 'partition')
