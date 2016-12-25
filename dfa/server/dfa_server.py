@@ -1695,11 +1695,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                                             fwd_mod=vm.fwd_mod,
                                             oui_id='cisco')))
 
-        if vm_info:
-            try:
-                self.neutron_event.send_vm_info(agent, str(vm_info))
-            except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
-                LOG.error('Failed to send VM info to agent.')
+        try:
+            self.neutron_event.send_vm_info(agent, str(vm_info))
+        except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
+            LOG.error('Failed to send VM info to agent.')
 
     def request_uplink_info(self, payload):
         """Get the uplink from the database and send the info to the agent."""
