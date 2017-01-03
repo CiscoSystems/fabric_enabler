@@ -98,36 +98,66 @@ start_lldpad () {
     fi
 }
 
+restart_lldpad () {
+    DISTR=$1
+
+    if [ "$DISTR" == ubuntu ]
+    then
+        logger -t SETUP_LLDPAD "Restarting Lldpad for Ubuntu"
+        sudo restart lldpad
+    else
+        if [ "$DISTR" == redhat ] || [ "$DISTR" == centos ]
+        then
+            logger -t SETUP_LLDPAD "Restarting Lldpad for Redhat/Centos"
+            sudo systemctl restart lldpad
+        else
+            logger -t SETUP_LLDPAD "Not supported distro"
+        fi
+    fi
+}
+
 SRC_DIR=$1
 if [ "$SRC_DIR  " == "" ]
 then
     logger -t SETUP_LLDPAD "Empty SRC DIR"
     exit
 fi
-flag=0
-logger -t SETUP_LLDPAD "Copying lldpad files"
-NAME=`$SRC_DIR/dfa/scripts/distr.sh`
-generate_init $NAME $SRC_DIR
 
-LLDP_PATH=`which lldpad`
-if [ $? == 0 ]
-then
-    get_status $NAME
-    LLDP_STAT=$?
+setup_and_start() {
+    flag=0
+    logger -t SETUP_LLDPAD "Copying lldpad files"
+    DISTR=$1
+    generate_init $NAME $SRC_DIR
 
-    if [ $LLDP_STAT -eq 1 ]
+    LLDP_PATH=`which lldpad`
+    if [ $? == 0 ]
     then
-        logger -t SETUP_LLDPAD "lldpad is already running"
+	get_status $DISTR
+	LLDP_STAT=$?
+    
+	if [ $LLDP_STAT -eq 1 ]
+	then
+            logger -t SETUP_LLDPAD "lldpad is already running"
+	else
+            if [ $LLDP_STAT -eq 0 ]
+            then
+		logger -t SETUP_LLDPAD "starting lldpad"
+		start_lldpad $DISTR
+            else
+		logger -t SETUP_LLDPAD "Could not start lldpad"
+            fi
+	fi
     else
-        if [ $LLDP_STAT -eq 0 ]
-        then
-            logger -t SETUP_LLDPAD "starting lldpad"
-            start_lldpad $NAME
-        else
-            logger -t SETUP_LLDPAD "Could not start lldpad"
-        fi
+	logger  -t SETUP_LLDPAD "Install and start lldpad service"
     fi
+    logger -t SETUP_LLDPAD "Done with lldpad"
+}
+
+NAME=`$SRC_DIR/dfa/scripts/distr.sh`
+
+if [ "$2" == "restart" ]
+then
+    restart_lldpad $NAME
 else
-    logger  -t SETUP_LLDPAD "Install and start lldpad service"
+    setup_and_start $NAME
 fi
-logger -t SETUP_LLDPAD "Done with lldpad"

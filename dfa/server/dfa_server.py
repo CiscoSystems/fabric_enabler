@@ -125,6 +125,12 @@ class RpcCallBacks(object):
         uplink = args.get('uplink')
         veth_intf = args.get('veth_intf')
         memb_port_list = args.get('memb_port_list')
+        fail_reason = args.get('fail_reason')
+        if agent not in self.obj.agents_status_table:
+            self.obj.agents_status_table[agent] = {'fail_reason': fail_reason}
+        else:
+            self.obj.agents_status_table[agent].update(
+                {'fail_reason': fail_reason})
         configs = self.obj.get_agent_configurations(agent)
         if configs:
             # Update the agents database.
@@ -281,6 +287,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         self.network = {}
         self.subnet = {}
         self.port = {}
+        self.port_result = {}
         self.dfa_threads = []
         self.agents_status_table = {}
 
@@ -470,7 +477,11 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         self.server.stop()
 
     def update_agent_status(self, agent, ts):
-        self.agents_status_table[agent] = dict(timestamp=ts, fail_count=0)
+        if agent not in self.agents_status_table:
+            self.agents_status_table[agent] = dict(timestamp=ts, fail_count=0)
+        else:
+            self.agents_status_table[agent].update({'timestamp': ts,
+                                                    'fail_count': 0})
 
     def update_project_info_cache(self, pid, dci_id=None,
                                   name=None, opcode='add',
@@ -1281,7 +1292,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             LOG.debug("Migration: updating VM DB with %s.", params)
 
     def _migrate_from(self, vm, new_host):
-
+        if constants.IP_DHCP_WAIT in vm.ip:
+            ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
+        else:
+            ipaddr = vm.ip
         # Send VM 'down' event to agent that migrated VM resided.
         vm_info = dict(status='down',
                        vm_mac=vm.mac,
@@ -1289,7 +1303,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                        host=vm.host,
                        port_uuid=vm.port_id,
                        net_uuid=vm.network_id,
-                       oui=dict(ip_addr=vm.ip,
+                       oui=dict(ip_addr=ipaddr,
                                 vm_name=vm.name,
                                 vm_uuid=vm.instance_id,
                                 gw_mac=vm.gw_mac,
@@ -1306,7 +1320,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             return constants.DELETE_PENDING
 
     def _migrate_to(self, vm, to_host):
-
+        if constants.IP_DHCP_WAIT in vm.ip:
+            ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
+        else:
+            ipaddr = vm.ip
         # Send VM 'up' event to agent that VM migrated to.
         vm_info = dict(status='up',
                        vm_mac=vm.mac,
@@ -1314,7 +1331,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                        host=to_host,
                        port_uuid=vm.port_id,
                        net_uuid=vm.network_id,
-                       oui=dict(ip_addr=vm.ip,
+                       oui=dict(ip_addr=ipaddr,
                                 vm_name=vm.name,
                                 vm_uuid=vm.instance_id,
                                 gw_mac=vm.gw_mac,
@@ -1350,13 +1367,17 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             if vm.port_id in self.port:
                 del self.port[vm.port_id]
             return
+        if constants.IP_DHCP_WAIT in vm.ip:
+            ipaddr = vm.ip.replace(constants.IP_DHCP_WAIT, '')
+        else:
+            ipaddr = vm.ip
         vm_info = dict(status='down',
                        vm_mac=vm.mac,
                        segmentation_id=vm.segmentation_id,
                        host=vm.host,
                        port_uuid=vm.port_id,
                        net_uuid=vm.network_id,
-                       oui=dict(ip_addr=vm.ip,
+                       oui=dict(ip_addr=ipaddr,
                                 vm_name=vm.name,
                                 vm_uuid=vm.instance_id,
                                 gw_mac=vm.gw_mac,
@@ -1713,11 +1734,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                                             fwd_mod=vm.fwd_mod,
                                             oui_id='cisco')))
 
-        if vm_info:
-            try:
-                self.neutron_event.send_vm_info(agent, str(vm_info))
-            except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
-                LOG.error('Failed to send VM info to agent.')
+        try:
+            self.neutron_event.send_vm_info(agent, str(vm_info))
+        except (rpc.MessagingTimeout, rpc.RPCException, rpc.RemoteError):
+            LOG.error('Failed to send VM info to agent.')
 
     def request_uplink_info(self, payload):
         """Get the uplink from the database and send the info to the agent."""
@@ -1853,6 +1873,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                     LOG.info('Deleted VM %(vm)s from DB.', {'vm': vm.name})
                     if vm.port_id in self.port:
                         del self.port[vm.port_id]
+                    if vm.port_id in self.port_result:
+                        del self.port_result[vm.port_id]
                     return
                 res = constants.RESULTS_MAP.get((result, vm.result))
                 final_res = res if res else vm.result
@@ -1869,6 +1891,18 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                 LOG.debug("vm_result_update: port_id: %(pid)s, params: %(pr)s",
                           {'pid': port_id, 'pr': params})
                 self.update_vm_db(port_id, **params)
+            if port_id in self.port_result:
+                self.port_result[port_id].update(
+                    {'local_vlan': payload.get('local_vlan'),
+                     'vdp_vlan': payload.get('vdp_vlan'),
+                     'result': result,
+                     'fail_reason': payload.get('fail_reason')})
+            else:
+                self.port_result[port_id] = {
+                    'local_vlan': payload.get('local_vlan'),
+                    'vdp_vlan': payload.get('vdp_vlan'),
+                    'result': result,
+                    'fail_reason': payload.get('fail_reason')}
 
     def dhcp_agent_network_add(self, dhcp_net_info):
         """Process dhcp agent net add event.

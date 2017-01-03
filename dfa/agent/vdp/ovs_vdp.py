@@ -85,11 +85,23 @@ class LocalVlan():
         # network.
         self.port_vdp_vlan_dict = {}
 
-    def set_port_uuid(self, port_uuid, vdp_vlan):
+    def set_port_uuid(self, port_uuid, vdp_vlan, fail_reason):
         if port_uuid not in self.port_uuid_list:
-            port_vlan_set = [port_uuid, vdp_vlan]
+            port_vlan_set = [port_uuid, vdp_vlan, fail_reason]
             self.port_uuid_list[port_uuid] = port_vlan_set
             self.set_port_vlan(vdp_vlan)
+
+    def set_portid_fail_reason(self, port_id, fail_reason):
+        if port_id not in self.port_uuid_list:
+            LOG.error("Unable to set fail_reason, port_uuid %s not created",
+                      port_id)
+            return
+        self.port_uuid_list[port_id][2] = fail_reason
+
+    def get_portid_fail_reason(self, port_id):
+        if port_id not in self.port_uuid_list:
+            return None
+        return self.port_uuid_list[port_id][2]
 
     def get_portid_vlan(self, port_id):
         if port_id not in self.port_uuid_list:
@@ -124,6 +136,9 @@ class LocalVlan():
         self.reset_port_vlan(vlan)
         self.set_portid_vlan(port_uuid, new_vlan)
         self.set_port_vlan(new_vlan)
+
+    def set_fail_reason(self, port_uuid, fail_reason):
+        self.set_portid_fail_reason(port_uuid, fail_reason)
 
     def any_valid_vlan(self):
         if not len(self.port_vdp_vlan_dict):
@@ -171,7 +186,10 @@ class OVSNeutronVdp(object):
         self.vdp_vlan_cb = vdp_vlan_cb
         self.fi_evb_dmac = fi_evb_dmac
         self.ucs_fi = is_ucs_fi
+        self.uplink_fail_reason = ""
         self.setup_lldpad = self.setup_lldpad_ports()
+        if not self.setup_lldpad:
+            return
         flow_check_periodic_task = sys_utils.PeriodicTask(
             cconstants.FLOW_CHECK_INTERVAL, self._flow_check_handler)
         self.flow_check_periodic_task = flow_check_periodic_task
@@ -346,8 +364,10 @@ class OVSNeutronVdp(object):
         # Openstack
         ovs_bridges = ovs_lib.get_bridges(self.root_helper)
         if self.ext_br not in ovs_bridges or self.integ_br not in ovs_bridges:
-            LOG.error("Integ or Physical Bridge not configured by Openstack")
-            raise dfae.DfaAgentFailed(reason="Bridge Unavailable")
+            self.uplink_fail_reason = cconstants.bridge_not_cfgd_reason % (
+                ovs_bridges, self.integ_br, self.ext_br)
+            LOG.error(self.uplink_fail_reason)
+            raise dfae.DfaAgentFailed(reason=self.uplink_fail_reason)
         br = ovs_lib.OVSBridge(self.ext_br, root_helper=self.root_helper)
         self.ext_br_obj = br
         int_br = ovs_lib.OVSBridge(self.integ_br, root_helper=self.root_helper)
@@ -355,9 +375,10 @@ class OVSNeutronVdp(object):
 
         self.phy_peer_port, self.int_peer_port = self.find_interconnect_ports()
         if self.phy_peer_port is None or self.int_peer_port is None:
-            LOG.error("Integ or Physical Patch/Veth Ports not configured by "
-                      "Openstack")
-            raise dfae.DfaAgentFailed(reason="Ports Unconfigured")
+            self.uplink_fail_reason = cconstants.veth_not_cfgd_reason % (
+                self.phy_peer_port, self.int_peer_port)
+            LOG.error(self.uplink_fail_reason)
+            raise dfae.DfaAgentFailed(reason=self.uplink_fail_reason)
 
         lldp_ovs_veth_str = constants.LLDPAD_OVS_VETH_PORT + self.uplink
         if len(lldp_ovs_veth_str) > constants.MAX_VETH_NAME:
@@ -398,14 +419,16 @@ class OVSNeutronVdp(object):
         else:
             phy_port_num = br.get_port_ofport(self.uplink)
         if phy_port_num == cconstants.INVALID_OFPORT:
-            LOG.error("Uplink port not detected on external bridge")
+            self.uplink_fail_reason = cconstants.invalid_uplink_ofport_reason
+            LOG.error(self.uplink_fail_reason)
             return False
         if not br.port_exists(lldp_ovs_veth_str):
             lldp_ovs_portnum = br.add_port(lldp_ovs_veth)
         else:
             lldp_ovs_portnum = br.get_port_ofport(lldp_ovs_veth)
         if lldp_ovs_portnum == cconstants.INVALID_OFPORT:
-            LOG.error("lldp veth port not detected on external bridge")
+            self.uplink_fail_reason = cconstants.lldp_ofport_not_detect_reason
+            LOG.error(self.uplink_fail_reason)
             return False
         lldp_loc_veth.link.set_up()
         lldp_ovs_veth.link.set_up()
@@ -416,20 +439,24 @@ class OVSNeutronVdp(object):
         self.int_peer_port_num = int_br.get_port_ofport(self.int_peer_port)
         if self.phy_peer_port_num == cconstants.INVALID_OFPORT or\
            self.int_peer_port_num == cconstants.INVALID_OFPORT:
-            LOG.error("int or phy peer OF Port not detected on Int or"
-                      "Phy Bridge %s %s" %
-                      (self.phy_peer_port_num, self.int_peer_port_num))
+            self.uplink_fail_reason = cconstants.invalid_peer_ofport_reason % (
+                self.phy_peer_port_num, self.int_peer_port_num)
+            LOG.error(self.uplink_fail_reason)
             return False
         self.lldpad_info = (lldpad.LldpadDriver(lldp_loc_veth_str, self.uplink,
                                                 self.root_helper))
         ret = self.lldpad_info.enable_evb()
         if not ret:
-            LOG.error("Unable to cfg EVB")
+            self.uplink_fail_reason = cconstants.evb_cfg_fail_reason
+            LOG.error(self.uplink_fail_reason)
             return False
         self.lldp_local_veth_port = lldp_loc_veth_str
         self.lldp_ovs_veth_port = lldp_ovs_veth_str
         LOG.info("Setting up lldpad ports complete")
         return True
+
+    def get_uplink_fail_reason(self):
+        return self.uplink_fail_reason
 
     def get_lldp_local_bridge_port(self):
         return self.lldp_local_veth_port
@@ -461,8 +488,10 @@ class OVSNeutronVdp(object):
         lvm = self.local_vlan_map.get(net_uuid)
         if lvm:
             if port_uuid not in lvm.port_uuid_list:
-                LOG.error("port_uuid %s not in cache for port_down", port_uuid)
-                return False
+                fail_reason = "port_uuid %s not in cache for port_down" % (
+                    port_uuid)
+                LOG.error(fail_reason)
+                return {'result': False, 'fail_reason': fail_reason}
             vdp_vlan = lvm.late_binding_vlan
             lldpad_port.send_vdp_vnic_down(port_uuid=port_uuid,
                                            vsiid=port_uuid,
@@ -517,12 +546,13 @@ class OVSNeutronVdp(object):
                         self.vdp_nego_req = True
                         LOG.debug("Reprogrammed old Flows %s %s %s" %
                                   (lvm.lvid, vdp_vlan, vlan_other))
-            return True
+            return {'result': True, 'fail_reason': None}
         else:
             # There's no logical change of this condition being hit
             # So, not returning False here.
-            LOG.error("Local VLAN Map not available in port down")
-            return False
+            fail_reason = "Local VLAN Map not available in port_down"
+            LOG.error(fail_reason)
+            return {'result': False, 'fail_reason': fail_reason}
 
     def port_up_segment_mode(self, lldpad_port, port_name, port_uuid, mac,
                              net_uuid, segmentation_id, oui):
@@ -537,19 +567,19 @@ class OVSNeutronVdp(object):
             vdp_vlan = lvm.late_binding_vlan
             ovs_cb_data = {'obj': self, 'mac': mac,
                            'port_uuid': port_uuid, 'net_uuid': net_uuid}
-            lldpad_port.send_vdp_vnic_up(port_uuid=port_uuid,
-                                         vsiid=port_uuid, gid=segmentation_id,
-                                         mac=mac, vlan=vdp_vlan, oui=oui,
-                                         vsw_cb_fn=self.vdp_vlan_change,
-                                         vsw_cb_data=ovs_cb_data)
-            lvm.set_port_uuid(port_uuid, vdp_vlan)
-            return True
+            vlan, fail_reason = lldpad_port.send_vdp_vnic_up(
+                port_uuid=port_uuid, vsiid=port_uuid, gid=segmentation_id,
+                mac=mac, vlan=vdp_vlan, oui=oui,
+                vsw_cb_fn=self.vdp_vlan_change, vsw_cb_data=ovs_cb_data)
+            lvm.set_port_uuid(port_uuid, vdp_vlan, fail_reason)
+            return {'result': True, 'fail_reason': fail_reason}
         else:
             int_br = self.integ_br_obj
             lvid = int_br.get_port_vlan_tag(port_name)
             if lvid != cconstants.INVALID_VLAN:
-                ret, vdp_vlan = self.provision_vdp_overlay_networks(
+                provision_reply = self.provision_vdp_overlay_networks(
                     port_uuid, mac, net_uuid, segmentation_id, lvid, oui)
+                vdp_vlan = provision_reply.get('vdp_vlan')
                 if not lvm:
                     lvm = LocalVlan(lvid, segmentation_id)
                     self.local_vlan_map[net_uuid] = lvm
@@ -558,16 +588,20 @@ class OVSNeutronVdp(object):
                 # The vdp_vlan that's a part of port_list is just for debugging
                 # So, it's ok to populate the port UUID list even if VDP VLAN
                 # is invalid.
-                lvm.set_port_uuid(port_uuid, vdp_vlan)
+                lvm.set_port_uuid(port_uuid, vdp_vlan,
+                                  provision_reply.get('fail_reason'))
                 if vdp_vlan != cconstants.INVALID_VLAN:
                     lvm.late_binding_vlan = vdp_vlan
                     lvm.vdp_nego_req = False
                 else:
                     LOG.error("Cannot provision VDP overlay")
-                return ret
+                return {'result': provision_reply.get('result'),
+                        'fail_reason': provision_reply.get('fail_reason')}
             else:
-                LOG.error("Invalid VLAN")
-                return False
+                fail_reason = "Invalid OVS VLAN for port %s" % (port_name)
+                LOG.error(fail_reason)
+                return {'result': False,
+                        'fail_reason': fail_reason}
 
     def send_vdp_port_event_internal(self, port_uuid, mac, net_uuid,
                                      segmentation_id, status, oui):
@@ -580,15 +614,17 @@ class OVSNeutronVdp(object):
         '''
         lldpad_port = self.lldpad_info
         if not lldpad_port:
-            LOG.error("There is no LLDPad port available.")
-            return False
+            fail_reason = "There is no LLDPad port available."
+            LOG.error(fail_reason)
+            return {'result': False, 'fail_reason': fail_reason}
 
         if status == 'up':
             if self.vdp_mode == constants.VDP_SEGMENT_MODE:
                 port_name = self.ext_br_obj.get_ofport_name(port_uuid)
                 if port_name is None:
-                    LOG.error("Unknown portname for uuid %s" % port_uuid)
-                    return False
+                    fail_reason = "Unknown portname for uuid %s" % (port_uuid)
+                    LOG.error(fail_reason)
+                    return {'result': False, 'fail_reason': fail_reason}
                 LOG.info("Status up forportname for uuid %(uuid)s is %(port)s",
                          {'uuid': port_uuid, 'port': port_name})
                 ret = self.port_up_segment_mode(lldpad_port, port_name,
@@ -620,7 +656,7 @@ class OVSNeutronVdp(object):
                 return ret
         except Exception as e:
             LOG.error("Exception in send_vdp_port_event %s" % str(e))
-            return False
+            return {'result': False, 'fail_reason': str(e)}
 
     def pop_local_cache(self, port_uuid, mac, net_uuid, lvid, vdp_vlan,
                         segmentation_id):
@@ -636,7 +672,7 @@ class OVSNeutronVdp(object):
             lvm = LocalVlan(lvid, segmentation_id)
             self.local_vlan_map[net_uuid] = lvm
         lvm.lvid = lvid
-        lvm.set_port_uuid(port_uuid, vdp_vlan)
+        lvm.set_port_uuid(port_uuid, vdp_vlan, None)
         if vdp_vlan != cconstants.INVALID_VLAN:
             lvm.late_binding_vlan = vdp_vlan
             lvm.vdp_nego_req = False
@@ -675,7 +711,7 @@ class OVSNeutronVdp(object):
         self.program_vm_ovs_flows(lvid, vdp_vlan, 0)
 
     # fixme(padkrish)
-    def vdp_vlan_change_internal(self, vsw_cb_data, vdp_vlan):
+    def vdp_vlan_change_internal(self, vsw_cb_data, vdp_vlan, fail_reason):
         '''Callback Function from VDP when provider VLAN changes
 
         This will be called only during error cases when switch
@@ -700,7 +736,8 @@ class OVSNeutronVdp(object):
         LOG.debug("lvid %s exist %s New VDP VLAN %s" % (lvid, exist_vdp_vlan,
                                                         vdp_vlan))
         lvm.decr_reset_vlan(port_uuid, vdp_vlan)
-        self.vdp_vlan_cb(port_uuid, lvid, vdp_vlan)
+        lvm.set_fail_reason(port_uuid, fail_reason)
+        self.vdp_vlan_cb(port_uuid, lvid, vdp_vlan, fail_reason)
         if vdp_vlan == exist_vdp_vlan:
             LOG.debug("No change in provider VLAN %s" % vdp_vlan)
             return
@@ -731,7 +768,7 @@ class OVSNeutronVdp(object):
                 LOG.error("Invalid or same VLAN  (%s %s)" % (exist_vdp_vlan,
                                                              vdp_vlan))
 
-    def vdp_vlan_change(self, vsw_cb_data, vdp_vlan):
+    def vdp_vlan_change(self, vsw_cb_data, vdp_vlan, fail_reason):
         '''Callback Function from VDP when provider VLAN changes
 
         This will be called only during error cases when switch
@@ -740,7 +777,8 @@ class OVSNeutronVdp(object):
         LOG.debug("In VDP VLAN change VLAN %s" % vdp_vlan)
         try:
             with self.ovs_vdp_lock:
-                self.vdp_vlan_change_internal(vsw_cb_data, vdp_vlan)
+                self.vdp_vlan_change_internal(vsw_cb_data, vdp_vlan,
+                                              fail_reason)
         except Exception as e:
             LOG.error("Exception in vdp_vlan_change %s" % str(e))
 
@@ -759,22 +797,25 @@ class OVSNeutronVdp(object):
         if lldpad_port:
             ovs_cb_data = {'obj': self, 'port_uuid': port_uuid, 'mac': mac,
                            'net_uuid': net_uuid}
-            vdp_vlan = lldpad_port.send_vdp_vnic_up(
+            vdp_vlan, fail_reason = lldpad_port.send_vdp_vnic_up(
                 port_uuid=port_uuid, vsiid=port_uuid, gid=segmentation_id,
                 mac=mac, new_network=True, oui=oui,
                 vsw_cb_fn=self.vdp_vlan_change, vsw_cb_data=ovs_cb_data)
         else:
-            LOG.error("There is no LLDPad port available.")
-            return False, cconstants.INVALID_VLAN
+            fail_reason = "There is no LLDPad port available."
+            LOG.error(fail_reason)
+            return {'result': False, 'vdp_vlan': cconstants.INVALID_VLAN,
+                    'fail_reason': fail_reason}
         # check validity
         if not ovs_lib.is_valid_vlan_tag(vdp_vlan):
             LOG.error("Cannot provision VDP Overlay network for"
                       " net-id=%(net_uuid)s - Invalid ",
                       {'net_uuid': net_uuid})
-            return True, cconstants.INVALID_VLAN
+            return {'result': True, 'vdp_vlan': cconstants.INVALID_VLAN,
+                    'fail_reason': fail_reason}
 
         lmsg = ('provision_vdp_overlay_networks: add_flow for '
                 'Local Vlan %(local_vlan)s VDP VLAN %(vdp_vlan)s')
         LOG.info(lmsg, {'local_vlan': lvid, 'vdp_vlan': vdp_vlan})
         self.program_vm_ovs_flows(lvid, 0, vdp_vlan)
-        return True, vdp_vlan
+        return {'result': True, 'vdp_vlan': vdp_vlan, 'fail_reason': None}

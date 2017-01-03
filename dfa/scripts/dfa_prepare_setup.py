@@ -87,6 +87,12 @@ dist_data = {
                'host': '%'},
 }
 
+def run_alembic_cmd(cmd):
+    cwd = os.getcwd()
+    os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    o = get_cmd_output('alembic -c db/alembic.ini %s' % cmd).strip()
+    os.chdir(cwd)
+    return o
 
 def get_cmd_output(cmd, check_result=True):
     output = None
@@ -280,6 +286,36 @@ def prepare_db(mysql_user, mysql_pass, mysql_host):
             {'user': user, 'reason': out})
         sys.exit(0)
 
+    # Invoke upgrade_db to setup Fabric Enabler DB properly
+    upgrade_db(mysql_user, mysql_pass, mysql_host)
+
+def upgrade_db(mysql_user, mysql_pass, mysql_host):
+    (user, password, host, db, charset) = get_db_credentials(dfa_cfg_file)
+
+    mysql_cmd = ('mysql -u%s -h%s ') % (mysql_user, mysql_host)
+    if mysql_pass is not None:
+        mysql_cmd = mysql_cmd + '-p%s ' % (mysql_pass)
+
+    # Get tables
+    cmd = mysql_cmd + "-N -e 'show tables' %s " % db
+    out = get_cmd_output(cmd)
+    tables = out.splitlines()
+
+    if 'alembic_version' not in tables and len(tables) > 0:
+        # DB tables are present but no Alembic was used before:
+        # assume this is rel_2_0_0 DB and make the DB Alembic-friendly!
+        cmd  = mysql_cmd + \
+          "-N -e 'CREATE TABLE alembic_version (version_num varchar(32))' %s " % db
+        out = get_cmd_output(cmd)
+        print(out)
+        cmd  = mysql_cmd + \
+          '-N -e "insert into alembic_version values(\'3cfc638d80e7\')" %s ' % db
+        out = get_cmd_output(cmd)
+        print(out)
+
+    # Migrate to latest version
+    out = run_alembic_cmd("upgrade head")
+    print(out)
 
 def find_conf_and_modify(os_path, root_helper):
 
@@ -407,29 +443,38 @@ if __name__ == '__main__':
     parser.add_option('--vendor-os-release',
                       type='string', dest='vendor_os_release', default=None,
                       help='Vendor specific OS release, e.g. rhel-osp7')
+    parser.add_option('--upgrade', default=None,
+                      help='Set to True if upgrading an existing installation')
     (options, args) = parser.parse_args()
 
     node = options.node_function.lower()
-    if node == 'control':
-        if options.mysql_host is None or options.mysql_user is None:
-            mysqlconf = os.path.join(os.path.expanduser('~'), mysqlcnf)
-            print("Cannot find %s" % mysqlconf)
-            print("MySQL credentials must be provided when setting up "
-                  "a controller node.\nUse --help for more help.")
-            sys.exit(1)
+    upgrade = True if options.upgrade is not None \
+              and options.upgrade.lower() == 'true' else False
 
-        find_conf_and_modify(options.dir_path.lower(), root_helper)
-        prepare_db(options.mysql_user, options.mysql_pass, options.mysql_host)
-    if node == 'ha-control':
-        find_conf_and_modify(options.dir_path.lower(), root_helper)
-	node = 'control'
+    if upgrade:
+        if node == 'control':
+            upgrade_db(options.mysql_user, options.mysql_pass, options.mysql_host)
+    else:
+        if node == 'control':
+            if options.mysql_host is None or options.mysql_user is None:
+                mysqlconf = os.path.join(os.path.expanduser('~'), mysqlcnf)
+                print("Cannot find %s" % mysqlconf)
+                print("MySQL credentials must be provided when setting up "
+                      "a controller node.\nUse --help for more help.")
+                sys.exit(1)
 
-    if (node == 'control' or node == 'ha-control') \
-       and options.vendor_os_release == "rhel-osp7":
-        dist = platform.dist()[0].lower()
-        if dist == 'redhat':
-            do_rhel_osp7_customization(root_helper)
-        else:
-            print("WARNING: no RedHat system, customization skipped.")
+            find_conf_and_modify(options.dir_path.lower(), root_helper)
+            prepare_db(options.mysql_user, options.mysql_pass, options.mysql_host)
+        if node == 'ha-control':
+            find_conf_and_modify(options.dir_path.lower(), root_helper)
+            node = 'control'
 
-    copy_init_conf_files(node, root_helper)
+        if (node == 'control' or node == 'ha-control') \
+           and options.vendor_os_release == "rhel-osp7":
+            dist = platform.dist()[0].lower()
+            if dist == 'redhat':
+                do_rhel_osp7_customization(root_helper)
+            else:
+                print("WARNING: no RedHat system, customization skipped.")
+
+        copy_init_conf_files(node, root_helper)
