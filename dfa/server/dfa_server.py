@@ -50,6 +50,11 @@ from dfa.server.services.firewall.native import fabric_setup_base as FP
 from dfa.server.services.firewall.native import fw_mgr as fw_native
 
 LOG = logging.getLogger(__name__)
+# In order to support multiple openstacks on one dcnm
+# We need to add some suffix to some reserved openstack
+# projects which are created at installation time
+reserved_project_name = ["admin", "demo", "alt_demo"]
+not_create_project_name = ["invisible_to_admin", "service"]
 
 
 class RpcCallBacks(object):
@@ -392,6 +397,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         else:
             self.dhcp_consist_check = 0
             LOG.info("Using DCNM DHCP")
+        self.sync_projects()
+        self.sync_networks()
 
     @property
     def cfg(self):
@@ -440,6 +447,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             self.network[net.network_id]['name'] = net.name
             self.network[net.network_id]['id'] = net.network_id
             self.network[net.network_id]['vlan'] = net.vlan
+            def_part = self._cfg.dcnm.default_partition_name
+            self.network[net.network_id]['partition'] = def_part
 
         LOG.info('Network info cache: %s', self.network)
 
@@ -500,21 +509,25 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                      'dci_id': proj_fields[1]}))
                 return proj_name[0:dci_index], proj_fields[1]
 
-    def project_create_event(self, proj_info):
-        """Create project."""
+    def project_create_func(self, proj_id, proj=None):
+        """ Create project given project uuid"""
 
-        LOG.debug("Processing create %(proj)s event.", {'proj': proj_info})
-        proj_id = proj_info.get('resource_info')
-        try:
-            proj = self.keystone_event._service.projects.get(proj_id)
-        except:
-            LOG.error("Failed to find project %s.", proj_id)
+        if self.get_project_name(proj_id):
+            LOG.info("project %s exists, returning", proj_id)
             return
 
+        if not proj:
+            try:
+                proj = self.keystone_event._service.projects.get(proj_id)
+            except:
+                LOG.error("Failed to find project %s.", proj_id)
+                return
         # In the project name, dci_id may be included. Check if this is the
         # case and extract the dci_id from the name, and provide dci_id when
         # creating the project.
         proj_name, dci_id = self._get_dci_id_and_proj_name(proj.name)
+        if proj_name in reserved_project_name:
+            proj_name = "_".join((proj_name, self.cfg.dcnm.orchestrator_id))
         # The default partition name is 'os' (i.e. openstack) which reflects
         # it is created by openstack.
         part_name = self.cfg.dcnm.default_partition_name
@@ -540,6 +553,14 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             LOG.debug('project %(name)s %(dci)s %(desc)s', (
                 {'name': proj_name, 'dci': dci_id, 'desc': proj.description}))
         self.project_create_notif(proj_id, proj_name)
+
+    def project_create_event(self, proj_info):
+        """Create project."""
+
+        LOG.debug("Processing create %(proj)s event.", {'proj': proj_info})
+        proj_id = proj_info.get('resource_info')
+
+        self.project_create_func(proj_id)
 
     def project_update_event(self, proj_info):
         """Process project update event.
@@ -666,6 +687,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
 
         # Check if the network is created by DCNM.
         query_net = self.get_network(net.get('id'))
+        if query_net.result != constants.SUBNET_PENDING:
+            LOG.info("Subnet exists, returning")
+            return
         if query_net and query_net.source.lower() == 'dcnm':
             # The network is created by DCNM.
             # No need to process this event.
@@ -692,6 +716,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                 part = net['partition']
                 self.dcnm_client.create_network(tenant_name, dcnm_net, subnet,
                                                 part, self.dcnm_dhcp)
+            self.update_network_db(net.get('id'), constants.RESULT_SUCCESS)
         except dexc.DfaClientRequestFailed:
             emsg = 'Failed to create network %(net)s.'
             LOG.exception(emsg, {'net': dcnm_net.name})
@@ -713,12 +738,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         return self.seg_drvr.allocate_segmentation_id(netid, seg_id=segid,
                                                       source=source)
 
-    def network_create_event(self, network_info):
-        """Process network create event.
-
-        Save the network information in the database.
+    def network_create_func(self, net):
+        """ Create network in database and dcnm
+        :param net: network dictionary
         """
-        net = network_info['network']
         net_id = net['id']
         net_name = net.get('name')
         nwk_db_elem = self.get_network(net_id)
@@ -728,8 +751,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         if self.fw_api.is_network_source_fw(nwk_db_elem, net_name):
             LOG.info("Service network %s, returning", net_name)
             return
-        self.network[net_id] = {}
-        self.network[net_id].update(net)
+        if not nwk_db_elem:
+            self.network[net_id] = {}
+            self.network[net_id].update(net)
 
         net_name = net.get('name')
         tenant_id = net.get('tenant_id')
@@ -778,6 +802,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                      'by %(source)s. Ignoring processing the event.' % (
                          {'name': net_name, 'source': 'dcnm'}))
             return
+        if nwk_db_elem:
+            LOG.debug("Network %s exists, not processing" % net_name)
+            return
 
         # Check if project (i.e. tenant) exist.
         tenant_name = self.get_project_name(tenant_id)
@@ -806,7 +833,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                 self.network[net_id]['vlan'] = vlan
             self.add_network_db(net_id, self.network[net_id],
                                 'openstack',
-                                constants.RESULT_SUCCESS)
+                                constants.SUBNET_PENDING)
             LOG.debug('network_create_event: network=%s', self.network)
         except dexc.DfaClientRequestFailed:
             # Fail to get config profile from DCNM.
@@ -815,6 +842,14 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             self.add_network_db(net_id, self.network[net_id], 'openstack',
                                 constants.CREATE_FAIL)
             LOG.error('Failed to create network=%s.', self.network)
+
+    def network_create_event(self, network_info):
+        """Process network create event.
+
+        Save the network information in the database.
+        """
+        net = network_info['network']
+        self.network_create_func(net)
 
     def network_delete_event(self, network_info):
         """Process network delete event."""
@@ -1070,6 +1105,10 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         if not vm_prefix:
             inst_name = self._inst_api.get_instance_for_uuid(device_id,
                                                              tenant_id)
+            # handle the case port is created and bound to ovs
+            # but vm is not launched on the port. i.e. octavia hm port
+            if not inst_name:
+                inst_name = port.get('name')
 
         fwd_mod = (net_id in self.network and
                    self.network[net_id].get('fwd_mod')) or 'anycast-gateway'
@@ -1110,6 +1149,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                 port.get('binding:vif_type').lower() == 'unbound'):
             # A port is created without binding host, vif_type,...
             # Keep the info in the database.
+            vm_info['oui']["ip_addr"] += constants.IP_DHCP_WAIT
             self.add_vms_db(vm_info, constants.RESULT_SUCCESS)
 
             LOG.debug('Port %s created with no binding host and vif_type.')
@@ -1526,7 +1566,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         ip = vm_info['oui']['ip_addr']
         if constants.IP_DHCP_WAIT in ip:
             ipaddr = ip.replace(constants.IP_DHCP_WAIT, '')
-            vm_info['oui'][ip_addr] = ipaddr
+            vm_info['oui']['ip_addr'] = ipaddr
         try:
             self.neutron_event.send_vm_info(agent_host,
                                             str(vm_info))
@@ -1546,8 +1586,8 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
                      port_id)
             return
         d_id = p["device_id"]
-        len = constants.DID_LEN
-        p["device_id"] = d_id[:len] if len(d_id) > len else d_id
+        l = constants.DID_LEN
+        p["device_id"] = d_id[:l] if len(d_id) > l else d_id
 
         vm_info = self._make_vm_info(p, 'up', constants.DHCP_PREFIX)
         LOG.debug("add_dhcp_ports : %s" % vm_info)
@@ -1850,6 +1890,9 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
             LOG.error("Can not retrieve port info for port %s" % port_id)
             return
         LOG.debug("lbaas add port, %s", port)
+        if not port['binding:host_id']:
+            LOG.info("No host bind for lbaas port, octavia case")
+            return
         port["device_id"] = lb_id
 
         vm_info = self._make_vm_info(port, 'up', constants.LBAAS_PREFIX)
@@ -1928,6 +1971,32 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         """
         lb_id = lb_info.get('loadbalancer_id')
         self.delete_lbaas_port(lb_id)
+
+    def sync_projects(self):
+        """Sync projects
+        This function will retrieve project from keystone
+        and populate them  dfa database and dcnm
+        """
+        p = self.keystone_event._service.projects.list()
+        for proj in p:
+            if proj.name in not_create_project_name:
+                continue
+            LOG.info("Syncing project %s" % proj.name)
+            self.project_create_func(proj.id, proj=proj)
+
+    def sync_networks(self):
+        """sync networkss
+        It will Retrieve networks from neutron and populate
+        them in dfa database and dcnm
+        """
+        nets = self.neutronclient.list_networks()
+        for net in nets.get("networks"):
+            LOG.info("Syncing network %s", net["id"])
+            self.network_create_func(net)
+        subnets = self.neutronclient.list_subnets()
+        for subnet in subnets.get("subnets"):
+            LOG.info("Syncing subnet %s", subnet["id"])
+            self.create_subnet(subnet)
 
     def create_threads(self):
         """Create threads on server."""
@@ -2008,10 +2077,14 @@ def dfa_server():
         dfa.create_threads()
         while True:
             time.sleep(constants.MAIN_INTERVAL)
-            if dfa.dcnm_dhcp:
-                dfa.update_port_ip_address()
-            else:
-                dfa.check_dhcp_ports()
+            try:
+                if dfa.dcnm_dhcp:
+                    dfa.update_port_ip_address()
+                else:
+                    dfa.check_dhcp_ports()
+            except Exception as exc:
+                LOG.error("Exception %s occured " % exc.__class__)
+
             for trd in dfa.dfa_threads:
                 if not trd.am_i_active:
                     LOG.info("Thread %s is not active.", trd.name)
