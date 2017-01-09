@@ -20,8 +20,8 @@ import Queue
 import time
 
 from dfa.common import utils
-from dfa.agent.vdp import ovs_vdp
 from dfa.agent.topo_disc import topo_disc
+from dfa.agent.vdp import ovs_vdp
 from dfa.common import constants
 from dfa.common import dfa_logger as logging
 from dfa.common import dfa_sys_lib as sys_utils
@@ -316,7 +316,8 @@ class VdpMgr(object):
                          "veth %s" % (self.phy_uplink, veth_intf))
                 self.save_uplink(uplink=self.phy_uplink, veth_intf=veth_intf)
                 self.topo_disc.uncfg_intf(self.phy_uplink)
-                self.topo_disc.cfg_intf(veth_intf)
+                self.topo_disc.cfg_intf(veth_intf,
+                                        phy_interface=self.phy_uplink)
         elif msg.get_status() == 'down':
             # Free the object fixme(padkrish)
             if phy_uplink in self.ovs_vdp_obj_dict:
@@ -411,12 +412,25 @@ class VdpMgr(object):
         except rpc.MessagingTimeout:
             LOG.error("RPC timeout: Failed to save link name on the server")
 
+    def _fill_topology_cfg(self, topo_dict):
+        """Fills the extra configurations in the topology. """
+        cfg_dict = {}
+        if topo_dict.bond_member_ports is not None:
+            cfg_dict.update({'bond_member_ports':
+                             topo_dict.bond_member_ports})
+        if topo_dict.bond_interface is not None:
+            cfg_dict.update({'bond_interface':
+                             topo_dict.bond_interface})
+        return cfg_dict
+
     def save_topo_disc_params(self, intf, topo_disc_obj):
         context = {}
+        topo_cfg = self._fill_topology_cfg(topo_disc_obj)
         args = json.dumps(
             dict(
-                agent=self.host_id,
-                intf=intf,
+                host=self.host_id, protocol_interface=intf,
+                heartbeat=time.ctime(),
+                phy_interface=topo_disc_obj.phy_interface,
                 remote_evb_cfgd=topo_disc_obj.remote_evb_cfgd,
                 remote_evb_mode=topo_disc_obj.remote_evb_mode,
                 remote_mgmt_addr=topo_disc_obj.remote_mgmt_addr,
@@ -425,7 +439,7 @@ class VdpMgr(object):
                 remote_port=topo_disc_obj.remote_port,
                 remote_chassis_id_mac=topo_disc_obj.remote_chassis_id_mac,
                 remote_port_id_mac=topo_disc_obj.remote_port_id_mac,
-                bond_intf=topo_disc_obj.bond_intf))
+                configurations=json.dumps(topo_cfg)))
         msg = self.rpc_clnt.make_msg('save_topo_disc_params', context,
                                      msg=args)
         try:

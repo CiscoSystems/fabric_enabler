@@ -531,16 +531,16 @@ def is_intf_up(intf):
 
     """Function to check if a interface is up."""
 
-    intf_path = '/sys/class/net' + '/' + intf
+    intf_path = '/'.join(('/sys/class/net', intf))
     intf_exist = os.path.exists(intf_path)
     if not intf_exist:
         LOG.error(
             "Unable to get interface %s : Interface dir %s does not exist",
-            intif,
+            intf,
             intf_path)
         return False
     try:
-        oper_file = intf_path + '/' + 'operstate'
+        oper_file = '/'.join((intf_path, 'operstate'))
         with open(oper_file, 'r') as fd:
             oper_state = fd.read().strip('\n')
             if oper_state == 'up':

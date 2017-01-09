@@ -18,3 +18,6 @@
 # Topology Discovery constants:
 
 PERIODIC_TASK_INTERVAL = 15
+# This means a topology update message will be sent after every minute (15*4),
+# even if there's no change in the parameters.
+TOPO_DISC_SEND_THRESHOLD = 4
