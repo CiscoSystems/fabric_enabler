@@ -347,9 +347,8 @@ class ShowProfile(ShowOne):
         '''Get a config Profile details from the Fabric Enabler. '''
 
         context = {}
-        args = jsonutils.dumps(parsed_args)
         msg = self.app.clnt.make_msg('get_per_config_profile_detail',
-                                     context, msg=args)
+                                     context, msg=parsed_args)
         try:
             resp = self.app.clnt.call(msg)
             return resp
@@ -572,7 +571,7 @@ class EnablerVersion(ShowOne):
     """Prints nexus fabric enabler version. """
 
     def take_action(self, parsed_args):
-        return (['version'], [constants.VERSION])
+        return (['Fabric Enabler Version'], [constants.VERSION])
 
 
 COMMAND_V2 = {
