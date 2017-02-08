@@ -25,6 +25,8 @@ import ConfigParser
 import cisco_scp
 import paramiko
 import errno
+import json
+import socket
 
 startup_cmds = {
     'ubuntu': {
@@ -184,13 +186,19 @@ class NexusFabricEnablerInstaller(object):
         """Returns commpute nodes in the setup."""
 
         compute_list = []
-        nova_manage = ''.join((self.root_helper, "nova-manage service list"))
-        output, returncode = self.run_cmd_line(nova_manage)
-        output_list = output.split('\n')
-        for ent in output_list:
-            novac = ent.split()
-            if len(novac) != 0 and novac[0] == 'nova-compute':
-                compute_list.append(novac[1])
+        cmd = ''.join((self.root_helper, "-E neutron agent-list -f json"))
+        output, returncode = self.run_cmd_line(cmd,check_result=False)
+        if returncode != 0:
+            print(("Command '%s' could not be invoked. " +
+                  "Please source suitable openrc file") % cmd)
+            sys.exit(1)
+        output_json = json.loads(output)
+        for e in output_json:
+            if e['agent_type'] != 'Open vSwitch agent':
+                continue
+            if e['host'] == socket.gethostname():
+                continue
+            compute_list.append(e['host'])
         return compute_list
 
     def parse_config(self):
@@ -263,11 +271,11 @@ class NexusFabricEnablerInstaller(object):
     def setup_control(self, hamode):
         """Install enabler package on control node."""
 
+        output, returncode = self.run_cmd_line(self.install_pkg, shell=True)
+        print output
         output, returncode = self.run_cmd_line(
             self.run_dfa_prep_on_hacontrol if hamode else
             self.run_dfa_prep_on_control)
-        print output
-        output, returncode = self.run_cmd_line(self.install_pkg, shell=True)
         print output
         
         if not self.upgrade or (self.upgrade and self.restart_lldpad_on_upgrades):
