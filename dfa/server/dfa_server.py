@@ -1256,7 +1256,7 @@ class DfaServer(dfr.DfaFailureRecovery, dfa_dbm.DfaDBMixin,
         except dexc.DfaClientRequestFailed as exc:
             emsg = ('Failed to create network %(net)s.')
             LOG.error(emsg, {'net': net.name})
-            self.network[net.get('id')].update({'reason': exc.args[0]})
+            self.network[net.id].update({'reason': exc.args[0]})
             self.update_network_db(net_id, constants.DELETE_FAIL)
         if self._lbMgr and self._lbMgr.lb_is_internal_nwk(net.name):
             self._lbMgr.lb_delete_net(net.name, tenant_id)
